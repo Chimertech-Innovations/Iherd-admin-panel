@@ -47,7 +47,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAdminProducts, useFirebaseCollection, useBestSellers } from "@/hooks/useFirebaseData";
-import { getLocalizedText } from "@/lib/utils";
+import { getLocalizedText, formatImageUrl } from "@/lib/utils";
 
 export const Route = createFileRoute("/marketplace/products")({
   head: () => ({ meta: [{ title: "Product Marketplace — iHerd Admin" }] }),
@@ -267,53 +267,76 @@ function ProductsMarketplacePage() {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className="p-4 rounded-2xl bg-card border-border">
+        <Card className="p-4 rounded-2xl bg-card border-border relative overflow-hidden">
           <div className="flex items-center justify-between">
             <span className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Total Products</span>
             <div className="grid h-8 w-8 place-items-center rounded-xl bg-primary/10 text-primary">
               <Package className="h-4 w-4" />
             </div>
           </div>
-          <div className="mt-2 text-2xl font-bold">{isLoading ? "…" : totalCount.toLocaleString()}</div>
+          {isLoading ? (
+            <div className="h-8 w-20 bg-muted/70 rounded-lg mt-2 animate-pulse" />
+          ) : (
+            <div className="mt-2 text-2xl font-bold">{totalCount.toLocaleString()}</div>
+          )}
           <div className="text-xs text-muted-foreground mt-1">Live in marketplace</div>
         </Card>
 
-        <Card className="p-4 rounded-2xl bg-card border-border">
+        <Card className="p-4 rounded-2xl bg-card border-border relative overflow-hidden">
           <div className="flex items-center justify-between">
             <span className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Active / Approved</span>
             <div className="grid h-8 w-8 place-items-center rounded-xl bg-emerald-500/10 text-emerald-600">
               <CheckCircle2 className="h-4 w-4" />
             </div>
           </div>
-          <div className="mt-2 text-2xl font-bold text-emerald-600">{isLoading ? "…" : approvedCount.toLocaleString()}</div>
+          {isLoading ? (
+            <div className="h-8 w-20 bg-muted/70 rounded-lg mt-2 animate-pulse" />
+          ) : (
+            <div className="mt-2 text-2xl font-bold text-emerald-600">{approvedCount.toLocaleString()}</div>
+          )}
           <div className="text-xs text-muted-foreground mt-1">Available for buyer purchase</div>
         </Card>
 
-        <Card className="p-4 rounded-2xl bg-card border-border">
+        <Card className="p-4 rounded-2xl bg-card border-border relative overflow-hidden">
           <div className="flex items-center justify-between">
             <span className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Best Sellers</span>
             <div className="grid h-8 w-8 place-items-center rounded-xl bg-amber-500/10 text-amber-600">
               <Flame className="h-4 w-4" />
             </div>
           </div>
-          <div className="mt-2 text-2xl font-bold text-amber-600">{isLoading ? "…" : bestSellerCount.toLocaleString()}</div>
+          {isLoading ? (
+            <div className="h-8 w-20 bg-muted/70 rounded-lg mt-2 animate-pulse" />
+          ) : (
+            <div className="mt-2 text-2xl font-bold text-amber-600">{bestSellerCount.toLocaleString()}</div>
+          )}
           <div className="text-xs text-muted-foreground mt-1">Featured in app store front</div>
         </Card>
 
-        <Card className="p-4 rounded-2xl bg-card border-border">
+        <Card className="p-4 rounded-2xl bg-card border-border relative overflow-hidden">
           <div className="flex items-center justify-between">
             <span className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Out of Stock</span>
             <div className="grid h-8 w-8 place-items-center rounded-xl bg-destructive/10 text-destructive">
               <AlertCircle className="h-4 w-4" />
             </div>
           </div>
-          <div className="mt-2 text-2xl font-bold text-destructive">{isLoading ? "…" : outOfStockCount.toLocaleString()}</div>
+          {isLoading ? (
+            <div className="h-8 w-20 bg-muted/70 rounded-lg mt-2 animate-pulse" />
+          ) : (
+            <div className="mt-2 text-2xl font-bold text-destructive">{outOfStockCount.toLocaleString()}</div>
+          )}
           <div className="text-xs text-muted-foreground mt-1">Zero stock count</div>
         </Card>
       </div>
 
       {/* Main Table Card */}
-      <Card className="rounded-2xl overflow-hidden border-border">
+      <Card className="rounded-2xl overflow-hidden border-border relative">
+        {/* Animated Progress Bar */}
+        {isLoading && (
+          <div className="absolute top-0 left-0 right-0 h-1 bg-primary/20 overflow-hidden z-20">
+            <div className="h-full bg-primary animate-pulse w-full" />
+          </div>
+        )}
+
         <div className="p-4 border-b flex flex-col sm:flex-row gap-3 sm:items-center justify-between">
           <div className="relative flex-1 max-w-sm">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -322,11 +345,12 @@ function ProductsMarketplacePage() {
               onChange={(e) => setQ(e.target.value)}
               placeholder="Search products by name or ID..."
               className="pl-9 bg-muted/50 border-transparent focus-visible:bg-background"
+              disabled={isLoading}
             />
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            <Select value={filter} onValueChange={setFilter}>
+            <Select value={filter} onValueChange={setFilter} disabled={isLoading}>
               <SelectTrigger className="w-36 bg-muted/50">
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
@@ -339,7 +363,7 @@ function ProductsMarketplacePage() {
               </SelectContent>
             </Select>
 
-            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+            <Select value={categoryFilter} onValueChange={setCategoryFilter} disabled={isLoading}>
               <SelectTrigger className="w-44 bg-muted/50">
                 <SelectValue placeholder="Category" />
               </SelectTrigger>
@@ -372,10 +396,40 @@ function ProductsMarketplacePage() {
             </TableHeader>
             <TableBody>
               {isLoading ? (
-                Array.from({ length: 5 }).map((_, i) => (
-                  <TableRow key={i}>
-                    <TableCell colSpan={9} className="py-4 text-center">
-                      <div className="h-4 bg-muted rounded animate-pulse w-3/4 mx-auto" />
+                Array.from({ length: 6 }).map((_, i) => (
+                  <TableRow key={i} className="animate-pulse">
+                    <TableCell>
+                      <div className="h-10 w-10 rounded-xl bg-muted/70 animate-pulse" />
+                    </TableCell>
+                    <TableCell>
+                      <div className="space-y-1.5">
+                        <div className="h-4 w-44 bg-muted/80 rounded-md animate-pulse" />
+                        <div className="h-3 w-24 bg-muted/50 rounded animate-pulse" />
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="h-5 w-24 bg-muted/60 rounded-lg animate-pulse" />
+                    </TableCell>
+                    <TableCell>
+                      <div className="h-5 w-20 bg-muted/50 rounded-full animate-pulse" />
+                    </TableCell>
+                    <TableCell>
+                      <div className="h-4 w-16 bg-muted/70 rounded animate-pulse" />
+                    </TableCell>
+                    <TableCell>
+                      <div className="h-4 w-12 bg-muted/50 rounded animate-pulse" />
+                    </TableCell>
+                    <TableCell>
+                      <div className="h-5 w-14 bg-muted/60 rounded-full animate-pulse" />
+                    </TableCell>
+                    <TableCell>
+                      <div className="h-5 w-20 bg-muted/60 rounded-full animate-pulse" />
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <div className="h-8 w-16 bg-muted/60 rounded-lg animate-pulse" />
+                        <div className="h-8 w-14 bg-muted/60 rounded-lg animate-pulse" />
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))
@@ -388,7 +442,8 @@ function ProductsMarketplacePage() {
                 </TableRow>
               ) : (
                 filteredProducts.map((p) => {
-                  const img = p.thumbnailUrl || p.imageUrls?.[0] || p.images?.[0];
+                  const rawImg = p.thumbnailUrl || p.imageUrls?.[0] || p.images?.[0] || p.image;
+                  const img = formatImageUrl(rawImg);
                   const prodName = getLocalizedText(p.name || p.title, p.id);
                   const isBs = Boolean(p.bestSeller || p.isBestSeller);
                   const catName = categoryMap.get(p.categoryId) || p.category || "General";
@@ -397,9 +452,19 @@ function ProductsMarketplacePage() {
                   return (
                     <TableRow key={p.id} className="hover:bg-muted/30 transition-colors">
                       <TableCell>
-                        <div className="h-10 w-10 rounded-xl bg-muted overflow-hidden flex items-center justify-center border shrink-0">
+                        <div className="h-11 w-11 rounded-xl bg-muted overflow-hidden flex items-center justify-center border shrink-0 bg-background/90 shadow-xs relative group">
                           {img ? (
-                            <img src={img} alt="" className="h-full w-full object-cover" />
+                            <img
+                              src={img}
+                              alt=""
+                              className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-200"
+                              referrerPolicy="no-referrer"
+                              crossOrigin="anonymous"
+                              loading="lazy"
+                              onError={(e) => {
+                                (e.target as HTMLElement).style.display = "none";
+                              }}
+                            />
                           ) : (
                             <Package className="h-5 w-5 text-muted-foreground" />
                           )}
@@ -423,17 +488,21 @@ function ProductsMarketplacePage() {
                       </TableCell>
 
                       <TableCell>
-                        <span className="font-mono text-xs text-muted-foreground">{getLocalizedText(p.id)}</span>
-                      </TableCell>
-
-                      <TableCell>
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs bg-muted font-medium">
-                          {getLocalizedText(catName)}
+                        <span className="font-mono text-xs font-semibold bg-muted px-2 py-0.5 rounded text-foreground">
+                          {p.id}
                         </span>
                       </TableCell>
 
                       <TableCell>
-                        <span className="font-bold text-foreground">₹{Number(p.price || 0).toLocaleString()}</span>
+                        <span className="inline-flex items-center text-xs font-medium bg-muted/60 text-muted-foreground px-2 py-0.5 rounded-full">
+                          {catName}
+                        </span>
+                      </TableCell>
+
+                      <TableCell>
+                        <span className="text-sm font-bold text-foreground">
+                          ₹{Number(p.price || 0).toLocaleString()}
+                        </span>
                       </TableCell>
 
                       <TableCell>
@@ -492,10 +561,16 @@ function ProductsMarketplacePage() {
         </div>
 
         <div className="p-4 border-t text-xs text-muted-foreground flex justify-between items-center">
-          <span>
-            Showing <b className="text-foreground">{filteredProducts.length}</b> of{" "}
-            <b className="text-foreground">{products.length}</b> products in catalog
-          </span>
+          {isLoading ? (
+            <span className="inline-flex items-center gap-2 text-xs font-medium text-primary">
+              <span className="h-2 w-2 rounded-full bg-primary animate-ping" /> Loading product catalog...
+            </span>
+          ) : (
+            <span>
+              Showing <b className="text-foreground">{filteredProducts.length}</b> of{" "}
+              <b className="text-foreground">{products.length}</b> products in catalog
+            </span>
+          )}
         </div>
       </Card>
 
@@ -677,16 +752,34 @@ function ProductsMarketplacePage() {
               </div>
             </div>
 
-            {/* Image URL & Seller */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="prod-thumb">Image / Thumbnail URL</Label>
-                <Input
-                  id="prod-thumb"
-                  placeholder="https://..."
-                  value={thumbnailUrl}
-                  onChange={(e) => setThumbnailUrl(e.target.value)}
-                />
+            {/* Image URL & Seller with Live Thumbnail Preview */}
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-3 items-center">
+                <div className="space-y-1.5 flex-1">
+                  <Label htmlFor="prod-thumb">Image / Thumbnail URL</Label>
+                  <Input
+                    id="prod-thumb"
+                    placeholder="https://drive.google.com/file/d/... or https://..."
+                    value={thumbnailUrl}
+                    onChange={(e) => setThumbnailUrl(e.target.value)}
+                  />
+                  <span className="text-[10px] text-muted-foreground">Supports Google Drive share links, Firebase Storage, and web URLs</span>
+                </div>
+
+                {thumbnailUrl && (
+                  <div className="h-14 w-14 rounded-2xl border bg-muted overflow-hidden flex items-center justify-center shrink-0 shadow-sm mt-1 sm:mt-0">
+                    <img
+                      src={formatImageUrl(thumbnailUrl)}
+                      alt="Preview"
+                      className="h-full w-full object-cover"
+                      referrerPolicy="no-referrer"
+                      crossOrigin="anonymous"
+                      onError={(e) => {
+                        (e.target as HTMLElement).style.display = "none";
+                      }}
+                    />
+                  </div>
+                )}
               </div>
 
               <div className="space-y-1.5">
@@ -724,19 +817,28 @@ function ProductsMarketplacePage() {
               />
             </div>
 
-            {/* Best Seller Checkbox */}
-            <div className="flex items-center gap-2 pt-1">
+            {/* Best Seller Checkbox Card */}
+            <div className="flex items-center justify-between p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30">
+              <div className="flex items-center gap-2.5">
+                <div className="grid h-8 w-8 place-items-center rounded-xl bg-amber-500/20 text-amber-600">
+                  <Flame className="h-4.5 w-4.5" />
+                </div>
+                <div>
+                  <Label htmlFor="prod-bs" className="cursor-pointer font-bold text-sm text-foreground block">
+                    Feature in Best Sellers
+                  </Label>
+                  <p className="text-[11px] text-muted-foreground">
+                    Featured on mobile app homepage, carousel banner, and top recommended lists.
+                  </p>
+                </div>
+              </div>
               <input
                 type="checkbox"
                 id="prod-bs"
                 checked={bestSeller}
                 onChange={(e) => setBestSeller(e.target.checked)}
-                className="h-4 w-4 rounded border-gray-300 text-amber-500 focus:ring-amber-500"
+                className="h-5 w-5 rounded border-amber-400 text-amber-500 focus:ring-amber-500 cursor-pointer"
               />
-              <Label htmlFor="prod-bs" className="cursor-pointer font-normal flex items-center gap-1.5">
-                <Flame className="h-4 w-4 text-amber-500" />
-                Feature this product in <b>Best Sellers</b> collection & mobile app front
-              </Label>
             </div>
 
             <DialogFooter className="pt-3">

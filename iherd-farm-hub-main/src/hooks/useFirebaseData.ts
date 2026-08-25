@@ -392,8 +392,7 @@ export function useAdminProducts() {
         return [];
       }
     },
-    placeholderData: [],
-    staleTime: 10_000,
+    staleTime: 15_000,
   });
 
   const saveProduct = useMutation({
@@ -471,6 +470,131 @@ export function useAdminProducts() {
   });
 
   return { ...query, saveProduct, updateProductPrice, deleteProduct };
+}
+
+export function useAdminBanners() {
+  const queryClient = useQueryClient();
+
+  const query = useQuery<any[]>({
+    queryKey: ["banners"],
+    queryFn: async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/admin/banners`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.banners && Array.isArray(data.banners)) {
+            return data.banners;
+          }
+        }
+      } catch (err) {
+        console.warn("Backend banners fetch error, trying client SDK:", err);
+      }
+
+      try {
+        const colRef = collection(db, "banners");
+        const snap = await getDocs(colRef);
+        const results: any[] = [];
+        snap.forEach((d) => {
+          results.push({ id: d.id, ...d.data() });
+        });
+        results.sort((a, b) => (Number(a.priority) || 999) - (Number(b.priority) || 999));
+        return results;
+      } catch (err) {
+        console.warn("Client SDK banners error:", err);
+        return [];
+      }
+    },
+    staleTime: 10_000,
+  });
+
+  const saveBanner = useMutation({
+    mutationFn: async (banner: {
+      id?: string;
+      imageUrl: string;
+      actionType: string;
+      actionValue: string;
+      priority: number;
+      isActive: boolean;
+    }) => {
+      const isEdit = Boolean(banner.id);
+      const docId = banner.id || `banner${Date.now()}`;
+
+      try {
+        const url = isEdit ? `${API_BASE}/api/admin/banners/${docId}` : `${API_BASE}/api/admin/banners`;
+        const method = isEdit ? "PUT" : "POST";
+        const res = await fetch(url, {
+          method,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...banner, id: docId }),
+        });
+        if (res.ok) return await res.json();
+      } catch (err) {
+        console.warn("Backend banner save error, trying client SDK:", err);
+      }
+
+      const bannerRef = doc(db, "banners", docId);
+      const payload: any = {
+        imageUrl: banner.imageUrl || "",
+        actionType: banner.actionType || "product",
+        actionValue: banner.actionValue || "",
+        priority: Number(banner.priority) || 1,
+        isActive: Boolean(banner.isActive),
+        updatedAt: new Date().toISOString(),
+      };
+      await setDoc(bannerRef, payload, { merge: true });
+      return { success: true, id: docId, banner: payload };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["banners"] });
+    },
+  });
+
+  const toggleBannerActive = useMutation({
+    mutationFn: async ({ id, isActive }: { id: string; isActive: boolean }) => {
+      try {
+        const res = await fetch(`${API_BASE}/api/admin/banners/${id}/toggle`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ isActive }),
+        });
+        if (res.ok) return await res.json();
+      } catch (err) {
+        console.warn("Backend banner toggle error, trying client SDK:", err);
+      }
+
+      const bannerRef = doc(db, "banners", id);
+      await updateDoc(bannerRef, {
+        isActive,
+        updatedAt: new Date().toISOString(),
+      });
+      return { success: true, id, isActive };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["banners"] });
+    },
+  });
+
+  const deleteBanner = useMutation({
+    mutationFn: async (id: string) => {
+      try {
+        const res = await fetch(`${API_BASE}/api/admin/banners/${id}`, {
+          method: "DELETE",
+        });
+        if (res.ok) return await res.json();
+      } catch (err) {
+        console.warn("Backend banner delete error, trying client SDK:", err);
+      }
+
+      const bannerRef = doc(db, "banners", id);
+      await deleteDoc(bannerRef);
+      return { success: true, id };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["banners"] });
+    },
+  });
+
+  return { ...query, banners: query.data || [], saveBanner, toggleBannerActive, deleteBanner };
 }
 
 

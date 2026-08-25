@@ -285,6 +285,7 @@ function Dashboard() {
   const displayName = profile?.name ? profile.name.split(" ")[0] : "Admin";
 
   const { data: allUsers = [] } = useAdminUsers();
+  const { data: firestoreUsers = [] } = useFirebaseCollection<any>("users");
   const { data: cattle = [] } = useFirebaseCollection("cattle-marketplace");
   const { data: orders = [] } = useFirebaseCollection("CattleOrders");
   const { data: products = [] } = useFirebaseCollection("product_marketplace/main/products");
@@ -294,16 +295,25 @@ function Dashboard() {
   const { data: tokenAdvData } = useTokenAdvance();
   const { data: bestSellers = [] } = useBestSellers();
 
-  // Extract farmers and sellers dynamically from users list
-  const farmers = allUsers.filter((u: any) => u && (
-    (u.farms && (typeof u.farms === "object" || Array.isArray(u.farms))) ||
-    (u.farmer && typeof u.farmer === "object" && Object.keys(u.farmer).length > 0) ||
-    (u.roles && u.roles.includes("farmer"))
-  ));
-  const sellers = allUsers.filter((u: any) => u && (
-    (u.seller && typeof u.seller === "object" && Object.keys(u.seller).length > 0) ||
-    (u.roles && u.roles.includes("seller"))
-  ));
+  // Extract farmers and sellers dynamically from merged users list
+  const farmers = allUsers.filter((u: any) => {
+    const fsUser = firestoreUsers.find((fu: any) => fu.id === u.uid || fu.uid === u.uid);
+    const roles = fsUser?.roles || (fsUser?.role ? [fsUser.role] : u.roles || []);
+    return (
+      roles.some((r: any) => typeof r === "string" && r.toLowerCase().includes("farmer")) ||
+      Boolean(fsUser && (fsUser.farms || fsUser.farmer || fsUser.isFarmer)) ||
+      Boolean(u && (u.farms || u.farmer))
+    );
+  });
+  const sellers = allUsers.filter((u: any) => {
+    const fsUser = firestoreUsers.find((fu: any) => fu.id === u.uid || fu.uid === u.uid);
+    const roles = fsUser?.roles || (fsUser?.role ? [fsUser.role] : u.roles || []);
+    return (
+      roles.some((r: any) => typeof r === "string" && r.toLowerCase().includes("seller")) ||
+      Boolean(fsUser && (fsUser.seller || fsUser.isSeller)) ||
+      Boolean(u && u.seller)
+    );
+  });
 
   // Strictly bind counts to active Firebase collections
   const farmersCount = farmers.length;

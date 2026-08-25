@@ -23,6 +23,7 @@ function CattleMarketplacePage() {
       title="Cattle marketplace moderation"
       description="Review and approve cattle listings from the cattle-marketplace collection."
       primaryAction=""
+      isLoading={isLoading}
       filters={["Approved", "Pending", "Rejected"]}
       statusKey="status"
       kpis={[

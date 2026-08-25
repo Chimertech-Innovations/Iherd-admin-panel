@@ -71,6 +71,7 @@ function UsersPage() {
       title="User Accounts"
       description="View app users, registration dates, phone numbers, and roles from Firebase Auth & Firestore."
       primaryAction=""
+      isLoading={isLoading}
       filters={["Farmer", "Seller", "Veterinarian", "Other"]}
       statusKey="role"
       rowHref={(r) => `/users/${r.uid}`}

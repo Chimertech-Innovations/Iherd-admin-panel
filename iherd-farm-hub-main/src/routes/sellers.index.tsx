@@ -1,6 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { DataPage } from "@/components/admin/DataPage";
 import { useAdminUsers } from "../hooks/useAdminUsers";
+import { useFirebaseCollection } from "../hooks/useFirebaseData";
+import { getLocalizedText } from "@/lib/utils";
 
 export const Route = createFileRoute("/sellers/")({
   head: () => ({ meta: [{ title: "Sellers — iHerd Admin" }] }),
@@ -8,36 +10,98 @@ export const Route = createFileRoute("/sellers/")({
 });
 
 function SellersPage() {
-  const { data: allUsers = [] } = useAdminUsers();
+  const { data: authUsers = [], isLoading: authLoading } = useAdminUsers();
+  const { data: firestoreUsers = [], isLoading: fsLoading } = useFirebaseCollection<any>("users");
+  const { data: directSellers = [], isLoading: sellersLoading } = useFirebaseCollection<any>("sellers");
+  const isLoading = authLoading || fsLoading || sellersLoading;
 
-  // Extract sellers from users collection who have a 'seller' object or roles array
-  const sellers = allUsers
-    .filter(u => u && (
-      (u.seller && typeof u.seller === "object" && Object.keys(u.seller).length > 0) ||
-      (u.roles && u.roles.includes("seller"))
-    ))
-    .map(u => {
-      const sellerProfile = u.seller || {};
-      return {
-        id: u.uid || u.id,
-        name: sellerProfile.name || sellerProfile.shopName || u.displayName || u.name || "Unknown Seller",
-        category: sellerProfile.category || "—",
+  const sellerMap = new Map<string, any>();
+
+  // 1. Process Auth users merged with Firestore profiles
+  authUsers.forEach((authUser: any) => {
+    const fsUser = firestoreUsers.find((fu: any) => fu.id === authUser.uid || fu.uid === authUser.uid);
+    const directSeller = directSellers.find((ds: any) => ds.id === authUser.uid || ds.uid === authUser.uid);
+
+    const roles: string[] = fsUser?.roles || (fsUser?.role ? [fsUser.role] : authUser?.roles || []);
+    const isSeller =
+      roles.some((r: any) => typeof r === "string" && r.toLowerCase().includes("seller")) ||
+      Boolean(fsUser && (fsUser.seller || fsUser.isSeller)) ||
+      Boolean(authUser && authUser.seller) ||
+      Boolean(directSeller);
+
+    if (isSeller) {
+      const sellerProfile = fsUser?.seller || authUser?.seller || directSeller || {};
+      const uid = authUser.uid;
+      const name = sellerProfile.name || sellerProfile.shopName || fsUser?.name || fsUser?.displayName || authUser?.displayName || "Unknown Seller";
+
+      sellerMap.set(uid, {
+        id: uid,
+        name: getLocalizedText(name),
+        category: getLocalizedText(sellerProfile.category || "General"),
         products: sellerProfile.products || 0,
         gmv: sellerProfile.gmv || "—",
         rating: sellerProfile.rating || 0,
-        status: u.status || "Active",
+        status: fsUser?.status || authUser?.status || sellerProfile.status || "Active",
         verified: sellerProfile.verified || false,
-      };
-    });
+      });
+    }
+  });
 
+  // 2. Process standalone Firestore users
+  firestoreUsers.forEach((fsUser: any) => {
+    const uid = fsUser.id || fsUser.uid;
+    if (!uid || sellerMap.has(uid)) return;
+
+    const roles: string[] = fsUser.roles || (fsUser.role ? [fsUser.role] : []);
+    const isSeller =
+      roles.some((r: any) => typeof r === "string" && r.toLowerCase().includes("seller")) ||
+      Boolean(fsUser.seller || fsUser.isSeller);
+
+    if (isSeller) {
+      const directSeller = directSellers.find((ds: any) => ds.id === uid || ds.uid === uid);
+      const sellerProfile = fsUser.seller || directSeller || {};
+      const name = sellerProfile.name || sellerProfile.shopName || fsUser.name || fsUser.displayName || "Unknown Seller";
+
+      sellerMap.set(uid, {
+        id: uid,
+        name: getLocalizedText(name),
+        category: getLocalizedText(sellerProfile.category || "General"),
+        products: sellerProfile.products || 0,
+        gmv: sellerProfile.gmv || "—",
+        rating: sellerProfile.rating || 0,
+        status: fsUser.status || sellerProfile.status || "Active",
+        verified: sellerProfile.verified || false,
+      });
+    }
+  });
+
+  // 3. Process direct sellers collection
+  directSellers.forEach((ds: any) => {
+    const id = ds.id || ds.uid;
+    if (!id || sellerMap.has(id)) return;
+
+    sellerMap.set(id, {
+      id: id,
+      name: getLocalizedText(ds.name || ds.shopName || "Unknown Seller"),
+      category: getLocalizedText(ds.category || "General"),
+      products: ds.products || 0,
+      gmv: ds.gmv || "—",
+      rating: ds.rating || 0,
+      status: ds.status || "Active",
+      verified: ds.verified || false,
+    });
+  });
+
+  const sellers = Array.from(sellerMap.values());
   const totalSellers = sellers.length;
-  const verifiedSellers = sellers.filter(s => s.verified).length;
+  const verifiedSellers = sellers.filter((s) => s.verified).length;
 
   return (
     <DataPage
       title="Seller management"
       description="Manage marketplace sellers — feed, equipment, medicines and cattle."
       primaryAction="Add seller"
+      isLoading={isLoading}
       filters={["Active", "Pending", "Suspended"]}
       kpis={[
         { label: "Total sellers", value: totalSellers.toLocaleString() },

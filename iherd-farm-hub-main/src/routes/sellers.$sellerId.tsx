@@ -120,7 +120,7 @@ function StatCard({ icon: Icon, label, value, highlight }: { icon: any; label: s
 
 function SellerDetail() {
   const { sellerId } = Route.useParams();
-  const { data: sellers } = useFirebaseCollection<any>("sellers");
+  const { data: sellers = [] } = useFirebaseCollection<any>("sellers");
   const seller = sellers.find((s) => s.id === sellerId) ?? {
     id: sellerId, name: "Unknown Seller", category: "—", products: 0, gmv: "—", rating: 0,
     status: "Pending", owner: "—", phone: "—", email: "—", city: "—", state: "—",

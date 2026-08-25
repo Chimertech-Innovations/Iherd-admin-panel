@@ -42,4 +42,31 @@ export function getLocalizedText(val: any, fallback = "—"): string {
   return String(val);
 }
 
+/**
+ * Formats image URLs, converting Google Drive sharing/preview URLs to direct image stream URLs.
+ */
+export function formatImageUrl(url: any): string {
+  if (!url) return "";
+  if (Array.isArray(url)) {
+    const first = url.find((u) => typeof u === "string" && u.trim().length > 0);
+    return formatImageUrl(first);
+  }
+  if (typeof url !== "string") return "";
+
+  const trimmed = url.trim();
+  if (!trimmed) return "";
+
+  // 1. Convert Google Drive Links
+  const driveFileMatch = trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+  if (driveFileMatch && driveFileMatch[1]) {
+    return `https://drive.google.com/thumbnail?id=${driveFileMatch[1]}&sz=w1000`;
+  }
+  const driveIdMatch = trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (trimmed.includes("drive.google.com") && driveIdMatch && driveIdMatch[1]) {
+    return `https://drive.google.com/thumbnail?id=${driveIdMatch[1]}&sz=w1000`;
+  }
+
+  return trimmed;
+}
+
 

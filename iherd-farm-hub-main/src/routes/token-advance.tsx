@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useTokenAdvance, useFirebaseCollection } from "@/hooks/useFirebaseData";
+import { getLocalizedText } from "@/lib/utils";
 
 export const Route = createFileRoute("/token-advance")({
   head: () => ({ meta: [{ title: "Token Advance — iHerd Admin" }] }),

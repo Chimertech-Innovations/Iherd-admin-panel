@@ -19,6 +19,7 @@ function SupportPage() {
       title="Customer issues"
       description="Customer issues queue across farmers and sellers from Firestore."
       primaryAction=""
+      isLoading={isLoading}
       filters={["Open", "Pending", "Closed"]}
       statusKey="status"
       kpis={[

@@ -125,7 +125,7 @@ function InvoicesPage() {
     <div>
       <PageHeader
         title="Order Invoices"
-        description="Generated PDF invoices stored under gs://auth-b404a.appspot.com/invoices"
+        description="Generated PDF invoices"
         actions={
           <Button variant="outline" size="sm" onClick={fetchInvoices} className="gap-1.5" disabled={loading}>
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Refresh
