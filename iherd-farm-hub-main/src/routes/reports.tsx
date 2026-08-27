@@ -96,7 +96,7 @@ function Reports() {
       </div>
 
       <Card className="p-5 rounded-2xl">
-        <h3 className="font-semibold mb-3">Saved reports</h3>
+        <h3 className="font-semibold mb-3">Saved Reports Details</h3>
         <ul className="divide-y">
           {reports.map((r) => (
             <li key={r} className="flex items-center gap-3 py-3">
