@@ -53,7 +53,7 @@ function Reports() {
     <div>
       <PageHeader
         title="Reports & analytics"
-        description="Deep dive into platform metrics and download structured reports."
+        description=""
         actions={
           <Button size="sm" className="gap-1.5 bg-gradient-to-br from-primary to-primary-glow">
             <Download className="h-4 w-4" /> Export all
