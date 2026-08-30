@@ -1,175 +1,328 @@
+import { useMemo } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { DataPage } from "@/components/admin/DataPage";
 import { useFirebaseCollection } from "../hooks/useFirebaseData";
 import { useAdminUsers } from "../hooks/useAdminUsers";
-
-import { getLocalizedText } from "@/lib/utils";
+import { Phone, Mail, MapPin, Building, Store, Stethoscope, ExternalLink } from "lucide-react";
 
 export const Route = createFileRoute("/users/")({
-  head: () => ({ meta: [{ title: "Users — iHerd Admin" }] }),
+  head: () => ({ meta: [{ title: "User Accounts — iHerd Admin" }] }),
   component: UsersPage,
 });
+
+function isSimilarUid(a?: string, b?: string) {
+  if (!a || !b) return false;
+  const s1 = a.toLowerCase();
+  const s2 = b.toLowerCase();
+  if (s1 === s2) return true;
+  return s1.replace(/[1li]/g, "x") === s2.replace(/[1li]/g, "x");
+}
 
 function UsersPage() {
   // 1. Fetch authenticated users from backend server
   const { data: authUsers = [], isLoading: authLoading } = useAdminUsers();
 
-  // 2. Fetch users collection from Firestore to merge roles
+  // 2. Fetch users collection from Firestore to merge live roles & profiles
   const { data: firestoreUsers = [], isLoading: firestoreLoading } = useFirebaseCollection<any>("users");
 
-  const isLoading = authLoading || firestoreLoading;
+  const isLoading = authLoading && authUsers.length === 0;
 
-  // Merge Auth data with Firestore roles & metadata
-  const mergedUsers = authUsers.map((authUser: any) => {
-    const fsUser = firestoreUsers.find((fu: any) => fu.id === authUser.uid || fu.uid === authUser.uid);
-    const roles = fsUser?.roles || (fsUser?.role ? [fsUser.role] : authUser.roles || ["User"]);
-    
-    // Determine primary role for filters
-    let primaryRole = "other";
-    if (roles.includes("farmer") || (fsUser && (fsUser.farms || fsUser.farmer))) {
-      primaryRole = "farmer";
-    } else if (roles.includes("seller") || (fsUser && fsUser.seller)) {
-      primaryRole = "seller";
-    } else if (roles.includes("veterinarian") || roles.includes("vet") || (fsUser && (fsUser.veterinarian || fsUser.vet))) {
-      primaryRole = "veterinarian";
-    }
+  // Merge Auth users and Firestore user documents
+  const mergedUsers = useMemo(() => {
+    const userMap = new Map<string, any>();
 
-    return {
-      ...authUser,
-      roles,
-      role: primaryRole, // role string for filters
-      displayName: fsUser?.name || fsUser?.displayName || authUser.displayName || "User",
-      phoneNumber: fsUser?.phoneNumber || fsUser?.phone || authUser.phoneNumber || "—",
-      createdAt: fsUser?.createdAt 
-        ? (fsUser.createdAt.seconds ? fsUser.createdAt.seconds * 1000 : fsUser.createdAt)
-        : authUser.createdAt,
-      lastLoginAt: authUser.lastLoginAt || fsUser?.updatedAt || null,
-      farms: fsUser?.farms || null,
-      farmer: fsUser?.farmer || null,
-      seller: fsUser?.seller || null,
-      veterinarian: fsUser?.veterinarian || fsUser?.vet || null,
-    };
-  });
+    // 1. Index all Auth users
+    authUsers.forEach((authUser: any) => {
+      const uid = authUser.uid || authUser.id;
+      if (!uid) return;
+      const fsUser = firestoreUsers.find((fu: any) => isSimilarUid(fu.id, uid) || isSimilarUid(fu.uid, uid));
 
-  // Sort by registration/created time descending (latest registered/filled first)
-  const sortedUsers = [...mergedUsers].sort((a, b) => {
-    const timeA = a.createdAt ? new Date(a.createdAt).getTime() : (a.lastLoginAt ? new Date(a.lastLoginAt).getTime() : 0);
-    const timeB = b.createdAt ? new Date(b.createdAt).getTime() : (b.lastLoginAt ? new Date(b.lastLoginAt).getTime() : 0);
-    return timeB - timeA;
-  });
+      // Accurate role resolution from backend and Firestore
+      const rawRoles = authUser.roles || fsUser?.roles || (fsUser?.role ? [fsUser.role] : ["User"]);
+      const roles = Array.isArray(rawRoles) ? rawRoles : [String(rawRoles)];
 
-  const totalUsers = sortedUsers.length;
-  const farmerUsers = sortedUsers.filter(u => u.role === "farmer").length;
-  const sellerUsers = sortedUsers.filter(u => u.role === "seller").length;
-  const vetUsers = sortedUsers.filter(u => u.role === "veterinarian").length;
+      let primaryRole = "User";
+      if (roles.includes("Farmer") || authUser.isFarmer) {
+        primaryRole = "Farmer";
+      } else if (roles.includes("Seller") || authUser.seller) {
+        primaryRole = "Seller";
+      } else if (roles.includes("Veterinarian") || authUser.veterinarian) {
+        primaryRole = "Veterinarian";
+      }
+
+      const farmerProfile = authUser.farmer || fsUser?.farmer || null;
+      const farmProfile = authUser.farms || fsUser?.farms || null;
+      const sellerProfile = authUser.seller || fsUser?.seller || null;
+      const vetProfile = authUser.veterinarian || fsUser?.veterinarian || fsUser?.vet || null;
+
+      const resolvedName =
+        (authUser.displayName && authUser.displayName !== "User" && authUser.displayName !== "Farmer")
+          ? authUser.displayName
+          : (authUser.name && authUser.name !== "User")
+          ? authUser.name
+          : (fsUser?.fullName && fsUser.fullName !== "User")
+          ? fsUser.fullName
+          : (fsUser?.name && fsUser.name !== "User")
+          ? fsUser.name
+          : (fsUser?.displayName && fsUser.displayName !== "User")
+          ? fsUser.displayName
+          : (farmerProfile?.name && farmerProfile.name !== "User")
+          ? farmerProfile.name
+          : (authUser.phoneNumber ? `User (${authUser.phoneNumber})` : `User #${uid.slice(-6).toUpperCase()}`);
+
+      const resolvedPhone =
+        (authUser.phoneNumber && authUser.phoneNumber !== "—")
+          ? authUser.phoneNumber
+          : (fsUser?.phoneNumber && fsUser.phoneNumber !== "—")
+          ? fsUser.phoneNumber
+          : (fsUser?.phone && fsUser.phone !== "—")
+          ? fsUser.phone
+          : (farmerProfile?.farmerPhoneNumber && farmerProfile.farmerPhoneNumber !== "—")
+          ? farmerProfile.farmerPhoneNumber
+          : "—";
+
+      userMap.set(uid, {
+        ...authUser,
+        id: uid,
+        uid,
+        name: resolvedName,
+        displayName: resolvedName,
+        phoneNumber: resolvedPhone,
+        email: authUser.email || fsUser?.email || null,
+        roles: roles.length > 0 ? roles : [primaryRole],
+        role: primaryRole,
+        farmer: farmerProfile,
+        farms: farmProfile,
+        seller: sellerProfile,
+        veterinarian: vetProfile,
+        village: farmProfile?.village || farmerProfile?.village || fsUser?.village || "—",
+        district: farmProfile?.district || farmerProfile?.district || fsUser?.district || "—",
+        state: farmProfile?.state || farmerProfile?.state || fsUser?.state || "—",
+        createdAt: authUser.createdAt || fsUser?.createdAt || null,
+        lastLoginAt: authUser.lastLoginAt || fsUser?.updatedAt || null,
+      });
+    });
+
+    // 2. Add any Firestore users that might not be in auth list
+    firestoreUsers.forEach((fu: any) => {
+      const uid = fu.id || fu.uid;
+      if (!uid || userMap.has(uid)) return;
+
+      const rawRoles = fu.roles || (fu.role ? [fu.role] : ["User"]);
+      const roles = Array.isArray(rawRoles) ? rawRoles : [String(rawRoles)];
+      let primaryRole = "User";
+      if (roles.some((r: any) => String(r).toLowerCase().includes("farmer")) || fu.farms || fu.farmer) {
+        primaryRole = "Farmer";
+      } else if (roles.some((r: any) => String(r).toLowerCase().includes("seller")) || fu.seller) {
+        primaryRole = "Seller";
+      } else if (roles.some((r: any) => String(r).toLowerCase().includes("vet")) || fu.veterinarian || fu.vet) {
+        primaryRole = "Veterinarian";
+      }
+
+      userMap.set(uid, {
+        id: uid,
+        uid,
+        name: fu.name || fu.fullName || fu.displayName || (fu.phoneNumber ? `User (${fu.phoneNumber})` : `User #${uid.slice(-6).toUpperCase()}`),
+        displayName: fu.name || fu.fullName || fu.displayName || `User #${uid.slice(-6).toUpperCase()}`,
+        phoneNumber: fu.phoneNumber || fu.phone || "—",
+        email: fu.email || null,
+        roles,
+        role: primaryRole,
+        farmer: fu.farmer || null,
+        farms: fu.farms || null,
+        seller: fu.seller || null,
+        veterinarian: fu.veterinarian || fu.vet || null,
+        village: fu.village || "—",
+        district: fu.district || "—",
+        state: fu.state || "—",
+        createdAt: fu.createdAt ? (fu.createdAt.seconds ? fu.createdAt.seconds * 1000 : fu.createdAt) : null,
+        lastLoginAt: fu.updatedAt ? (fu.updatedAt.seconds ? fu.updatedAt.seconds * 1000 : fu.updatedAt) : null,
+      });
+    });
+
+    // Sort by registration/created time descending (latest registered first)
+    return Array.from(userMap.values()).sort((a, b) => {
+      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return timeB - timeA;
+    });
+  }, [authUsers, firestoreUsers]);
+
+  const totalUsers = mergedUsers.length;
+  const farmerUsers = mergedUsers.filter((u) => u.role === "Farmer" || (Array.isArray(u.roles) && u.roles.includes("Farmer"))).length;
+  const sellerUsers = mergedUsers.filter((u) => u.role === "Seller" || (Array.isArray(u.roles) && u.roles.includes("Seller"))).length;
+  const vetUsers = mergedUsers.filter((u) => u.role === "Veterinarian" || (Array.isArray(u.roles) && u.roles.includes("Veterinarian"))).length;
 
   return (
-    <DataPage
-      title="User Accounts"
-      description="View app users, registration dates, phone numbers, and roles from Firebase Auth & Firestore."
-      primaryAction=""
-      isLoading={isLoading}
-      filters={["Farmer", "Seller", "Veterinarian", "Other"]}
-      statusKey="role"
-      rowHref={(r) => `/users/${r.uid}`}
-      kpis={[
-        { label: "Total Users", value: totalUsers.toLocaleString() },
-        { label: "Farmers", value: farmerUsers.toLocaleString() },
-        { label: "Sellers", value: sellerUsers.toLocaleString() },
-        { label: "Vets", value: vetUsers.toLocaleString() },
-      ]}
-      data={sortedUsers}
-      columns={[
-        {
-          key: "uid",
-          label: "User ID / UID",
-          render: (r) => (
-            <Link
-              to="/users/$userId"
-              params={{ userId: r.uid }}
-              className="flex items-center gap-3 min-w-0 group hover:underline decoration-primary"
-            >
-              <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary/10 text-primary text-xs font-semibold">
-                US
-              </div>
-              <div className="min-w-0">
-                <div className="font-mono text-xs font-medium truncate max-w-[150px] group-hover:text-primary transition-colors">{r.uid}</div>
-                <div className="text-xs text-muted-foreground truncate">{r.email || "No email"}</div>
-              </div>
-            </Link>
-          ),
-        },
-        {
-          key: "phoneNumber",
-          label: "Phone Number",
-          render: (r) => <span className="font-medium">{r.phoneNumber || "—"}</span>,
-        },
-        {
-          key: "roles",
-          label: "Roles",
-          render: (r) => {
-            const rolesList = r.roles || (r.role ? [r.role] : []);
-            return (
-              <div className="flex flex-wrap gap-1">
-                {rolesList.length > 0 ? (
-                  rolesList.map((role: string) => (
-                    <span key={role} className="inline-flex items-center rounded-md bg-green-50 px-2 py-1 text-xs font-medium text-green-700 ring-1 ring-inset ring-green-600/20">
-                      {role}
-                    </span>
-                  ))
-                ) : (
-                  <span className="text-muted-foreground text-xs">—</span>
+    <div className="space-y-6">
+      <DataPage
+        title="User Accounts Directory"
+        description="All registered Firebase Authentication users, verified farmer roles, store profiles, and contact details."
+        primaryAction="Add User"
+        isLoading={isLoading}
+        filters={["Farmer", "Seller", "Veterinarian", "User"]}
+        statusKey="role"
+        searchPlaceholder="Search by name, phone, UID, email, location..."
+        searchKeys={["name", "displayName", "uid", "phoneNumber", "email", "village", "district", "state"]}
+        rowHref={(r) => `/users/${r.uid}`}
+        kpis={[
+          { label: "Total Accounts", value: totalUsers.toLocaleString(), change: "All registered users", up: true },
+          { label: "Farmers", value: farmerUsers.toLocaleString(), change: "With farm & cattle data", up: true },
+          { label: "Sellers", value: sellerUsers.toLocaleString(), change: "Marketplace vendors", up: true },
+          { label: "Veterinarians", value: vetUsers.toLocaleString(), change: "Verified doctors", up: true },
+        ]}
+        data={mergedUsers}
+        columns={[
+          {
+            key: "displayName",
+            label: "User / Account",
+            render: (r) => (
+              <Link
+                to="/users/$userId"
+                params={{ userId: r.uid }}
+                className="flex items-center gap-3 min-w-0 group"
+              >
+                <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-primary/20 to-primary-glow/10 border border-primary/20 text-primary font-bold text-xs shadow-sm group-hover:scale-105 transition-transform">
+                  {(r.name || r.displayName || "U").slice(0, 2).toUpperCase()}
+                </div>
+                <div className="min-w-0">
+                  <div className="font-semibold text-sm text-foreground group-hover:text-primary transition-colors truncate">
+                    {r.name || r.displayName || "iHerd User"}
+                  </div>
+                  <div className="font-mono text-xs text-muted-foreground truncate max-w-[180px]">
+                    UID: {r.uid}
+                  </div>
+                </div>
+              </Link>
+            ),
+          },
+          {
+            key: "phoneNumber",
+            label: "Phone / Contact",
+            render: (r) => (
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+                  <Phone className="h-3.5 w-3.5 text-primary shrink-0" />
+                  <span>{r.phoneNumber || "—"}</span>
+                </div>
+                {r.email && (
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground truncate max-w-[170px]">
+                    <Mail className="h-3 w-3 shrink-0" />
+                    <span className="truncate">{r.email}</span>
+                  </div>
                 )}
               </div>
-            );
+            ),
           },
-        },
-        {
-          key: "profileDetails",
-          label: "Profile Details",
-          render: (r) => {
-            if ((r.farms && typeof r.farms === "object" && !Array.isArray(r.farms)) || (r.farmer && typeof r.farmer === "object")) {
-              const farmerInfo = r.farmer || r.farms || {};
+          {
+            key: "role",
+            label: "Role / Badge",
+            render: (r) => {
+              const role = r.role || "User";
+              let badgeColor = "bg-blue-500/10 text-blue-600 border-blue-500/20";
+              if (role === "Farmer") badgeColor = "bg-emerald-500/10 text-emerald-600 border-emerald-500/20";
+              if (role === "Seller") badgeColor = "bg-amber-500/10 text-amber-600 border-amber-500/20";
+              if (role === "Veterinarian") badgeColor = "bg-purple-500/10 text-purple-600 border-purple-500/20";
+
               return (
-                <div className="text-xs">
-                  <span className="font-semibold text-primary">🌾 Farm: </span>
-                  <span>{getLocalizedText(farmerInfo.name, "Unnamed Farm")}</span>
-                  {farmerInfo.state && <span className="text-muted-foreground"> ({getLocalizedText(farmerInfo.state)})</span>}
+                <div className="flex flex-wrap items-center gap-1">
+                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border ${badgeColor}`}>
+                    {role}
+                  </span>
                 </div>
               );
-            }
-            if (r.seller && typeof r.seller === "object") {
+            },
+          },
+          {
+            key: "profileDetails",
+            label: "Connected Details & Location",
+            render: (r) => {
+              if (r.role === "Farmer") {
+                const farmName = r.farms?.name || r.farmer?.farmName || "Dairy Farm";
+                const location = [r.village, r.district, r.state].filter((v) => v && v !== "—").join(", ");
+                return (
+                  <div className="text-xs space-y-0.5">
+                    <div className="font-medium text-emerald-600 flex items-center gap-1">
+                      <Building className="h-3.5 w-3.5 shrink-0" />
+                      <span>{farmName}</span>
+                    </div>
+                    {location && (
+                      <div className="text-muted-foreground flex items-center gap-1">
+                        <MapPin className="h-3 w-3 shrink-0" />
+                        <span>{location}</span>
+                      </div>
+                    )}
+                  </div>
+                );
+              }
+              if (r.role === "Seller" && r.seller) {
+                return (
+                  <div className="text-xs space-y-0.5">
+                    <div className="font-medium text-amber-600 flex items-center gap-1">
+                      <Store className="h-3.5 w-3.5 shrink-0" />
+                      <span>{r.seller.name || r.seller.shopName || "Marketplace Store"}</span>
+                    </div>
+                    {r.seller.category && (
+                      <div className="text-muted-foreground">{r.seller.category}</div>
+                    )}
+                  </div>
+                );
+              }
+              if (r.role === "Veterinarian" && r.veterinarian) {
+                return (
+                  <div className="text-xs space-y-0.5">
+                    <div className="font-medium text-purple-600 flex items-center gap-1">
+                      <Stethoscope className="h-3.5 w-3.5 shrink-0" />
+                      <span>{r.veterinarian.clinic || r.veterinarian.hospital || "Veterinary Clinic"}</span>
+                    </div>
+                    {r.veterinarian.qualification && (
+                      <div className="text-muted-foreground">{r.veterinarian.qualification}</div>
+                    )}
+                  </div>
+                );
+              }
+              const loc = [r.village, r.state].filter((v) => v && v !== "—").join(", ");
+              return loc ? (
+                <div className="text-xs text-muted-foreground flex items-center gap-1">
+                  <MapPin className="h-3 w-3 shrink-0" />
+                  <span>{loc}</span>
+                </div>
+              ) : (
+                <span className="text-muted-foreground text-xs">—</span>
+              );
+            },
+          },
+          {
+            key: "createdAt",
+            label: "Registration Date",
+            render: (r) => {
+              if (!r.createdAt) return <span className="text-muted-foreground text-xs">—</span>;
+              const date = new Date(r.createdAt);
               return (
-                <div className="text-xs">
-                  <span className="font-semibold text-emerald-600">🏪 Store: </span>
-                  <span>{getLocalizedText(r.seller.name || r.seller.shopName, "Unnamed Store")}</span>
-                  {r.seller.category && <span className="text-muted-foreground"> ({getLocalizedText(r.seller.category)})</span>}
+                <div className="text-xs space-y-0.5">
+                  <div className="font-medium text-foreground">{date.toLocaleDateString()}</div>
+                  <div className="text-muted-foreground">{date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
                 </div>
               );
-            }
-            if (r.veterinarian && typeof r.veterinarian === "object") {
-              return (
-                <div className="text-xs">
-                  <span className="font-semibold text-sky-600">🩺 Vet: </span>
-                  <span>{getLocalizedText(r.veterinarian.clinic || r.veterinarian.hospital, "Unnamed Clinic")}</span>
-                  {r.veterinarian.qualification && <span className="text-muted-foreground"> ({getLocalizedText(r.veterinarian.qualification)})</span>}
-                </div>
-              );
-            }
-            return <span className="text-muted-foreground text-xs">—</span>;
+            },
           },
-        },
-        {
-          key: "createdAt",
-          label: "Created At",
-          render: (r) => {
-            if (!r.createdAt) return <span className="text-muted-foreground text-xs">—</span>;
-            const date = new Date(r.createdAt);
-            return <span className="text-xs">{date.toLocaleString()}</span>;
+          {
+            key: "actions",
+            label: "Actions",
+            className: "text-right",
+            render: (r) => (
+              <Link
+                to="/users/$userId"
+                params={{ userId: r.uid }}
+                className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"
+              >
+                <span>View Full Profile</span>
+                <ExternalLink className="h-3.5 w-3.5" />
+              </Link>
+            ),
           },
-        },
-      ]}
-    />
+        ]}
+      />
+    </div>
   );
 }
-

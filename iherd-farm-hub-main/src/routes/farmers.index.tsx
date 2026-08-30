@@ -216,13 +216,23 @@ function FarmersPage() {
     const directFarmer = directFarmers.find((df: any) => df.id === uid || df.uid === uid);
     const meta = farmerMetaMap.get(uid) || {};
 
-    const roles: string[] = fsUser?.roles || (fsUser?.role ? [fsUser.role] : authUser?.roles || []);
-    const isFarmer =
-      roles.some((r: any) => typeof r === "string" && r.toLowerCase().includes("farmer")) ||
-      Boolean(fsUser && (fsUser.farms || fsUser.farmer || fsUser.isFarmer)) ||
-      Boolean(authUser && (authUser.farms || authUser.farmer || authUser.isFarmer)) ||
-      Boolean(directFarmer) ||
-      Boolean(meta.farmName || meta.name);
+    const rawRoles = fsUser?.roles || (fsUser?.role ? [fsUser.role] : authUser?.roles || []);
+    const roles: string[] = Array.isArray(rawRoles) ? rawRoles : [String(rawRoles)];
+    const hasFarmerRole = roles.some((r: any) => typeof r === "string" && r.toLowerCase().includes("farmer"));
+    const hasDirectFarmerDoc = Boolean(directFarmer);
+    const hasExplicitFarmerProfile = Boolean(
+      (fsUser?.farmer && typeof fsUser.farmer === "object" && (fsUser.farmer.farmName || fsUser.farmer.farmerName || fsUser.farmer.village || fsUser.farmer.name)) ||
+      (authUser?.farmer && typeof authUser.farmer === "object" && (authUser.farmer.farmName || authUser.farmer.farmerName || authUser.farmer.village))
+    );
+    const hasFarm = Boolean(
+      meta.farmId ||
+      meta.farmName ||
+      (fsUser?.farms && typeof fsUser.farms === "object" && Object.keys(fsUser.farms).length > 0) ||
+      (authUser?.farms && typeof authUser.farms === "object" && Object.keys(authUser.farms).length > 0)
+    );
+    const hasCattle = (cattleCountMap.get(uid) || 0) > 0;
+
+    const isFarmer = hasFarmerRole || hasDirectFarmerDoc || hasExplicitFarmerProfile || hasFarm || hasCattle || fsUser?.isFarmer === true || authUser?.isFarmer === true;
 
     if (isFarmer) {
       const farmerProfile = fsUser?.farmer || authUser?.farmer || directFarmer || {};
@@ -287,20 +297,24 @@ function FarmersPage() {
     }
   });
 
-  // 2. Process standalone Firestore users with farmer roles
+  // 2. Process standalone Firestore users with genuine farmer roles
   firestoreUsers.forEach((fsUser: any) => {
     const uid = fsUser.id || fsUser.uid;
     if (!uid || farmerMap.has(uid)) return;
 
     const meta = farmerMetaMap.get(uid) || {};
-    const roles: string[] = fsUser.roles || (fsUser.role ? [fsUser.role] : []);
-    const isFarmer =
-      roles.some((r: any) => typeof r === "string" && r.toLowerCase().includes("farmer")) ||
-      Boolean(fsUser.farmer || fsUser.isFarmer || fsUser.farms) ||
-      Boolean(meta.farmName || meta.name);
+    const rawRoles = fsUser.roles || (fsUser.role ? [fsUser.role] : []);
+    const roles: string[] = Array.isArray(rawRoles) ? rawRoles : [String(rawRoles)];
+    const hasFarmerRole = roles.some((r: any) => typeof r === "string" && r.toLowerCase().includes("farmer"));
+    const directFarmer = directFarmers.find((df: any) => df.id === uid || df.uid === uid);
+    const hasDirectFarmerDoc = Boolean(directFarmer);
+    const hasExplicitFarmerProfile = Boolean(fsUser.farmer && typeof fsUser.farmer === "object" && (fsUser.farmer.farmName || fsUser.farmer.farmerName || fsUser.farmer.village || fsUser.farmer.name));
+    const hasFarm = Boolean(meta.farmId || meta.farmName || (fsUser.farms && typeof fsUser.farms === "object" && Object.keys(fsUser.farms).length > 0));
+    const hasCattle = (cattleCountMap.get(uid) || 0) > 0;
+
+    const isFarmer = hasFarmerRole || hasDirectFarmerDoc || hasExplicitFarmerProfile || hasFarm || hasCattle || fsUser.isFarmer === true;
 
     if (isFarmer) {
-      const directFarmer = directFarmers.find((df: any) => df.id === uid || df.uid === uid);
       const farmerProfile = fsUser.farmer || directFarmer || {};
       const rawTimestamp = parseTime(
         fsUser.createdAt ||
@@ -356,6 +370,38 @@ function FarmersPage() {
         status: fsUser.status || farmerProfile.status || "Active",
       });
     }
+  });
+
+  // 3. Process standalone direct farmers collection
+  directFarmers.forEach((df: any) => {
+    const uid = df.id || df.uid;
+    if (!uid || farmerMap.has(uid)) return;
+
+    const meta = farmerMetaMap.get(uid) || {};
+    const rawTimestamp = parseTime(df.createdAt || df.timestamp);
+    const phone = df.phone || df.farmerPhoneNumber || df.phoneNumber || meta.phone || "—";
+    const name = df.name || df.farmerName || meta.name || (phone !== "—" ? `Farmer (${phone})` : `Farmer #${uid.slice(-6).toUpperCase()}`);
+    const village = df.village || meta.village || "—";
+    const district = df.district || meta.district || "—";
+    const state = df.state || meta.state || "—";
+    const trackedCattle = cattleCountMap.get(uid) || Number(df.cattle || 0);
+    const registeredFarmName = meta.farmName || df.farmName || null;
+
+    farmerMap.set(uid, {
+      id: uid,
+      uid,
+      name: getLocalizedText(name),
+      phone,
+      village: getLocalizedText(village),
+      district: getLocalizedText(district),
+      state: getLocalizedText(state),
+      cattleCount: trackedCattle,
+      registeredFarmName,
+      hasFarm: Boolean(registeredFarmName),
+      joined: formatDate(rawTimestamp),
+      rawTimestamp,
+      status: df.status || "Active",
+    });
   });
 
   // Sort by newest registration first

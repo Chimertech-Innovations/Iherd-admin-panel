@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { 
-  type User, 
+  type User as FirebaseUser, 
   onAuthStateChanged, 
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
@@ -9,6 +9,7 @@ import {
 } from "firebase/auth";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { auth, db } from "../lib/firebase";
+import { supabase, isSupabaseConfigured } from "../lib/supabase";
 
 export interface UserProfile {
   uid: string;
@@ -19,8 +20,15 @@ export interface UserProfile {
   createdAt: string;
 }
 
+export type AuthUser = {
+  uid: string;
+  email?: string | null;
+  displayName?: string | null;
+  phoneNumber?: string | null;
+};
+
 interface AuthContextType {
-  user: User | null;
+  user: AuthUser | null;
   profile: UserProfile | null;
   loading: boolean;
   setProfile: (profile: UserProfile | null) => void;
@@ -32,48 +40,88 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const adminEmail = import.meta.env.VITE_ADMIN_EMAIL || "iherdadmin@gmail.com";
-  const adminPass = import.meta.env.VITE_ADMIN_PASSWORD || "adminpassword123";
-  const isMockKey = 
-    !import.meta.env.VITE_FIREBASE_API_KEY || 
-    import.meta.env.VITE_FIREBASE_API_KEY === "mock-api-key" || 
-    import.meta.env.VITE_FIREBASE_API_KEY.includes("YOUR_ACTUAL");
+  const adminEmail = (import.meta.env.VITE_ADMIN_EMAIL as string | undefined)?.trim() || "";
 
   useEffect(() => {
-    // Check if we have a saved mock session first
-    if (isMockKey && typeof window !== "undefined" && window.localStorage.getItem("iherd_local_auth") === "1") {
-      setUser({
-        uid: "admin-uid",
-        email: adminEmail,
-        displayName: "Admin User",
-      } as User);
-      setProfile({
-        uid: "admin-uid",
-        name: "Admin User",
-        email: adminEmail,
-        phone: "",
-        role: "Super Admin",
-        createdAt: new Date().toISOString()
+    // 1. Supabase Auth Integration
+    if (isSupabaseConfigured && supabase) {
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (session?.user) {
+          const suUser = session.user;
+          const authUserObj: AuthUser = {
+            uid: suUser.id,
+            email: suUser.email || "",
+            displayName: suUser.user_metadata?.name || suUser.email?.split("@")[0] || "Admin",
+            phoneNumber: suUser.user_metadata?.phone || suUser.phone || "",
+          };
+          setUser(authUserObj);
+          setProfile({
+            uid: suUser.id,
+            name: authUserObj.displayName || "Admin User",
+            email: suUser.email || "",
+            phone: authUserObj.phoneNumber || "",
+            role: "Super Admin",
+            createdAt: suUser.created_at || new Date().toISOString(),
+          });
+        }
+        setLoading(false);
       });
-      setLoading(false);
-      return;
+
+      const {
+        data: { subscription },
+      } = supabase.auth.onAuthStateChange((_event, session) => {
+        if (session?.user) {
+          const suUser = session.user;
+          const authUserObj: AuthUser = {
+            uid: suUser.id,
+            email: suUser.email || "",
+            displayName: suUser.user_metadata?.name || suUser.email?.split("@")[0] || "Admin",
+            phoneNumber: suUser.user_metadata?.phone || suUser.phone || "",
+          };
+          setUser(authUserObj);
+          setProfile({
+            uid: suUser.id,
+            name: authUserObj.displayName || "Admin User",
+            email: suUser.email || "",
+            phone: authUserObj.phoneNumber || "",
+            role: "Super Admin",
+            createdAt: suUser.created_at || new Date().toISOString(),
+          });
+        } else {
+          setUser(null);
+          setProfile(null);
+        }
+        setLoading(false);
+      });
+
+      return () => {
+        subscription.unsubscribe();
+      };
     }
 
+    // 2. Firebase Auth Integration (No hardcoded passwords)
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      setUser(currentUser);
       if (currentUser) {
-        // Restrict to configured admin email if set
-        if (currentUser.email && currentUser.email !== adminEmail) {
+        // If admin email restriction is configured
+        if (adminEmail && currentUser.email && currentUser.email.toLowerCase() !== adminEmail.toLowerCase()) {
           await firebaseSignOut(auth);
           setUser(null);
           setProfile(null);
           setLoading(false);
           return;
         }
+
+        const authUserObj: AuthUser = {
+          uid: currentUser.uid,
+          email: currentUser.email,
+          displayName: currentUser.displayName,
+          phoneNumber: currentUser.phoneNumber,
+        };
+        setUser(authUserObj);
 
         try {
           const userDocRef = doc(db, "users", currentUser.uid);
@@ -85,13 +133,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               uid: currentUser.uid,
               name: currentUser.displayName || "Admin User",
               email: currentUser.email || "",
-              phone: currentUser.phoneNumber || "+91 98xxx 21034",
+              phone: currentUser.phoneNumber || "",
               role: "Super Admin",
-              createdAt: new Date().toISOString()
+              createdAt: new Date().toISOString(),
             };
             setProfile(fallbackProfile);
-            
-            // Create the admin profile in Firestore so the security rules can detect the 'Super Admin' role
+
             await setDoc(userDocRef, {
               uid: currentUser.uid,
               name: fallbackProfile.name,
@@ -99,110 +146,133 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               phoneNumber: fallbackProfile.phone,
               roles: ["Super Admin"],
               createdAt: new Date(),
-              updatedAt: new Date()
-            });
+              updatedAt: new Date(),
+            }, { merge: true });
           }
-        } catch (err) {
-          console.error("Error fetching user profile:", err);
+        } catch {
+          // Firestore read error -> fallback profile
+          setProfile({
+            uid: currentUser.uid,
+            name: currentUser.displayName || "Admin User",
+            email: currentUser.email || "",
+            phone: currentUser.phoneNumber || "",
+            role: "Super Admin",
+            createdAt: new Date().toISOString(),
+          });
         }
       } else {
+        setUser(null);
         setProfile(null);
       }
       setLoading(false);
     });
 
     return () => unsubscribe();
-  }, [adminEmail, isMockKey]);
+  }, [adminEmail]);
 
   const signIn = async (email: string, password: string) => {
-    if (email !== adminEmail) {
-      throw new Error("Unauthorized. Only the designated administrator is allowed.");
+    if (adminEmail && email.toLowerCase() !== adminEmail.toLowerCase()) {
+      throw new Error(`Unauthorized. Only ${adminEmail} is permitted.`);
     }
 
-    if (isMockKey) {
-      if (password === adminPass) {
+    // 1. If Supabase is active, authenticate via Supabase Auth
+    if (isSupabaseConfigured && supabase) {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (error) {
+        throw new Error(error.message || "Failed to sign in via Supabase.");
+      }
+
+      if (data.user) {
+        const suUser = data.user;
         setUser({
-          uid: "admin-uid",
-          email: adminEmail,
-          displayName: "Admin User",
-        } as User);
-        setProfile({
-          uid: "admin-uid",
-          name: "Admin User",
-          email: adminEmail,
-          phone: "+91 98xxx 21034",
-          role: "Super Admin",
-          createdAt: new Date().toISOString()
+          uid: suUser.id,
+          email: suUser.email || "",
+          displayName: suUser.user_metadata?.name || "Admin",
+          phoneNumber: suUser.user_metadata?.phone || "",
         });
-        if (typeof window !== "undefined") {
-          window.localStorage.setItem("iherd_local_auth", "1");
-        }
+        setProfile({
+          uid: suUser.id,
+          name: suUser.user_metadata?.name || "Admin User",
+          email: suUser.email || "",
+          phone: suUser.user_metadata?.phone || "",
+          role: "Super Admin",
+          createdAt: suUser.created_at || new Date().toISOString(),
+        });
         return;
-      } else {
-        throw new Error("Invalid password.");
       }
     }
 
+    // 2. Authenticate via Firebase Auth
     try {
       await signInWithEmailAndPassword(auth, email, password);
     } catch (err: any) {
-      if (err.code === "auth/user-not-found" || (err.message && err.message.includes("auth/user-not-found"))) {
-        if (password === adminPass) {
-          try {
-            const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-            await updateProfile(userCredential.user, { displayName: "Admin User" });
-            return;
-          } catch (signUpErr: any) {
-            throw new Error("Admin account not found and auto-registration failed: " + signUpErr.message);
-          }
-        }
-        throw new Error("Admin account not found in database. Please click 'Create one' below to register this admin email.");
+      if (err.code === "auth/invalid-credential" || err.code === "auth/wrong-password") {
+        throw new Error("Invalid password. Please check your credentials.");
+      } else if (err.code === "auth/user-not-found") {
+        throw new Error("Admin account not found. Please click 'Create one' to register.");
       }
-      throw err;
+      throw new Error(err.message || "Authentication failed.");
     }
   };
 
   const signUp = async (email: string, password: string, name: string, phone: string) => {
-    if (email !== adminEmail) {
-      throw new Error("Unauthorized. Only the designated administrator email can register.");
+    if (adminEmail && email.toLowerCase() !== adminEmail.toLowerCase()) {
+      throw new Error(`Unauthorized. Only ${adminEmail} is permitted.`);
     }
 
-    if (isMockKey) {
-      setUser({
-        uid: "admin-uid",
-        email: adminEmail,
-        displayName: name,
-      } as User);
-      setProfile({
-        uid: "admin-uid",
-        name: name,
-        email: adminEmail,
-        phone: phone,
-        role: "Super Admin",
-        createdAt: new Date().toISOString()
+    // 1. Supabase Sign Up
+    if (isSupabaseConfigured && supabase) {
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            name,
+            phone,
+            role: "Super Admin",
+          },
+        },
       });
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem("iherd_local_auth", "1");
+
+      if (error) {
+        throw new Error(error.message || "Supabase registration failed.");
       }
-      return;
+
+      if (data.user) {
+        setUser({
+          uid: data.user.id,
+          email: data.user.email || "",
+          displayName: name,
+          phoneNumber: phone,
+        });
+        setProfile({
+          uid: data.user.id,
+          name,
+          email,
+          phone,
+          role: "Super Admin",
+          createdAt: new Date().toISOString(),
+        });
+        return;
+      }
     }
 
+    // 2. Firebase Sign Up
     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-    const user = userCredential.user;
-    await updateProfile(user, { displayName: name });
-    // Database writes removed to maintain strict read-only access
+    await updateProfile(userCredential.user, { displayName: name });
   };
 
   const logout = async () => {
-    if (isMockKey) {
-      setUser(null);
-      setProfile(null);
-      if (typeof window !== "undefined") {
-        window.localStorage.removeItem("iherd_local_auth");
-      }
-      return;
+    if (isSupabaseConfigured && supabase) {
+      await supabase.auth.signOut();
     }
-    await firebaseSignOut(auth);
+    await firebaseSignOut(auth).catch(() => {});
+    setUser(null);
+    setProfile(null);
   };
 
   return (

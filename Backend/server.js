@@ -83,6 +83,35 @@ async function listFilesUnderPrefix(bucket, prefix) {
   }
 }
 
+// In-memory cache for high-frequency admin reads
+const memoryCache = new Map();
+
+function getCached(key, ttlMs = 45000) {
+  const item = memoryCache.get(key);
+  if (!item) return null;
+  if (Date.now() - item.timestamp > ttlMs) {
+    memoryCache.delete(key);
+    return null;
+  }
+  return item.data;
+}
+
+function setCache(key, data) {
+  memoryCache.set(key, { data, timestamp: Date.now() });
+}
+
+function clearCache(prefix = "") {
+  if (!prefix) {
+    memoryCache.clear();
+    return;
+  }
+  for (const key of memoryCache.keys()) {
+    if (key.startsWith(prefix)) {
+      memoryCache.delete(key);
+    }
+  }
+}
+
 // REST API: list all Firebase Storage files across all known paths
 app.get("/api/admin/storage", async (req, res) => {
   try {
@@ -911,23 +940,58 @@ app.post("/api/admin/user-farm-data/:userId", async (req, res) => {
 // REST API to list all Firebase Authentication users
 app.get(["/api/admin/users", "/get/api/admin/users"], async (req, res) => {
   try {
+    const cachedUsers = getCached("admin_users", 60000);
+    if (cachedUsers && Array.isArray(cachedUsers) && cachedUsers.length > 0) {
+      return res.json({ users: cachedUsers, cached: true });
+    }
+
     const auth = getAuth();
     const db = getFirestore();
     
-    // Prefetch all Firestore user documents, farms subcollections, and cattle to extract full farmer profiles
-    const [fsSnapshot, farmsSnapshot, cattleSnapshot] = await Promise.all([
-      db.collection("users").get(),
-      db.collectionGroup("farms").get().catch(() => ({ forEach: () => {} })),
-      db.collection("cattle_details").get().catch(() => ({ forEach: () => {} })),
+    // Prefetch all Firestore user collections, farmers, sellers, vets, farms, and cattle
+    const [fsSnapshot, farmersSnapshot, sellersSnapshot, vetsSnapshot, farmsSnapshot, cattleSnapshot] = await Promise.all([
+      db.collection("users").get().catch(() => ({ docs: [] })),
+      db.collection("farmers").get().catch(() => ({ docs: [] })),
+      db.collection("sellers").get().catch(() => ({ docs: [] })),
+      db.collection("vets").get().catch(() => ({ docs: [] })),
+      db.collectionGroup("farms").get().catch(() => ({ docs: [] })),
+      db.collection("cattle_details").get().catch(() => ({ docs: [] })),
     ]);
 
     const fsUsersMap = {};
-    fsSnapshot.forEach((doc) => {
+    fsSnapshot.docs?.forEach((doc) => {
       fsUsersMap[doc.id] = doc.data();
     });
 
+    const directFarmersMap = {};
+    farmersSnapshot.docs?.forEach((doc) => {
+      const d = doc.data();
+      directFarmersMap[doc.id] = { id: doc.id, ...d };
+      if (d.uid) directFarmersMap[d.uid] = { id: doc.id, ...d };
+      const p = (d.phone || d.phoneNumber || d.farmerPhoneNumber || "").replace(/\D/g, "").slice(-10);
+      if (p) directFarmersMap[p] = { id: doc.id, ...d };
+    });
+
+    const directSellersMap = {};
+    sellersSnapshot.docs?.forEach((doc) => {
+      const d = doc.data();
+      directSellersMap[doc.id] = { id: doc.id, ...d };
+      if (d.uid) directSellersMap[d.uid] = { id: doc.id, ...d };
+      const p = (d.phone || d.phoneNumber || d.sellerPhone || "").replace(/\D/g, "").slice(-10);
+      if (p) directSellersMap[p] = { id: doc.id, ...d };
+    });
+
+    const directVetsMap = {};
+    vetsSnapshot.docs?.forEach((doc) => {
+      const d = doc.data();
+      directVetsMap[doc.id] = { id: doc.id, ...d };
+      if (d.uid) directVetsMap[d.uid] = { id: doc.id, ...d };
+      const p = (d.phone || d.phoneNumber || d.vetPhone || "").replace(/\D/g, "").slice(-10);
+      if (p) directVetsMap[p] = { id: doc.id, ...d };
+    });
+
     const farmOwnersMap = {};
-    farmsSnapshot.forEach((doc) => {
+    farmsSnapshot.docs?.forEach((doc) => {
       const data = doc.data();
       const path = doc.ref.path;
       const parts = path.split("/");
@@ -947,7 +1011,7 @@ app.get(["/api/admin/users", "/get/api/admin/users"], async (req, res) => {
     });
 
     const cattleOwnersMap = {};
-    cattleSnapshot.forEach((doc) => {
+    cattleSnapshot.docs?.forEach((doc) => {
       const data = doc.data();
       const ownerUid = data.ownerUid || data.userId || data.farmerId || data.sellerId;
       if (ownerUid && !cattleOwnersMap[ownerUid]) {
@@ -970,33 +1034,66 @@ app.get(["/api/admin/users", "/get/api/admin/users"], async (req, res) => {
         const listUsersResult = await auth.listUsers(1000, nextPageToken);
         const batch = listUsersResult.users.map((userRecord) => {
           const fsUser = fsUsersMap[userRecord.uid] || {};
-          const farmMeta = farmOwnersMap[userRecord.uid] || {};
-          const cattleMeta = cattleOwnersMap[userRecord.uid] || {};
-          const farmerProfile = fsUser.farmer || {};
+          const cleanPhone = (userRecord.phoneNumber || fsUser.phoneNumber || fsUser.phone || "").replace(/\D/g, "").slice(-10);
+
+          const farmerRecord = directFarmersMap[userRecord.uid] || (cleanPhone ? directFarmersMap[cleanPhone] : null) || fsUser.farmer || null;
+          const sellerRecord = directSellersMap[userRecord.uid] || (cleanPhone ? directSellersMap[cleanPhone] : null) || fsUser.seller || null;
+          const vetRecord = directVetsMap[userRecord.uid] || (cleanPhone ? directVetsMap[cleanPhone] : null) || fsUser.veterinarian || fsUser.vet || null;
+          const farmMeta = farmOwnersMap[userRecord.uid] || null;
+          const cattleMeta = cattleOwnersMap[userRecord.uid] || null;
+
+          const rawRoles = fsUser.roles || (fsUser.role ? [fsUser.role] : []);
+          const roleArray = Array.isArray(rawRoles) ? rawRoles : [String(rawRoles)];
+
+          const isFarmer = Boolean(
+            farmerRecord ||
+            farmMeta ||
+            cattleMeta ||
+            (fsUser.farms && Object.keys(fsUser.farms).length > 0) ||
+            roleArray.some((r) => String(r).toLowerCase().includes("farmer"))
+          );
+
+          const isSeller = Boolean(
+            sellerRecord ||
+            fsUser.isSeller ||
+            roleArray.some((r) => String(r).toLowerCase().includes("seller"))
+          );
+
+          const isVet = Boolean(
+            vetRecord ||
+            fsUser.isVet ||
+            roleArray.some((r) => String(r).toLowerCase().includes("vet"))
+          );
+
+          const roles = [];
+          if (isFarmer) roles.push("Farmer");
+          if (isSeller) roles.push("Seller");
+          if (isVet) roles.push("Veterinarian");
+          if (roles.length === 0) roles.push("User");
 
           const resolvedName =
-            (farmMeta.name && farmMeta.name !== "User" && farmMeta.name !== "Farmer") ? farmMeta.name :
-            (cattleMeta.name && cattleMeta.name !== "User" && cattleMeta.name !== "Farmer") ? cattleMeta.name :
-            (farmerProfile.name && farmerProfile.name !== "User" && farmerProfile.name !== "Farmer") ? farmerProfile.name :
-            (farmerProfile.farmerName && farmerProfile.farmerName !== "User") ? farmerProfile.farmerName :
-            (fsUser.farmerName && fsUser.farmerName !== "User") ? fsUser.farmerName :
-            (fsUser.fullName && fsUser.fullName !== "User") ? fsUser.fullName :
-            (fsUser.name && fsUser.name !== "User") ? fsUser.name :
-            (fsUser.displayName && fsUser.displayName !== "User") ? fsUser.displayName :
-            (userRecord.displayName && userRecord.displayName !== "User") ? userRecord.displayName :
-            (farmMeta.phone ? `Farmer (${farmMeta.phone})` : (userRecord.phoneNumber ? `Farmer (${userRecord.phoneNumber})` : `Farmer #${userRecord.uid.slice(-6).toUpperCase()}`));
+            (userRecord.displayName && userRecord.displayName !== "User" && userRecord.displayName !== "Farmer") ? userRecord.displayName :
+            (fsUser.fullName && fsUser.fullName !== "User" && fsUser.fullName !== "Farmer") ? fsUser.fullName :
+            (fsUser.name && fsUser.name !== "User" && fsUser.name !== "Farmer") ? fsUser.name :
+            (fsUser.displayName && fsUser.displayName !== "User" && fsUser.displayName !== "Farmer") ? fsUser.displayName :
+            farmerRecord?.name && farmerRecord.name !== "User" ? farmerRecord.name :
+            sellerRecord?.name && sellerRecord.name !== "User" ? sellerRecord.name :
+            vetRecord?.name && vetRecord.name !== "User" ? vetRecord.name :
+            farmMeta?.name && farmMeta.name !== "User" ? farmMeta.name :
+            cattleMeta?.name && cattleMeta.name !== "User" ? cattleMeta.name :
+            userRecord.phoneNumber ? `User (${userRecord.phoneNumber})` :
+            `User #${userRecord.uid.slice(-6).toUpperCase()}`;
 
           const resolvedPhone =
             (userRecord.phoneNumber && userRecord.phoneNumber !== "—") ? userRecord.phoneNumber :
             (fsUser.phoneNumber && fsUser.phoneNumber !== "—") ? fsUser.phoneNumber :
             (fsUser.phone && fsUser.phone !== "—") ? fsUser.phone :
-            (farmMeta.phone && farmMeta.phone !== "—") ? farmMeta.phone :
-            (cattleMeta.phone && cattleMeta.phone !== "—") ? cattleMeta.phone :
-            (farmerProfile.farmerPhoneNumber && farmerProfile.farmerPhoneNumber !== "—") ? farmerProfile.farmerPhoneNumber :
+            farmerRecord?.phone || farmerRecord?.farmerPhoneNumber ||
+            sellerRecord?.phone || sellerRecord?.sellerPhone ||
+            vetRecord?.phone || vetRecord?.vetPhone ||
+            farmMeta?.phone || cattleMeta?.phone ||
             "—";
 
-          const roles = fsUser.roles || (fsUser.role ? [fsUser.role] : (farmMeta.name || farmMeta.farmName ? ["Farmer"] : ["User"]));
-          
           return {
             uid: userRecord.uid,
             email: userRecord.email || fsUser.email || null,
@@ -1004,22 +1101,23 @@ app.get(["/api/admin/users", "/get/api/admin/users"], async (req, res) => {
             displayName: resolvedName,
             name: resolvedName,
             roles: roles,
+            role: roles[0],
             createdAt: userRecord.metadata.creationTime || fsUser.createdAt || null,
             lastLoginAt: userRecord.metadata.lastSignInTime || fsUser.updatedAt || null,
-            farms: fsUser.farms || (farmMeta.farmName ? { name: farmMeta.farmName, id: farmMeta.farmId } : null),
-            farmer: {
-              ...farmerProfile,
+            farms: fsUser.farms || (farmMeta ? { name: farmMeta.farmName, id: farmMeta.farmId } : null),
+            farmer: isFarmer ? {
+              ...(farmerRecord || {}),
               name: resolvedName,
               farmerPhoneNumber: resolvedPhone,
-              village: farmMeta.village || cattleMeta.village || farmerProfile.village || fsUser.village || "—",
-              district: farmMeta.district || cattleMeta.district || farmerProfile.district || fsUser.district || "—",
-              state: farmMeta.state || cattleMeta.state || farmerProfile.state || fsUser.state || "—",
-              farmName: farmMeta.farmName || farmerProfile.farmName || null,
-            },
-            isFarmer: roles.some((r) => String(r).toLowerCase().includes("farmer")) || Boolean(farmMeta.farmName || farmMeta.name),
+              village: farmMeta?.village || cattleMeta?.village || farmerRecord?.village || fsUser.village || "—",
+              district: farmMeta?.district || cattleMeta?.district || farmerRecord?.district || fsUser.district || "—",
+              state: farmMeta?.state || cattleMeta?.state || farmerRecord?.state || fsUser.state || "—",
+              farmName: farmMeta?.farmName || farmerRecord?.farmName || null,
+            } : null,
+            isFarmer,
             status: fsUser.status || "Active",
-            seller: fsUser.seller || null,
-            veterinarian: fsUser.veterinarian || fsUser.vet || null,
+            seller: isSeller ? (sellerRecord || { name: resolvedName, phone: resolvedPhone }) : null,
+            veterinarian: isVet ? (vetRecord || { name: resolvedName, phone: resolvedPhone }) : null,
           };
         });
         
@@ -1043,29 +1141,37 @@ app.get(["/api/admin/users", "/get/api/admin/users"], async (req, res) => {
       // Fallback: Map all users from Firestore map
       result = Object.keys(fsUsersMap).map((uid) => {
         const fsUser = fsUsersMap[uid];
-        const farmMeta = farmOwnersMap[uid] || {};
-        const cattleMeta = cattleOwnersMap[uid] || {};
-        const farmerProfile = fsUser.farmer || {};
+        const cleanPhone = (fsUser.phoneNumber || fsUser.phone || "").replace(/\D/g, "").slice(-10);
+        const farmerRecord = directFarmersMap[uid] || (cleanPhone ? directFarmersMap[cleanPhone] : null) || fsUser.farmer || null;
+        const sellerRecord = directSellersMap[uid] || (cleanPhone ? directSellersMap[cleanPhone] : null) || fsUser.seller || null;
+        const vetRecord = directVetsMap[uid] || (cleanPhone ? directVetsMap[cleanPhone] : null) || fsUser.veterinarian || fsUser.vet || null;
+        const farmMeta = farmOwnersMap[uid] || null;
+        const cattleMeta = cattleOwnersMap[uid] || null;
+
+        const rawRoles = fsUser.roles || (fsUser.role ? [fsUser.role] : []);
+        const roleArray = Array.isArray(rawRoles) ? rawRoles : [String(rawRoles)];
+
+        const isFarmer = Boolean(
+          farmerRecord || farmMeta || cattleMeta || (fsUser.farms && Object.keys(fsUser.farms).length > 0) || roleArray.some((r) => String(r).toLowerCase().includes("farmer"))
+        );
+        const isSeller = Boolean(sellerRecord || fsUser.isSeller || roleArray.some((r) => String(r).toLowerCase().includes("seller")));
+        const isVet = Boolean(vetRecord || fsUser.isVet || roleArray.some((r) => String(r).toLowerCase().includes("vet")));
+
+        const roles = [];
+        if (isFarmer) roles.push("Farmer");
+        if (isSeller) roles.push("Seller");
+        if (isVet) roles.push("Veterinarian");
+        if (roles.length === 0) roles.push("User");
 
         const resolvedName =
-          (farmMeta.name && farmMeta.name !== "User" && farmMeta.name !== "Farmer") ? farmMeta.name :
-          (cattleMeta.name && cattleMeta.name !== "User" && cattleMeta.name !== "Farmer") ? cattleMeta.name :
-          (farmerProfile.name && farmerProfile.name !== "User" && farmerProfile.name !== "Farmer") ? farmerProfile.name :
-          (farmerProfile.farmerName && farmerProfile.farmerName !== "User") ? farmerProfile.farmerName :
-          (fsUser.farmerName && fsUser.farmerName !== "User") ? fsUser.farmerName :
-          (fsUser.fullName && fsUser.fullName !== "User") ? fsUser.fullName :
-          (fsUser.name && fsUser.name !== "User") ? fsUser.name :
-          (fsUser.displayName && fsUser.displayName !== "User") ? fsUser.displayName :
-          (farmMeta.phone ? `Farmer (${farmMeta.phone})` : (fsUser.phoneNumber ? `Farmer (${fsUser.phoneNumber})` : `Farmer #${uid.slice(-6).toUpperCase()}`));
+          (fsUser.fullName && fsUser.fullName !== "User" && fsUser.fullName !== "Farmer") ? fsUser.fullName :
+          (fsUser.name && fsUser.name !== "User" && fsUser.name !== "Farmer") ? fsUser.name :
+          (fsUser.displayName && fsUser.displayName !== "User" && fsUser.displayName !== "Farmer") ? fsUser.displayName :
+          farmerRecord?.name || sellerRecord?.name || vetRecord?.name || farmMeta?.name || cattleMeta?.name ||
+          (fsUser.phoneNumber ? `User (${fsUser.phoneNumber})` : `User #${uid.slice(-6).toUpperCase()}`);
 
-        const resolvedPhone =
-          (fsUser.phoneNumber && fsUser.phoneNumber !== "—") ? fsUser.phoneNumber :
-          (fsUser.phone && fsUser.phone !== "—") ? fsUser.phone :
-          (farmMeta.phone && farmMeta.phone !== "—") ? farmMeta.phone :
-          (cattleMeta.phone && cattleMeta.phone !== "—") ? cattleMeta.phone :
-          "—";
+        const resolvedPhone = fsUser.phoneNumber || fsUser.phone || farmerRecord?.phone || sellerRecord?.phone || vetRecord?.phone || farmMeta?.phone || cattleMeta?.phone || "—";
 
-        const roles = fsUser.roles || (fsUser.role ? [fsUser.role] : (farmMeta.name || farmMeta.farmName ? ["Farmer"] : ["User"]));
         return {
           uid: uid,
           email: fsUser.email || null,
@@ -1073,22 +1179,23 @@ app.get(["/api/admin/users", "/get/api/admin/users"], async (req, res) => {
           displayName: resolvedName,
           name: resolvedName,
           roles: roles,
+          role: roles[0],
           createdAt: fsUser.createdAt ? (fsUser.createdAt.seconds ? fsUser.createdAt.seconds * 1000 : fsUser.createdAt) : null,
           lastLoginAt: fsUser.updatedAt ? (fsUser.updatedAt.seconds ? fsUser.updatedAt.seconds * 1000 : fsUser.updatedAt) : null,
-          farms: fsUser.farms || (farmMeta.farmName ? { name: farmMeta.farmName, id: farmMeta.farmId } : null),
-          farmer: {
-            ...farmerProfile,
+          farms: fsUser.farms || (farmMeta ? { name: farmMeta.farmName, id: farmMeta.farmId } : null),
+          farmer: isFarmer ? {
+            ...(farmerRecord || {}),
             name: resolvedName,
             farmerPhoneNumber: resolvedPhone,
-            village: farmMeta.village || cattleMeta.village || farmerProfile.village || fsUser.village || "—",
-            district: farmMeta.district || cattleMeta.district || farmerProfile.district || fsUser.district || "—",
-            state: farmMeta.state || cattleMeta.state || farmerProfile.state || fsUser.state || "—",
-            farmName: farmMeta.farmName || farmerProfile.farmName || null,
-          },
-          isFarmer: roles.some((r) => String(r).toLowerCase().includes("farmer")) || Boolean(farmMeta.farmName || farmMeta.name),
+            village: farmMeta?.village || cattleMeta?.village || farmerRecord?.village || fsUser.village || "—",
+            district: farmMeta?.district || cattleMeta?.district || farmerRecord?.district || fsUser.district || "—",
+            state: farmMeta?.state || cattleMeta?.state || farmerRecord?.state || fsUser.state || "—",
+            farmName: farmMeta?.farmName || farmerRecord?.farmName || null,
+          } : null,
+          isFarmer,
           status: fsUser.status || "Active",
-          seller: fsUser.seller || null,
-          veterinarian: fsUser.veterinarian || fsUser.vet || null,
+          seller: isSeller ? (sellerRecord || { name: resolvedName, phone: resolvedPhone }) : null,
+          veterinarian: isVet ? (vetRecord || { name: resolvedName, phone: resolvedPhone }) : null,
         };
       });
     }
@@ -1096,10 +1203,63 @@ app.get(["/api/admin/users", "/get/api/admin/users"], async (req, res) => {
     // Sort all users by creation/registration time descending (latest first)
     result.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
 
+    setCache("admin_users", result);
     res.json({ users: result });
   } catch (error) {
     console.error("Error in /api/admin/users:", error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// REST API to list all Sellers
+app.get("/api/admin/sellers", async (req, res) => {
+  try {
+    const db = getFirestore();
+    const [sSnap, usersSnap] = await Promise.all([
+      db.collection("sellers").get().catch(() => ({ docs: [] })),
+      db.collection("users").get().catch(() => ({ docs: [] })),
+    ]);
+    const sellersMap = new Map();
+    sSnap.docs.forEach((doc) => {
+      sellersMap.set(doc.id, { id: doc.id, ...doc.data() });
+    });
+    usersSnap.docs.forEach((doc) => {
+      const u = doc.data();
+      if (u.seller || (Array.isArray(u.roles) && u.roles.some((r) => String(r).toLowerCase().includes("seller")))) {
+        if (!sellersMap.has(doc.id)) {
+          sellersMap.set(doc.id, { id: doc.id, uid: doc.id, ...(u.seller || u) });
+        }
+      }
+    });
+    res.json({ sellers: Array.from(sellersMap.values()) });
+  } catch (error) {
+    res.status(500).json({ error: error.message, sellers: [] });
+  }
+});
+
+// REST API to list all Veterinarians
+app.get("/api/admin/vets", async (req, res) => {
+  try {
+    const db = getFirestore();
+    const [vSnap, usersSnap] = await Promise.all([
+      db.collection("vets").get().catch(() => ({ docs: [] })),
+      db.collection("users").get().catch(() => ({ docs: [] })),
+    ]);
+    const vetsMap = new Map();
+    vSnap.docs.forEach((doc) => {
+      vetsMap.set(doc.id, { id: doc.id, ...doc.data() });
+    });
+    usersSnap.docs.forEach((doc) => {
+      const u = doc.data();
+      if (u.veterinarian || u.vet || (Array.isArray(u.roles) && u.roles.some((r) => String(r).toLowerCase().includes("vet")))) {
+        if (!vetsMap.has(doc.id)) {
+          vetsMap.set(doc.id, { id: doc.id, uid: doc.id, ...(u.veterinarian || u.vet || u) });
+        }
+      }
+    });
+    res.json({ vets: Array.from(vetsMap.values()) });
+  } catch (error) {
+    res.status(500).json({ error: error.message, vets: [] });
   }
 });
 
@@ -2458,6 +2618,40 @@ app.delete("/api/admin/banners/:id", async (req, res) => {
   } catch (error) {
     console.error(`Error in /api/admin/banners/${req.params.id} DELETE:`, error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// Generic admin fallback endpoint to read collections when browser Firestore permissions are restricted
+app.get("/api/admin/collection/*", async (req, res) => {
+  try {
+    const path = req.params[0];
+    if (!path) return res.status(400).json({ error: "Path is required" });
+    const db = getFirestore();
+    const snapshot = await db.collection(path).get();
+    const data = snapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+    res.json({ data, count: data.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message, data: [] });
+  }
+});
+
+// Generic admin fallback endpoint for collectionGroup
+app.get("/api/admin/collection-group/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const db = getFirestore();
+    const snapshot = await db.collectionGroup(id).get();
+    const data = snapshot.docs.map((doc) => ({
+      id: doc.id,
+      _path: doc.ref.path,
+      ...doc.data(),
+    }));
+    res.json({ data, count: data.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message, data: [] });
   }
 });
 
