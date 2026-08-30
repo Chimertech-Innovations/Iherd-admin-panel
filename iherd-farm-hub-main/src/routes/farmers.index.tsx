@@ -216,23 +216,26 @@ function FarmersPage() {
     const directFarmer = directFarmers.find((df: any) => df.id === uid || df.uid === uid);
     const meta = farmerMetaMap.get(uid) || {};
 
-    const rawRoles = fsUser?.roles || (fsUser?.role ? [fsUser.role] : authUser?.roles || []);
-    const roles: string[] = Array.isArray(rawRoles) ? rawRoles : [String(rawRoles)];
-    const hasFarmerRole = roles.some((r: any) => typeof r === "string" && r.toLowerCase().includes("farmer"));
+    const fsRoles = fsUser?.roles || (fsUser?.role ? [fsUser.role] : []);
+    const fsRolesList: string[] = Array.isArray(fsRoles) ? fsRoles : [String(fsRoles)];
+    const hasFarmerRole = fsRolesList.some((r: any) => typeof r === "string" && r.toLowerCase().includes("farmer"));
     const hasDirectFarmerDoc = Boolean(directFarmer);
-    const hasExplicitFarmerProfile = Boolean(
-      (fsUser?.farmer && typeof fsUser.farmer === "object" && (fsUser.farmer.farmName || fsUser.farmer.farmerName || fsUser.farmer.village || fsUser.farmer.name)) ||
-      (authUser?.farmer && typeof authUser.farmer === "object" && (authUser.farmer.farmName || authUser.farmer.farmerName || authUser.farmer.village))
-    );
     const hasFarm = Boolean(
       meta.farmId ||
       meta.farmName ||
-      (fsUser?.farms && typeof fsUser.farms === "object" && Object.keys(fsUser.farms).length > 0) ||
-      (authUser?.farms && typeof authUser.farms === "object" && Object.keys(authUser.farms).length > 0)
+      (fsUser?.farms && typeof fsUser.farms === "object" && (fsUser.farms.name || fsUser.farms.farmName || (Array.isArray(fsUser.farms) && fsUser.farms.length > 0)))
     );
     const hasCattle = (cattleCountMap.get(uid) || 0) > 0;
+    const hasGenuineFarmerProfile = Boolean(
+      fsUser?.farmer &&
+      typeof fsUser.farmer === "object" &&
+      (fsUser.farmer.farmName ||
+       fsUser.farmer.farmerName ||
+       (fsUser.farmer.village && fsUser.farmer.village !== "—") ||
+       (fsUser.farmer.name && fsUser.farmer.name !== "Farmer" && !fsUser.farmer.name.startsWith("Farmer (") && !fsUser.farmer.name.startsWith("Farmer #")))
+    );
 
-    const isFarmer = hasFarmerRole || hasDirectFarmerDoc || hasExplicitFarmerProfile || hasFarm || hasCattle || fsUser?.isFarmer === true || authUser?.isFarmer === true;
+    const isFarmer = hasFarmerRole || hasDirectFarmerDoc || hasFarm || hasCattle || hasGenuineFarmerProfile || fsUser?.isFarmer === true;
 
     if (isFarmer) {
       const farmerProfile = fsUser?.farmer || authUser?.farmer || directFarmer || {};
@@ -308,11 +311,18 @@ function FarmersPage() {
     const hasFarmerRole = roles.some((r: any) => typeof r === "string" && r.toLowerCase().includes("farmer"));
     const directFarmer = directFarmers.find((df: any) => df.id === uid || df.uid === uid);
     const hasDirectFarmerDoc = Boolean(directFarmer);
-    const hasExplicitFarmerProfile = Boolean(fsUser.farmer && typeof fsUser.farmer === "object" && (fsUser.farmer.farmName || fsUser.farmer.farmerName || fsUser.farmer.village || fsUser.farmer.name));
-    const hasFarm = Boolean(meta.farmId || meta.farmName || (fsUser.farms && typeof fsUser.farms === "object" && Object.keys(fsUser.farms).length > 0));
+    const hasFarm = Boolean(meta.farmId || meta.farmName || (fsUser.farms && typeof fsUser.farms === "object" && (fsUser.farms.name || fsUser.farms.farmName || (Array.isArray(fsUser.farms) && fsUser.farms.length > 0))));
     const hasCattle = (cattleCountMap.get(uid) || 0) > 0;
+    const hasGenuineFarmerProfile = Boolean(
+      fsUser.farmer &&
+      typeof fsUser.farmer === "object" &&
+      (fsUser.farmer.farmName ||
+       fsUser.farmer.farmerName ||
+       (fsUser.farmer.village && fsUser.farmer.village !== "—") ||
+       (fsUser.farmer.name && fsUser.farmer.name !== "Farmer" && !fsUser.farmer.name.startsWith("Farmer (") && !fsUser.farmer.name.startsWith("Farmer #")))
+    );
 
-    const isFarmer = hasFarmerRole || hasDirectFarmerDoc || hasExplicitFarmerProfile || hasFarm || hasCattle || fsUser.isFarmer === true;
+    const isFarmer = hasFarmerRole || hasDirectFarmerDoc || hasFarm || hasCattle || hasGenuineFarmerProfile || fsUser.isFarmer === true;
 
     if (isFarmer) {
       const farmerProfile = fsUser.farmer || directFarmer || {};

@@ -89,11 +89,7 @@ import {
   useBestSellers,
 } from "../hooks/useFirebaseData";
 import { getLocalizedText } from "@/lib/utils";
-
-const API_BASE =
-  (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ||
-  "https://iherdadminpanel.onrender.com";
-const FALLBACK_API_BASE = "https://iherdadminpanel.onrender.com";
+import { fetchApiJson } from "@/lib/apiClient";
 
 function InviteUserDialog() {
   const [open, setOpen] = useState(false);
@@ -355,6 +351,8 @@ function Dashboard() {
 
   const { data: allUsers = [] } = useAdminUsers();
   const { data: firestoreUsers = [] } = useFirebaseCollection<any>("users");
+  const { data: directFarmers = [] } = useFirebaseCollection<any>("farmers");
+  const { data: directSellers = [] } = useFirebaseCollection<any>("sellers");
   const { data: cattle = [] } = useFirebaseCollection("cattle-marketplace");
   const { data: cattleDetails = [] } = useFirebaseCollection("cattle_details");
   const { data: cattleOrders = [] } = useFirebaseCollection("CattleOrders");
@@ -370,76 +368,137 @@ function Dashboard() {
   const { data: apiProductOrders = [] } = useQuery({
     queryKey: ["dashboardProductOrders"],
     queryFn: async () => {
-      const endpoints = [API_BASE, FALLBACK_API_BASE];
-      for (const base of endpoints) {
-        try {
-          const controller = new AbortController();
-          const timer = setTimeout(() => controller.abort(), 6000);
-          const res = await fetch(`${base}/api/admin/product-orders`, { signal: controller.signal });
-          clearTimeout(timer);
-          if (res.ok) {
-            const data = await res.json();
-            return data.orders || [];
-          }
-        } catch {
-          // try next
-        }
+      try {
+        const data = await fetchApiJson<any>("/api/admin/product-orders");
+        return data.orders || [];
+      } catch {
+        return [];
       }
-      return [];
     },
-    staleTime: 20_000,
+    staleTime: 60_000,
   });
 
   // Enriched registered farms from API (which searches /users/{uid}/roles/farmer/farms subcollections)
   const { data: apiFarms = [] } = useQuery({
     queryKey: ["dashboardFarms"],
     queryFn: async () => {
-      const endpoints = [API_BASE, FALLBACK_API_BASE];
-      for (const base of endpoints) {
-        try {
-          const controller = new AbortController();
-          const timer = setTimeout(() => controller.abort(), 6000);
-          const res = await fetch(`${base}/api/admin/farms`, { signal: controller.signal });
-          clearTimeout(timer);
-          if (res.ok) {
-            const data = await res.json();
-            return data.farms || [];
-          }
-        } catch {
-          // try next
-        }
+      try {
+        const data = await fetchApiJson<any>("/api/admin/farms");
+        return data.farms || [];
+      } catch {
+        return [];
       }
-      return [];
     },
-    staleTime: 20_000,
+    staleTime: 60_000,
   });
 
   const effectiveProductOrders = apiProductOrders.length > 0 ? apiProductOrders : productOrders;
 
-  // Extract all farmers and sellers
+  // Extract only verified, genuine farmers
   const allFarmers = useMemo(() => {
-    return allUsers.filter((u: any) => {
-      const fsUser = firestoreUsers.find((fu: any) => fu.id === u.uid || fu.uid === u.uid);
-      const roles = fsUser?.roles || (fsUser?.role ? [fsUser.role] : u.roles || []);
-      return (
-        roles.some((r: any) => typeof r === "string" && r.toLowerCase().includes("farmer")) ||
-        Boolean(fsUser && (fsUser.farms || fsUser.farmer || fsUser.isFarmer)) ||
-        Boolean(u && (u.farms || u.farmer))
-      );
-    });
-  }, [allUsers, firestoreUsers]);
+    const map = new Map<string, any>();
 
-  const allSellers = useMemo(() => {
-    return allUsers.filter((u: any) => {
-      const fsUser = firestoreUsers.find((fu: any) => fu.id === u.uid || fu.uid === u.uid);
-      const roles = fsUser?.roles || (fsUser?.role ? [fsUser.role] : u.roles || []);
-      return (
-        roles.some((r: any) => typeof r === "string" && r.toLowerCase().includes("seller")) ||
-        Boolean(fsUser && (fsUser.seller || fsUser.isSeller)) ||
-        Boolean(u && u.seller)
-      );
+    // 1. Standalone /farmers collection
+    directFarmers.forEach((df: any) => {
+      const uid = df.id || df.uid;
+      if (!uid) return;
+      map.set(uid, {
+        ...df,
+        id: uid,
+        uid,
+        displayName: df.name || df.farmerName || "Farmer",
+        name: df.name || df.farmerName || "Farmer",
+        phoneNumber: df.phone || df.farmerPhoneNumber || "—",
+        createdAt: df.createdAt,
+        status: df.status || "Active",
+      });
     });
-  }, [allUsers, firestoreUsers]);
+
+    // 2. Users with verified farmer roles, registered farms, or cattle
+    allUsers.forEach((u: any) => {
+      const uid = u.uid;
+      if (!uid) return;
+      const fsUser = firestoreUsers.find((fu: any) => fu.id === uid || fu.uid === uid);
+      const rawRoles = fsUser?.roles || (fsUser?.role ? [fsUser.role] : u.roles || []);
+      const roles: string[] = Array.isArray(rawRoles) ? rawRoles : [String(rawRoles)];
+      const hasFarmerRole = roles.some((r: any) => typeof r === "string" && r.toLowerCase().includes("farmer"));
+      const hasDirectDoc = map.has(uid);
+      const hasFarm = Boolean(
+        (u.farms && typeof u.farms === "object" && Object.keys(u.farms).length > 0) ||
+        (fsUser?.farms && typeof fsUser.farms === "object" && Object.keys(fsUser.farms).length > 0) ||
+        apiFarms.some((f: any) => (f.ownerUid === uid || f.userId === uid)) ||
+        groupFarms.some((f: any) => (f.ownerUid === uid || f.userId === uid))
+      );
+      const hasCattle = cattleDetails.some((c: any) => (c.ownerUid === uid || c.userId === uid || c.farmerId === uid));
+      const hasExplicitProfile = Boolean(
+        fsUser?.farmer && typeof fsUser.farmer === "object" && (fsUser.farmer.farmName || fsUser.farmer.farmerName || fsUser.farmer.village || fsUser.farmer.name)
+      );
+
+      const isFarmer = hasFarmerRole || hasDirectDoc || hasFarm || hasCattle || hasExplicitProfile || u.isFarmer === true || fsUser?.isFarmer === true;
+
+      if (isFarmer && !map.has(uid)) {
+        map.set(uid, {
+          ...u,
+          id: uid,
+          uid,
+          displayName: fsUser?.name || fsUser?.fullName || u.displayName || u.name || "Farmer",
+          name: fsUser?.name || fsUser?.fullName || u.displayName || u.name || "Farmer",
+          phoneNumber: u.phoneNumber || fsUser?.phoneNumber || fsUser?.phone || "—",
+          createdAt: u.createdAt || fsUser?.createdAt,
+          status: fsUser?.status || u.status || "Active",
+        });
+      }
+    });
+
+    return Array.from(map.values());
+  }, [allUsers, firestoreUsers, directFarmers, apiFarms, groupFarms, cattleDetails]);
+
+  // Extract only verified sellers
+  const allSellers = useMemo(() => {
+    const map = new Map<string, any>();
+
+    directSellers.forEach((ds: any) => {
+      const uid = ds.id || ds.uid;
+      if (!uid) return;
+      map.set(uid, {
+        ...ds,
+        id: uid,
+        uid,
+        displayName: ds.name || ds.shopName || ds.sellerName || "Seller",
+        phoneNumber: ds.phone || ds.phoneNumber || ds.sellerPhone || "—",
+        createdAt: ds.createdAt,
+        status: ds.status || "Active",
+      });
+    });
+
+    allUsers.forEach((u: any) => {
+      const uid = u.uid;
+      if (!uid || map.has(uid)) return;
+      const fsUser = firestoreUsers.find((fu: any) => fu.id === uid || fu.uid === uid);
+      const rawRoles = fsUser?.roles || (fsUser?.role ? [fsUser.role] : u.roles || []);
+      const roles: string[] = Array.isArray(rawRoles) ? rawRoles : [String(rawRoles)];
+      const hasSellerRole = roles.some((r: any) => typeof r === "string" && r.toLowerCase().includes("seller"));
+      const hasSellerProfile = Boolean(
+        (u.seller && typeof u.seller === "object") ||
+        (fsUser?.seller && typeof fsUser.seller === "object") ||
+        fsUser?.isSeller === true
+      );
+
+      if (hasSellerRole || hasSellerProfile) {
+        map.set(uid, {
+          ...u,
+          id: uid,
+          uid,
+          displayName: fsUser?.seller?.name || fsUser?.seller?.shopName || fsUser?.name || u.displayName || "Seller",
+          phoneNumber: u.phoneNumber || fsUser?.phoneNumber || "—",
+          createdAt: u.createdAt || fsUser?.createdAt,
+          status: fsUser?.status || u.status || "Active",
+        });
+      }
+    });
+
+    return Array.from(map.values());
+  }, [allUsers, firestoreUsers, directSellers]);
 
   // Extract all farms across Firestore users & collectionGroup query
   const allFarms = useMemo(() => {
