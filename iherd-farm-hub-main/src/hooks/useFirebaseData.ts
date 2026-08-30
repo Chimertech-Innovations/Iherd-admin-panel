@@ -1,10 +1,42 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { collection, getDocs, doc, getDoc, setDoc, updateDoc, deleteDoc } from "firebase/firestore";
+import { collection, collectionGroup, getDocs, doc, getDoc, setDoc, updateDoc, deleteDoc } from "firebase/firestore";
 import { db } from "../lib/firebase";
 
 const API_BASE =
   (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ||
   "https://iherdadminpanel.onrender.com";
+
+export function useFirebaseCollectionGroup<T>(collectionId: string) {
+  const isMockKey = !import.meta.env.VITE_FIREBASE_API_KEY || 
+                    import.meta.env.VITE_FIREBASE_API_KEY === "mock-api-key" || 
+                    import.meta.env.VITE_FIREBASE_API_KEY.includes("YOUR_ACTUAL");
+
+  return useQuery({
+    queryKey: ["collectionGroup", collectionId],
+    queryFn: async () => {
+      if (isMockKey) {
+        return [];
+      }
+      try {
+        const colRef = collectionGroup(db, collectionId);
+        const snapshot = await getDocs(colRef);
+        if (snapshot.empty) {
+          return [];
+        }
+        const results: any[] = [];
+        snapshot.forEach((doc) => {
+          results.push({ id: doc.id, _path: doc.ref.path, ...doc.data() });
+        });
+        return results as T[];
+      } catch (error) {
+        console.warn(`Error fetching collectionGroup ${collectionId} from Firebase:`, error);
+        return [];
+      }
+    },
+    placeholderData: [],
+    staleTime: 10_000,
+  });
+}
 
 export function useFirebaseCollection<T>(collectionPath: string) {
   const isMockKey = !import.meta.env.VITE_FIREBASE_API_KEY || 

@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -26,11 +27,21 @@ import {
   Smartphone,
   Clock,
   Plus,
+  ShoppingCart,
+  UserPlus,
+  Truck,
+  ExternalLink,
+  CheckCheck,
+  Filter,
+  Trash2,
+  Radio,
+  Sparkles,
 } from "lucide-react";
 import { useFirebaseCollection } from "../hooks/useFirebaseData";
+import { useAdminNotifications, AdminNotification } from "@/hooks/useAdminNotifications";
 
 export const Route = createFileRoute("/notifications")({
-  head: () => ({ meta: [{ title: "Notifications — iHerd Admin" }] }),
+  head: () => ({ meta: [{ title: "Notifications & Live Activity — iHerd Admin" }] }),
   component: NotificationCenter,
 });
 
@@ -45,23 +56,37 @@ type PushItem = {
 };
 
 function NotificationCenter() {
+  const [activityQuery, setActivityQuery] = useState("");
+  const [activityFilter, setActivityFilter] = useState<string>("all");
   const [receivedQuery, setReceivedQuery] = useState("");
   const [pushQuery, setPushQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [localPush, setLocalPush] = useState<PushItem[]>([]);
 
+  // Push form state
+  const [pushTitle, setPushTitle] = useState("");
+  const [pushMessage, setPushMessage] = useState("");
+  const [targetAudience, setTargetAudience] = useState("all");
+
+  const {
+    notifications: liveActivity,
+    unreadCount,
+    markAsRead,
+    markAllAsRead,
+    clearAll,
+  } = useAdminNotifications();
+
   // Real data from Firestore
   const { data: notifications = [], isLoading: nLoading } = useFirebaseCollection<any>("notifications");
   const { data: pushHistory = [], isLoading: pLoading } = useFirebaseCollection<any>("push_notifications");
-  const { data: farmers = [] } = useFirebaseCollection<any>("farmers");
 
-  // Combine Firestore push history with locally sent ones (for this session)
+  // Combine Firestore push history with locally sent ones
   const allPush: PushItem[] = [
     ...localPush,
     ...pushHistory.map((p: any) => ({
       title: p.title || "—",
       message: p.message || p.body || "—",
-      farms: p.farms || p.targetFarms || "—",
+      farms: p.farms || p.targetFarms || "All Farms & Sellers",
       sent: p.sentAt?.seconds
         ? new Date(p.sentAt.seconds * 1000).toLocaleString()
         : p.sentAt || p.sent || "—",
@@ -71,11 +96,18 @@ function NotificationCenter() {
     })),
   ];
 
-  const unread = notifications.filter((n: any) =>
-    (n.status || "").toLowerCase() === "unread"
-  ).length;
-
-  const scheduled = allPush.filter((p) => p.status === "Scheduled").length;
+  const filteredActivity = useMemo(() => {
+    return liveActivity.filter((item) => {
+      const matchesSearch =
+        (item.title + item.message).toLowerCase().includes(activityQuery.toLowerCase());
+      if (!matchesSearch) return false;
+      if (activityFilter === "all") return true;
+      if (activityFilter === "orders") return item.type === "product_order" || item.type === "cattle_order";
+      if (activityFilter === "users") return item.type === "user_login";
+      if (activityFilter === "alerts") return item.type === "system_alert";
+      return true;
+    });
+  }, [liveActivity, activityQuery, activityFilter]);
 
   const filteredReceived = useMemo(
     () =>
@@ -95,70 +127,275 @@ function NotificationCenter() {
     [allPush, pushQuery],
   );
 
+  const handleSendPush = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pushTitle.trim() || !pushMessage.trim()) {
+      toast.error("Please provide both title and message");
+      return;
+    }
+
+    const newPush: PushItem = {
+      title: pushTitle.trim(),
+      message: pushMessage.trim(),
+      farms: targetAudience === "all" ? "All Registered Farmers & Sellers" : "Selected Region",
+      sent: new Date().toLocaleString(),
+      delivered: "Broadcast queued",
+      opened: "0",
+      status: "Delivered",
+    };
+
+    setLocalPush((prev) => [newPush, ...prev]);
+    toast.success("Broadcast push notification sent to users!");
+    setPushTitle("");
+    setPushMessage("");
+    setOpen(false);
+  };
+
+  const getActivityIcon = (type: AdminNotification["type"]) => {
+    switch (type) {
+      case "product_order":
+        return (
+          <div className="h-9 w-9 rounded-xl bg-emerald-500/15 text-emerald-600 flex items-center justify-center shrink-0">
+            <ShoppingCart className="h-4.5 w-4.5" />
+          </div>
+        );
+      case "cattle_order":
+        return (
+          <div className="h-9 w-9 rounded-xl bg-primary/15 text-primary flex items-center justify-center shrink-0">
+            <Truck className="h-4.5 w-4.5" />
+          </div>
+        );
+      case "user_login":
+        return (
+          <div className="h-9 w-9 rounded-xl bg-blue-500/15 text-blue-600 flex items-center justify-center shrink-0">
+            <UserPlus className="h-4.5 w-4.5" />
+          </div>
+        );
+      case "system_alert":
+      default:
+        return (
+          <div className="h-9 w-9 rounded-xl bg-amber-500/15 text-amber-600 flex items-center justify-center shrink-0">
+            <AlertTriangle className="h-4.5 w-4.5" />
+          </div>
+        );
+    }
+  };
+
   return (
-    <div>
+    <div className="space-y-6">
       <PageHeader
-        title="Notification center"
-        description="Manage incoming alerts and send push notifications to farms."
+        title="Notifications & Live Activity Center"
+        description="Monitor real-time product orders, cattle bookings, new user registrations, and broadcast push announcements."
         actions={
-          <>
-            <Button variant="outline" size="sm">Mark all read</Button>
-            <Button size="sm" className="bg-gradient-to-br from-primary to-primary-glow" onClick={() => setOpen(true)}>
-              <Send className="h-4 w-4 mr-1.5" />
-              Send push notification
+          <div className="flex items-center gap-2">
+            {unreadCount > 0 && (
+              <Button variant="outline" size="sm" onClick={markAllAsRead} className="rounded-xl text-xs gap-1.5">
+                <CheckCheck className="h-3.5 w-3.5" /> Mark All as Read ({unreadCount})
+              </Button>
+            )}
+            <Button
+              size="sm"
+              className="bg-gradient-to-br from-primary to-primary-glow rounded-xl text-xs gap-1.5 shadow-sm"
+              onClick={() => setOpen(true)}
+            >
+              <Send className="h-3.5 w-3.5" /> Send Push Broadcast
             </Button>
-          </>
+          </div>
         }
       />
 
-      <div className="grid gap-4 md:grid-cols-4 mb-6">
+      {/* KPI Stats Bar */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {[
-          { label: "Unread", value: nLoading ? "…" : String(unread), icon: Bell, tint: "bg-primary/10 text-primary" },
-          { label: "Total received", value: nLoading ? "…" : String(notifications.length), icon: AlertTriangle, tint: "bg-info/10 text-info" },
-          { label: "Push sent", value: pLoading ? "…" : String(allPush.length), icon: CheckCircle2, tint: "bg-success/10 text-success" },
-          { label: "Scheduled", value: pLoading ? "…" : String(scheduled), icon: Clock, tint: "bg-warning/10 text-warning-foreground" },
+          {
+            label: "Unread Activity",
+            value: unreadCount.toLocaleString(),
+            icon: Bell,
+            tint: "bg-primary/10 text-primary",
+            desc: "Pending notifications",
+          },
+          {
+            label: "Live Orders & Activity",
+            value: liveActivity.length.toLocaleString(),
+            icon: Sparkles,
+            tint: "bg-emerald-500/10 text-emerald-600",
+            desc: "Aggregated live events",
+          },
+          {
+            label: "Firestore System Alerts",
+            value: nLoading ? "…" : String(notifications.length),
+            icon: AlertTriangle,
+            tint: "bg-amber-500/10 text-amber-600",
+            desc: "Device & farm alerts",
+          },
+          {
+            label: "Push Broadcasts",
+            value: pLoading ? "…" : String(allPush.length),
+            icon: Radio,
+            tint: "bg-blue-500/10 text-blue-600",
+            desc: "Sent campaigns",
+          },
         ].map((k) => (
-          <Card key={k.label} className="p-5 rounded-2xl">
-            <div className="flex items-center gap-3">
-              <div className={`grid h-10 w-10 place-items-center rounded-xl ${k.tint}`}>
+          <Card key={k.label} className="p-5 rounded-2xl border shadow-sm">
+            <div className="flex items-center gap-3.5">
+              <div className={`grid h-11 w-11 place-items-center rounded-2xl ${k.tint}`}>
                 <k.icon className="h-5 w-5" />
               </div>
               <div>
-                <div className="text-xs text-muted-foreground">{k.label}</div>
-                <div className="text-xl font-semibold tracking-tight">{k.value}</div>
+                <div className="text-xs text-muted-foreground font-medium">{k.label}</div>
+                <div className="text-2xl font-bold tracking-tight text-foreground">{k.value}</div>
+                <div className="text-[11px] text-muted-foreground">{k.desc}</div>
               </div>
             </div>
           </Card>
         ))}
       </div>
 
-      <Tabs defaultValue="received">
-        <TabsList>
-          <TabsTrigger value="received">Received Notifications</TabsTrigger>
-          <TabsTrigger value="push">Push Notifications</TabsTrigger>
+      <Tabs defaultValue="activity" className="space-y-4">
+        <TabsList className="rounded-2xl p-1 bg-muted/60">
+          <TabsTrigger value="activity" className="rounded-xl text-xs font-semibold gap-1.5">
+            <Radio className="h-3.5 w-3.5 text-primary" /> Live Orders & User Activity ({liveActivity.length})
+          </TabsTrigger>
+          <TabsTrigger value="received" className="rounded-xl text-xs font-semibold gap-1.5">
+            <AlertTriangle className="h-3.5 w-3.5 text-amber-500" /> System Alerts ({notifications.length})
+          </TabsTrigger>
+          <TabsTrigger value="push" className="rounded-xl text-xs font-semibold gap-1.5">
+            <Send className="h-3.5 w-3.5 text-blue-500" /> Push Broadcast History ({allPush.length})
+          </TabsTrigger>
         </TabsList>
 
-        {/* RECEIVED */}
-        <TabsContent value="received" className="mt-5">
-          <Card className="p-0 rounded-2xl overflow-hidden">
-            <div className="flex items-center justify-between gap-3 p-5 border-b">
+        {/* TAB 1: LIVE ORDERS & USER ACTIVITY */}
+        <TabsContent value="activity">
+          <Card className="p-0 rounded-3xl overflow-hidden border shadow-sm">
+            <div className="p-5 border-b flex flex-wrap items-center justify-between gap-4 bg-muted/20">
               <div>
-                <h3 className="font-semibold">All received notifications</h3>
+                <h3 className="font-bold text-base text-foreground flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-primary" /> Live Activity & Event Stream
+                </h3>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Real-time notifications for incoming orders, customer signups, bookings, and alerts.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center rounded-xl bg-muted/60 p-0.5 border">
+                  {(["all", "orders", "users", "alerts"] as const).map((f) => (
+                    <button
+                      key={f}
+                      onClick={() => setActivityFilter(f)}
+                      className={`px-3 py-1 text-xs font-semibold rounded-lg capitalize transition-all ${
+                        activityFilter === f
+                          ? "bg-background text-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {f}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="relative w-full sm:w-64">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                  <Input
+                    value={activityQuery}
+                    onChange={(e) => setActivityQuery(e.target.value)}
+                    placeholder="Search events, orders, names..."
+                    className="pl-8 h-9 text-xs rounded-xl"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="divide-y divide-border/40">
+              {filteredActivity.length === 0 ? (
+                <div className="p-12 text-center space-y-2">
+                  <div className="h-12 w-12 rounded-2xl bg-muted/60 text-muted-foreground flex items-center justify-center mx-auto">
+                    <Bell className="h-6 w-6" />
+                  </div>
+                  <p className="text-sm font-semibold text-foreground">No activity notifications found</p>
+                  <p className="text-xs text-muted-foreground">New orders, customer registrations, and events will stream here live.</p>
+                </div>
+              ) : (
+                filteredActivity.map((item) => (
+                  <div
+                    key={item.id}
+                    className={`p-4 flex flex-wrap sm:flex-nowrap items-center justify-between gap-4 hover:bg-muted/30 transition-colors ${
+                      !item.read ? "bg-primary/5" : ""
+                    }`}
+                  >
+                    <div className="flex items-start gap-3.5 min-w-0">
+                      {getActivityIcon(item.type)}
+                      <div className="space-y-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className={`text-xs ${!item.read ? "font-bold text-foreground" : "font-semibold text-foreground/90"}`}>
+                            {item.title}
+                          </span>
+                          {!item.read && (
+                            <Badge variant="secondary" className="h-4 px-1.5 text-[9px] font-bold bg-primary text-primary-foreground">
+                              NEW
+                            </Badge>
+                          )}
+                          <span className="text-[11px] text-muted-foreground flex items-center gap-1">
+                            <Clock className="h-3 w-3" />
+                            {item.timestamp}
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground leading-relaxed">
+                          {item.message}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end">
+                      {item.link && (
+                        <Link
+                          to={item.link as any}
+                          onClick={() => markAsRead(item.id)}
+                          className="inline-flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-xl bg-primary/10 text-primary hover:bg-primary/20 transition-all"
+                        >
+                          View Details <ExternalLink className="h-3 w-3" />
+                        </Link>
+                      )}
+                      {!item.read && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => markAsRead(item.id)}
+                          className="h-8 text-xs text-muted-foreground hover:text-foreground rounded-xl"
+                          title="Mark read"
+                        >
+                          <CheckCheck className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </Card>
+        </TabsContent>
+
+        {/* TAB 2: SYSTEM ALERTS */}
+        <TabsContent value="received">
+          <Card className="p-0 rounded-3xl overflow-hidden border shadow-sm">
+            <div className="flex items-center justify-between gap-3 p-5 border-b bg-muted/20">
+              <div>
+                <h3 className="font-bold text-base text-foreground">Firestore System & Device Alerts</h3>
                 <p className="text-xs text-muted-foreground mt-0.5">Alerts from Firestore 'notifications' collection.</p>
               </div>
               <div className="relative w-full max-w-xs">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                 <Input
                   value={receivedQuery}
                   onChange={(e) => setReceivedQuery(e.target.value)}
-                  placeholder="Search notifications"
-                  className="pl-9"
+                  placeholder="Search alerts"
+                  className="pl-8 h-9 text-xs rounded-xl"
                 />
               </div>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
+              <table className="w-full text-xs">
+                <thead className="bg-muted/40 text-muted-foreground uppercase tracking-wider">
                   <tr>
                     <th className="px-5 py-3 text-left font-medium">Title</th>
                     <th className="px-5 py-3 text-left font-medium">Message</th>
@@ -167,120 +404,113 @@ function NotificationCenter() {
                     <th className="px-5 py-3 text-left font-medium">Status</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y">
+                <tbody className="divide-y divide-border/40">
                   {nLoading ? (
-                    <tr><td colSpan={5} className="px-5 py-10 text-center text-sm text-muted-foreground">Loading…</td></tr>
+                    <tr>
+                      <td colSpan={5} className="px-5 py-8 text-center text-muted-foreground">
+                        Loading alerts…
+                      </td>
+                    </tr>
                   ) : filteredReceived.length === 0 ? (
-                    <tr><td colSpan={5} className="px-5 py-10 text-center text-sm text-muted-foreground">
-                      {notifications.length === 0 ? "No notifications in Firestore 'notifications' collection yet." : "No notifications match your search."}
-                    </td></tr>
-                  ) : filteredReceived.map((n: any, i: number) => {
-                    const status = n.status || "Read";
-                    const d = n.createdAt?.seconds
-                      ? new Date(n.createdAt.seconds * 1000).toLocaleString()
-                      : n.createdAt ? new Date(n.createdAt).toLocaleString() : n.datetime || "—";
-                    return (
-                      <tr key={n.id || i} className="hover:bg-muted/20">
-                        <td className="px-5 py-3">
-                          <div className="flex items-center gap-3">
-                            <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
-                              <Bell className="h-4 w-4" />
-                            </div>
-                            <span className="font-medium">{n.title || n.subject || "—"}</span>
-                          </div>
-                        </td>
-                        <td className="px-5 py-3 text-muted-foreground max-w-md">{n.message || n.body || "—"}</td>
-                        <td className="px-5 py-3 text-muted-foreground">{n.sender || n.from || "System"}</td>
-                        <td className="px-5 py-3 text-muted-foreground whitespace-nowrap">{d}</td>
-                        <td className="px-5 py-3">
-                          <span className={`inline-flex rounded-md px-2 py-0.5 text-xs font-medium ${
-                            status === "Unread" || status === "unread"
-                              ? "bg-primary/15 text-primary"
-                              : "bg-muted text-muted-foreground"
-                          }`}>
-                            {status}
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                    <tr>
+                      <td colSpan={5} className="px-5 py-8 text-center text-muted-foreground">
+                        No platform alerts in Firestore 'notifications' collection yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredReceived.map((n: any, i: number) => {
+                      const status = n.status || "Read";
+                      const d = n.createdAt?.seconds
+                        ? new Date(n.createdAt.seconds * 1000).toLocaleString()
+                        : n.createdAt
+                        ? new Date(n.createdAt).toLocaleString()
+                        : n.datetime || "—";
+                      return (
+                        <tr key={n.id || i} className="hover:bg-muted/20">
+                          <td className="px-5 py-3 font-semibold text-foreground">
+                            {n.title || n.subject || "System Notification"}
+                          </td>
+                          <td className="px-5 py-3 text-muted-foreground max-w-md">{n.message || n.body || "—"}</td>
+                          <td className="px-5 py-3 text-muted-foreground">{n.sender || n.from || "System"}</td>
+                          <td className="px-5 py-3 text-muted-foreground whitespace-nowrap">{d}</td>
+                          <td className="px-5 py-3">
+                            <Badge variant="outline" className="text-[10px]">
+                              {status}
+                            </Badge>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
                 </tbody>
               </table>
             </div>
           </Card>
         </TabsContent>
 
-        {/* PUSH */}
-        <TabsContent value="push" className="mt-5">
-          <Card className="p-0 rounded-2xl overflow-hidden">
-            <div className="flex items-center justify-between gap-3 p-5 border-b">
+        {/* TAB 3: PUSH BROADCAST HISTORY */}
+        <TabsContent value="push">
+          <Card className="p-0 rounded-3xl overflow-hidden border shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3 p-5 border-b bg-muted/20">
               <div>
-                <h3 className="font-semibold">Push notification history</h3>
-                <p className="text-xs text-muted-foreground mt-0.5">From Firestore 'push_notifications' collection.</p>
+                <h3 className="font-bold text-base text-foreground">Push Notification Broadcasts</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">Campaigns sent to registered farm accounts.</p>
               </div>
               <div className="flex items-center gap-2">
                 <div className="relative w-full max-w-xs">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                   <Input
                     value={pushQuery}
                     onChange={(e) => setPushQuery(e.target.value)}
                     placeholder="Search push history"
-                    className="pl-9"
+                    className="pl-8 h-9 text-xs rounded-xl"
                   />
                 </div>
-                <Button size="sm" className="bg-gradient-to-br from-primary to-primary-glow" onClick={() => setOpen(true)}>
-                  <Plus className="h-4 w-4 mr-1.5" />
-                  Send push notification
+                <Button size="sm" className="rounded-xl text-xs bg-primary text-primary-foreground gap-1" onClick={() => setOpen(true)}>
+                  <Plus className="h-3.5 w-3.5" /> New Broadcast
                 </Button>
               </div>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
+              <table className="w-full text-xs">
+                <thead className="bg-muted/40 text-muted-foreground uppercase tracking-wider">
                   <tr>
                     <th className="px-5 py-3 text-left font-medium">Notification</th>
-                    <th className="px-5 py-3 text-left font-medium">Target farms</th>
-                    <th className="px-5 py-3 text-left font-medium">Sent</th>
-                    <th className="px-5 py-3 text-left font-medium">Delivered</th>
-                    <th className="px-5 py-3 text-left font-medium">Opened</th>
+                    <th className="px-5 py-3 text-left font-medium">Target Audience</th>
+                    <th className="px-5 py-3 text-left font-medium">Sent Date</th>
                     <th className="px-5 py-3 text-left font-medium">Status</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y">
+                <tbody className="divide-y divide-border/40">
                   {pLoading ? (
-                    <tr><td colSpan={6} className="px-5 py-10 text-center text-sm text-muted-foreground">Loading…</td></tr>
-                  ) : filteredPush.length === 0 ? (
-                    <tr><td colSpan={6} className="px-5 py-10 text-center text-sm text-muted-foreground">
-                      {allPush.length === 0 ? "No push notifications sent yet." : "No push notifications match your search."}
-                    </td></tr>
-                  ) : filteredPush.map((p, i) => (
-                    <tr key={i} className="hover:bg-muted/20 align-top">
-                      <td className="px-5 py-3">
-                        <div className="flex items-start gap-3">
-                          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
-                            <Smartphone className="h-4 w-4" />
-                          </div>
-                          <div className="min-w-0">
-                            <div className="font-medium">{p.title}</div>
-                            <div className="text-xs text-muted-foreground mt-0.5 max-w-sm">{p.message}</div>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-5 py-3 text-muted-foreground whitespace-nowrap">{p.farms}</td>
-                      <td className="px-5 py-3 text-muted-foreground whitespace-nowrap">{p.sent}</td>
-                      <td className="px-5 py-3">{p.delivered}</td>
-                      <td className="px-5 py-3">{p.opened}</td>
-                      <td className="px-5 py-3">
-                        <span className={`inline-flex rounded-md px-2 py-0.5 text-xs font-medium ${
-                          p.status === "Delivered"
-                            ? "bg-success/15 text-success"
-                            : "bg-warning/15 text-warning-foreground"
-                        }`}>
-                          {p.status}
-                        </span>
+                    <tr>
+                      <td colSpan={4} className="px-5 py-8 text-center text-muted-foreground">
+                        Loading push history…
                       </td>
                     </tr>
-                  ))}
+                  ) : filteredPush.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="px-5 py-8 text-center text-muted-foreground">
+                        No push broadcasts sent yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredPush.map((p, i) => (
+                      <tr key={i} className="hover:bg-muted/20">
+                        <td className="px-5 py-3">
+                          <div className="font-semibold text-foreground">{p.title}</div>
+                          <div className="text-muted-foreground text-[11px] max-w-md line-clamp-1">{p.message}</div>
+                        </td>
+                        <td className="px-5 py-3 text-muted-foreground">{p.farms}</td>
+                        <td className="px-5 py-3 text-muted-foreground whitespace-nowrap">{p.sent}</td>
+                        <td className="px-5 py-3">
+                          <Badge className="bg-emerald-500/10 text-emerald-600 text-[10px] font-semibold">
+                            {p.status}
+                          </Badge>
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
@@ -288,182 +518,60 @@ function NotificationCenter() {
         </TabsContent>
       </Tabs>
 
-      <SendPushDialog
-        open={open}
-        onOpenChange={setOpen}
-        farmers={farmers}
-        onSend={(item) => {
-          setLocalPush((prev) => [item, ...prev]);
-          toast.success("Push notification sent", { description: `Delivered to ${item.farms}` });
-        }}
-      />
-    </div>
-  );
-}
-
-function SendPushDialog({
-  open,
-  onOpenChange,
-  farmers,
-  onSend,
-}: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-  farmers: any[];
-  onSend: (p: PushItem) => void;
-}) {
-  const [title, setTitle] = useState("");
-  const [message, setMessage] = useState("");
-  const [selected, setSelected] = useState<string[]>([]);
-  const [query, setQuery] = useState("");
-
-  const farmsList = farmers.map((f: any) => ({
-    id: f.id,
-    name: f.name || f.farmName || f.displayName || f.id,
-    location: f.location || f.state || f.address || "—",
-    herd: f.herdSize || f.totalAnimals || f.cattleCount || 0,
-  }));
-
-  const filtered = useMemo(
-    () =>
-      farmsList.filter((f) =>
-        (f.name + f.location + f.id).toLowerCase().includes(query.toLowerCase()),
-      ),
-    [farmsList, query],
-  );
-
-  const allVisibleSelected = filtered.length > 0 && filtered.every((f) => selected.includes(f.id));
-
-  function toggle(id: string) {
-    setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
-  }
-
-  function toggleAllVisible() {
-    if (allVisibleSelected) {
-      setSelected((s) => s.filter((id) => !filtered.some((f) => f.id === id)));
-    } else {
-      setSelected((s) => Array.from(new Set([...s, ...filtered.map((f) => f.id)])));
-    }
-  }
-
-  function reset() {
-    setTitle("");
-    setMessage("");
-    setSelected([]);
-    setQuery("");
-  }
-
-  function handleSend() {
-    if (!title.trim() || !message.trim() || selected.length === 0) {
-      toast.error("Please add a title, message and select at least one farm.");
-      return;
-    }
-    const farmsLabel =
-      selected.length === farmsList.length
-        ? `All farms · ${farmsList.length}`
-        : `${selected.length} farm${selected.length > 1 ? "s" : ""}`;
-    onSend({
-      title: title.trim(),
-      message: message.trim(),
-      farms: farmsLabel,
-      sent: "Just now",
-      delivered: String(selected.length),
-      opened: "0",
-      status: "Delivered",
-    });
-    reset();
-    onOpenChange(false);
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) reset(); onOpenChange(v); }}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>Send push notification</DialogTitle>
-          <DialogDescription>Compose a message and pick the farms it should reach.</DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-4">
-          <div className="grid gap-2">
-            <Label htmlFor="push-title">Title</Label>
-            <Input
-              id="push-title"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              maxLength={80}
-              placeholder="e.g. Monsoon vaccination drive starts today"
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="push-message">Message</Label>
-            <Textarea
-              id="push-message"
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              maxLength={200}
-              rows={3}
-              placeholder="Short message shown in the notification banner"
-            />
-            <div className="text-[11px] text-muted-foreground text-right">{message.length}/200</div>
-          </div>
-
-          <div className="grid gap-2">
-            <div className="flex items-center justify-between">
-              <Label>Target farms</Label>
-              <span className="text-xs text-muted-foreground">
-                {selected.length} of {farmsList.length} selected
-              </span>
-            </div>
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+      {/* Broadcast Modal */}
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-md rounded-3xl p-6">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold flex items-center gap-2">
+              <Send className="h-4 w-4 text-primary" /> Send Broadcast Push Notification
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Send an instant push message alert to farmer and seller mobile devices.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleSendPush} className="space-y-3.5 mt-2">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Notification Title</Label>
               <Input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search farms by name, location or ID"
-                className="pl-9"
+                value={pushTitle}
+                onChange={(e) => setPushTitle(e.target.value)}
+                placeholder="e.g. Vaccination Drive Announcement"
+                className="rounded-xl h-10 text-xs"
               />
             </div>
-            <div className="rounded-xl border max-h-64 overflow-y-auto">
-              <div className="flex items-center gap-3 px-4 py-2.5 border-b bg-muted/30 text-xs">
-                <Checkbox checked={allVisibleSelected} onCheckedChange={toggleAllVisible} id="select-all" />
-                <label htmlFor="select-all" className="font-medium cursor-pointer">Select all visible</label>
-              </div>
-              <ul className="divide-y">
-                {filtered.length === 0 ? (
-                  <li className="px-4 py-6 text-center text-sm text-muted-foreground">
-                    {farmsList.length === 0 ? "No farmers found in Firestore." : "No farms match your search."}
-                  </li>
-                ) : filtered.map((f) => {
-                  const checked = selected.includes(f.id);
-                  return (
-                    <li
-                      key={f.id}
-                      className="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/20 cursor-pointer"
-                      onClick={() => toggle(f.id)}
-                    >
-                      <Checkbox checked={checked} onCheckedChange={() => toggle(f.id)} />
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm font-medium truncate">{f.name}</div>
-                        <div className="text-xs text-muted-foreground truncate">
-                          {f.id} · {f.location} · {f.herd} animals
-                        </div>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Notification Message</Label>
+              <Textarea
+                value={pushMessage}
+                onChange={(e) => setPushMessage(e.target.value)}
+                placeholder="Type the message body to deliver to app users..."
+                rows={3}
+                className="rounded-xl text-xs resize-none"
+              />
             </div>
-          </div>
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button className="bg-gradient-to-br from-primary to-primary-glow" onClick={handleSend}>
-            <Send className="h-4 w-4 mr-1.5" />
-            Send notification
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Target Group</Label>
+              <select
+                value={targetAudience}
+                onChange={(e) => setTargetAudience(e.target.value)}
+                className="w-full h-10 rounded-xl border bg-background px-3 text-xs"
+              >
+                <option value="all">All Farmers & Sellers</option>
+                <option value="farmers">Farmers Only</option>
+                <option value="sellers">Marketplace Sellers</option>
+              </select>
+            </div>
+            <DialogFooter className="gap-2 pt-2">
+              <Button type="button" variant="outline" onClick={() => setOpen(false)} className="rounded-xl text-xs">
+                Cancel
+              </Button>
+              <Button type="submit" className="rounded-xl text-xs bg-primary text-primary-foreground">
+                <Send className="h-3.5 w-3.5 mr-1" /> Send Broadcast
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }

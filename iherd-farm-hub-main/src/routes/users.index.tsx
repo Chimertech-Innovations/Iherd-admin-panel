@@ -51,13 +51,10 @@ function UsersPage() {
     };
   });
 
-  // Sort by latest last login time (lastLoginAt)
+  // Sort by registration/created time descending (latest registered/filled first)
   const sortedUsers = [...mergedUsers].sort((a, b) => {
-    const timeA = a.lastLoginAt ? new Date(a.lastLoginAt).getTime() : 0;
-    const timeB = b.lastLoginAt ? new Date(b.lastLoginAt).getTime() : 0;
-    if (timeA === 0 && timeB === 0) {
-      return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
-    }
+    const timeA = a.createdAt ? new Date(a.createdAt).getTime() : (a.lastLoginAt ? new Date(a.lastLoginAt).getTime() : 0);
+    const timeB = b.createdAt ? new Date(b.createdAt).getTime() : (b.lastLoginAt ? new Date(b.lastLoginAt).getTime() : 0);
     return timeB - timeA;
   });
 

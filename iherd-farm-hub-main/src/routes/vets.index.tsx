@@ -10,6 +10,26 @@ export const Route = createFileRoute("/vets/")({
   component: VetsPage,
 });
 
+function parseTime(val: any): number {
+  if (!val) return 0;
+  if (typeof val === "number") return val;
+  if (val instanceof Date) return val.getTime();
+  if (typeof val === "object" && (val._seconds || val.seconds)) {
+    return (val._seconds || val.seconds) * 1000;
+  }
+  const d = new Date(val).getTime();
+  return isNaN(d) ? 0 : d;
+}
+
+function formatDate(ms: number): string {
+  if (!ms || isNaN(ms)) return "—";
+  return new Date(ms).toLocaleDateString("en-US", {
+    month: "numeric",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 function VetsPage() {
   const { data: authUsers = [], isLoading: authLoading } = useAdminUsers();
   const { data: firestoreUsers = [], isLoading: fsLoading } = useFirebaseCollection<any>("users");
@@ -33,14 +53,13 @@ function VetsPage() {
     if (isVet) {
       const vetDetails = fsUser?.veterinarian || fsUser?.vet || authUser?.veterinarian || authUser?.vet || directVet || {};
       const uid = authUser.uid;
-      const rawJoined = fsUser?.createdAt || authUser?.createdAt || directVet?.createdAt;
-      let joined = "—";
-      if (rawJoined) {
-        const ms = rawJoined.seconds ? rawJoined.seconds * 1000 : new Date(rawJoined).getTime();
-        if (!isNaN(ms)) {
-          joined = new Date(ms).toLocaleDateString();
-        }
-      }
+      const rawTimestamp = parseTime(
+        fsUser?.createdAt ||
+        vetDetails?.createdAt ||
+        authUser?.createdAt ||
+        directVet?.createdAt ||
+        authUser?.metadata?.creationTime
+      );
 
       const name = vetDetails.name || fsUser?.name || fsUser?.displayName || authUser?.displayName || "Unknown Vet";
 
@@ -50,7 +69,8 @@ function VetsPage() {
         clinic: getLocalizedText(vetDetails.clinic || vetDetails.hospital || "—"),
         qualification: getLocalizedText(vetDetails.qualification || "—"),
         experience: vetDetails.experience ? `${vetDetails.experience} Years` : "—",
-        joined,
+        joined: formatDate(rawTimestamp),
+        rawTimestamp,
         status: fsUser?.status || authUser?.status || vetDetails.status || "Active",
         verified: vetDetails.verified || false,
       });
@@ -70,14 +90,11 @@ function VetsPage() {
     if (isVet) {
       const directVet = directVets.find((dv: any) => dv.id === uid || dv.uid === uid);
       const vetDetails = fsUser.veterinarian || fsUser.vet || directVet || {};
-      const rawJoined = fsUser.createdAt || directVet?.createdAt;
-      let joined = "—";
-      if (rawJoined) {
-        const ms = rawJoined.seconds ? rawJoined.seconds * 1000 : new Date(rawJoined).getTime();
-        if (!isNaN(ms)) {
-          joined = new Date(ms).toLocaleDateString();
-        }
-      }
+      const rawTimestamp = parseTime(
+        fsUser.createdAt ||
+        vetDetails?.createdAt ||
+        directVet?.createdAt
+      );
 
       const name = vetDetails.name || fsUser.name || fsUser.displayName || "Unknown Vet";
 
@@ -87,7 +104,8 @@ function VetsPage() {
         clinic: getLocalizedText(vetDetails.clinic || vetDetails.hospital || "—"),
         qualification: getLocalizedText(vetDetails.qualification || "—"),
         experience: vetDetails.experience ? `${vetDetails.experience} Years` : "—",
-        joined,
+        joined: formatDate(rawTimestamp),
+        rawTimestamp,
         status: fsUser.status || vetDetails.status || "Active",
         verified: vetDetails.verified || false,
       });
@@ -99,14 +117,7 @@ function VetsPage() {
     const id = dv.id || dv.uid;
     if (!id || vetMap.has(id)) return;
 
-    const rawJoined = dv.createdAt;
-    let joined = "—";
-    if (rawJoined) {
-      const ms = rawJoined.seconds ? rawJoined.seconds * 1000 : new Date(rawJoined).getTime();
-      if (!isNaN(ms)) {
-        joined = new Date(ms).toLocaleDateString();
-      }
-    }
+    const rawTimestamp = parseTime(dv.createdAt);
 
     vetMap.set(id, {
       id: id,
@@ -114,13 +125,18 @@ function VetsPage() {
       clinic: getLocalizedText(dv.clinic || dv.hospital || "—"),
       qualification: getLocalizedText(dv.qualification || "—"),
       experience: dv.experience ? `${dv.experience} Years` : "—",
-      joined,
+      joined: formatDate(rawTimestamp),
+      rawTimestamp,
       status: dv.status || "Active",
       verified: dv.verified || false,
     });
   });
 
-  const vets = Array.from(vetMap.values());
+  // Sort strictly by registration / filled timestamp descending (latest first)
+  const vets = Array.from(vetMap.values()).sort(
+    (a, b) => (b.rawTimestamp || 0) - (a.rawTimestamp || 0)
+  );
+
   const totalVets = vets.length;
   const activeVets = vets.filter((v) => v.status === "Active" || !v.status).length;
   const pendingVets = vets.filter((v) => v.status === "Pending" || v.status === "In Review").length;

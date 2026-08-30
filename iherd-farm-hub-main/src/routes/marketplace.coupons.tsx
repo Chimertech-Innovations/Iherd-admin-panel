@@ -80,6 +80,7 @@ function CouponsPage() {
   const [maxDiscount, setMaxDiscount] = useState("1000");
   const [expiryDate, setExpiryDate] = useState("");
   const [active, setActive] = useState(true);
+  const [trackUserIds, setTrackUserIds] = useState(false);
 
   // Product Applicability State
   const [applicabilityMode, setApplicabilityMode] = useState<"ALL" | "INCLUDED" | "EXCLUDED">("ALL");
@@ -105,6 +106,7 @@ function CouponsPage() {
     d.setDate(d.getDate() + 30);
     setExpiryDate(d.toISOString().slice(0, 10));
     setActive(true);
+    setTrackUserIds(false);
     setApplicabilityMode("ALL");
     setIncludedProductIds([]);
     setExcludedProductIds([]);
@@ -122,6 +124,7 @@ function CouponsPage() {
     const exp = c.expiresAtFormatted ? c.expiresAtFormatted.slice(0, 10) : "";
     setExpiryDate(exp);
     setActive(c.active !== false);
+    setTrackUserIds(Array.isArray(c.usedUserIds));
 
     if (Array.isArray(c.productIds) && c.productIds.length > 0) {
       setApplicabilityMode("INCLUDED");
@@ -148,7 +151,7 @@ function CouponsPage() {
     }
 
     try {
-      await saveCoupon.mutateAsync({
+      const couponPayload: any = {
         code: code.trim().toUpperCase(),
         type: discountType,
         value: Number(value) || 0,
@@ -159,7 +162,16 @@ function CouponsPage() {
         productIds: applicabilityMode === "INCLUDED" ? includedProductIds : [],
         excludedProductIds: applicabilityMode === "EXCLUDED" ? excludedProductIds : [],
         allowedFlow: "PRODUCT",
-      });
+      };
+
+      if (trackUserIds) {
+        couponPayload.usedUserIds = editingCoupon?.usedUserIds && Array.isArray(editingCoupon.usedUserIds)
+          ? editingCoupon.usedUserIds
+          : [];
+        couponPayload.includeUsedUserIds = true;
+      }
+
+      await saveCoupon.mutateAsync(couponPayload);
 
       toast.success(editingCoupon ? "Coupon updated successfully" : "Coupon created successfully");
       setDialogOpen(false);
@@ -351,7 +363,7 @@ function CouponsPage() {
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All statuses</SelectItem>
+                <SelectItem value="all">All status</SelectItem>
                 <SelectItem value="active">Active</SelectItem>
                 <SelectItem value="inactive">Inactive</SelectItem>
               </SelectContent>
@@ -773,17 +785,32 @@ function CouponsPage() {
               )}
             </div>
 
-            <div className="flex items-center gap-2 pt-2">
-              <input
-                type="checkbox"
-                id="coupon-active"
-                checked={active}
-                onChange={(e) => setActive(e.target.checked)}
-                className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary cursor-pointer"
-              />
-              <Label htmlFor="coupon-active" className="cursor-pointer font-normal">
-                Coupon is active and available for customer redemption
-              </Label>
+            <div className="space-y-2 pt-2 border-t">
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="coupon-track-users"
+                  checked={trackUserIds}
+                  onChange={(e) => setTrackUserIds(e.target.checked)}
+                  className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary cursor-pointer"
+                />
+                <Label htmlFor="coupon-track-users" className="cursor-pointer font-normal text-xs text-muted-foreground hover:text-foreground">
+                  One time use per User
+                </Label>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="coupon-active"
+                  checked={active}
+                  onChange={(e) => setActive(e.target.checked)}
+                  className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary cursor-pointer"
+                />
+                <Label htmlFor="coupon-active" className="cursor-pointer font-normal text-xs">
+                  Coupon is active and available for customer redemption
+                </Label>
+              </div>
             </div>
 
             <DialogFooter className="pt-3">

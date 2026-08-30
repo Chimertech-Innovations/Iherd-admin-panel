@@ -22,8 +22,9 @@ const styles: Record<string, string> = {
   draft: "bg-muted text-muted-foreground border-border",
 };
 
-export function StatusBadge({ status }: { status: string }) {
-  const key = status.toLowerCase().replace(/\s+/g, "");
+export function StatusBadge({ status }: { status?: any }) {
+  const label = typeof status === "string" ? status : status ? String(status) : "Active";
+  const key = label.toLowerCase().replace(/[\s_-]+/g, "");
   return (
     <span
       className={cn(
@@ -32,7 +33,7 @@ export function StatusBadge({ status }: { status: string }) {
       )}
     >
       <span className="mr-1.5 h-1.5 w-1.5 rounded-full bg-current opacity-70" />
-      {status}
+      {label}
     </span>
   );
 }

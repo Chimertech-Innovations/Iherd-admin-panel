@@ -31,6 +31,14 @@ export type Column<T> = {
   className?: string;
 };
 
+export type KPI = {
+  label: string;
+  value: string | number;
+  hint?: string;
+  change?: string;
+  up?: boolean;
+};
+
 export function DataPage<T extends Record<string, any>>({
   title,
   description,
@@ -38,7 +46,11 @@ export function DataPage<T extends Record<string, any>>({
   columns,
   statusKey = "status",
   filters = [],
+  statusOptions,
   kpis,
+  stats,
+  searchPlaceholder = "Search...",
+  searchKeys,
   primaryAction = "Add new",
   rowHref,
   isLoading = false,
@@ -49,7 +61,11 @@ export function DataPage<T extends Record<string, any>>({
   columns: Column<T>[];
   statusKey?: string;
   filters?: string[];
-  kpis?: { label: string; value: string; hint?: string }[];
+  statusOptions?: string[];
+  kpis?: KPI[];
+  stats?: KPI[];
+  searchPlaceholder?: string;
+  searchKeys?: string[];
   primaryAction?: string;
   rowHref?: (row: T) => string | undefined;
   isLoading?: boolean;
@@ -58,18 +74,23 @@ export function DataPage<T extends Record<string, any>>({
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState("all");
 
+  const effectiveKpis = kpis || stats;
+  const effectiveFilters = (statusOptions && statusOptions.length > 0) ? statusOptions : filters;
+
   const filtered = useMemo(() => {
     return data.filter((row) => {
       const matchQ = q
-        ? Object.values(row).some((v) =>
-            getLocalizedText(v).toLowerCase().includes(q.toLowerCase())
-          )
+        ? (searchKeys && searchKeys.length > 0
+            ? searchKeys.some((k) => getLocalizedText(row[k]).toLowerCase().includes(q.toLowerCase()))
+            : Object.values(row).some((v) =>
+                getLocalizedText(v).toLowerCase().includes(q.toLowerCase())
+              ))
         : true;
       const rowStatus = getLocalizedText(row[statusKey]).toLowerCase();
       const matchF = filter === "all" ? true : rowStatus === filter.toLowerCase();
       return matchQ && matchF;
     });
-  }, [data, q, filter, statusKey]);
+  }, [data, q, filter, statusKey, searchKeys]);
 
   return (
     <div>
@@ -88,9 +109,9 @@ export function DataPage<T extends Record<string, any>>({
         }
       />
 
-      {kpis && kpis.length > 0 && (
+      {effectiveKpis && effectiveKpis.length > 0 && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-          {kpis.map((k) => (
+          {effectiveKpis.map((k) => (
             <Card key={k.label} className="p-4 rounded-2xl relative overflow-hidden">
               <div className="text-xs uppercase tracking-wide text-muted-foreground">
                 {k.label}
@@ -100,7 +121,11 @@ export function DataPage<T extends Record<string, any>>({
               ) : (
                 <div className="mt-1 text-2xl font-bold text-foreground">{k.value}</div>
               )}
-              {k.hint && <div className="text-xs text-muted-foreground mt-1">{k.hint}</div>}
+              {(k.hint || k.change) && (
+                <div className={`text-xs mt-1 ${k.change ? (k.up ? 'text-emerald-500 font-medium' : 'text-muted-foreground') : 'text-muted-foreground'}`}>
+                  {k.change || k.hint}
+                </div>
+              )}
             </Card>
           ))}
         </div>
@@ -120,21 +145,21 @@ export function DataPage<T extends Record<string, any>>({
             <Input
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Search..."
+              placeholder={searchPlaceholder}
               className="pl-9"
               disabled={isLoading}
             />
           </div>
           <div className="flex items-center gap-2 shrink-0 sm:ml-auto">
-            {filters.length > 0 && (
+            {effectiveFilters.length > 0 && (
               <Select value={filter} onValueChange={setFilter} disabled={isLoading}>
                 <SelectTrigger className="w-40">
                   <Filter className="h-4 w-4 mr-1.5" />
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All statuses</SelectItem>
-                  {filters.map((f) => (
+                  <SelectItem value="all">All status</SelectItem>
+                  {effectiveFilters.map((f) => (
                     <SelectItem key={f} value={f.toLowerCase()}>
                       {f}
                     </SelectItem>

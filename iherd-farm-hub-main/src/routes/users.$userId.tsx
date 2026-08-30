@@ -841,11 +841,14 @@ function UserDetail() {
                       <Wrench className="h-3.5 w-3.5 text-primary" /> Farm Equipment & Infrastructure ({farmDoc.farmEquipmentList.length})
                     </h4>
                     <div className="flex flex-wrap gap-1.5">
-                      {farmDoc.farmEquipmentList.map((eq: string, eIdx: number) => (
-                        <span key={eIdx} className="px-3 py-1 rounded-xl bg-muted text-foreground text-xs font-medium border border-border/60 capitalize">
-                          {eq.replace(/_/g, " ")}
-                        </span>
-                      ))}
+                      {farmDoc.farmEquipmentList.map((eq: any, eIdx: number) => {
+                        const eqStr = getLocalizedText(eq?.key || eq);
+                        return (
+                          <span key={eIdx} className="px-3 py-1 rounded-xl bg-muted text-foreground text-xs font-medium border border-border/60 capitalize">
+                            {eqStr.replace(/_/g, " ")}
+                          </span>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -856,13 +859,13 @@ function UserDetail() {
                     {farmDoc.latitude && (
                       <div className="flex items-center gap-2">
                         <Compass className="h-4 w-4 text-primary" />
-                        <span>Coordinates: <span className="font-mono font-bold text-foreground">{farmDoc.latitude}, {farmDoc.longitude}</span></span>
+                        <span>Coordinates: <span className="font-mono font-bold text-foreground">{getLocalizedText(farmDoc.latitude)}, {getLocalizedText(farmDoc.longitude)}</span></span>
                       </div>
                     )}
                     {farmDoc.veterinaryName && (
                       <div className="flex items-center gap-2">
                         <Stethoscope className="h-4 w-4 text-primary" />
-                        <span>Assigned Vet: <span className="font-bold text-foreground">{farmDoc.veterinaryName}</span> ({farmDoc.veterinarianPhoneNumber || "—"})</span>
+                        <span>Assigned Vet: <span className="font-bold text-foreground">{getLocalizedText(farmDoc.veterinaryName)}</span> ({getLocalizedText(farmDoc.veterinarianPhoneNumber, "—")})</span>
                       </div>
                     )}
                   </div>
@@ -1001,7 +1004,7 @@ function UserDetail() {
                           <div className="absolute top-3 right-3 flex items-center gap-2">
                             {cattle.rfid && (
                               <span className="bg-black/75 text-white text-xs font-mono font-bold px-3 py-1 rounded-full backdrop-blur-md border border-white/20 shadow-sm">
-                                RFID: {cattle.rfid}
+                                RFID: {getLocalizedText(cattle.rfid)}
                               </span>
                             )}
                             <StatusBadge status={cattle.status || "Active"} />
@@ -1014,12 +1017,12 @@ function UserDetail() {
                           <div className="flex items-start justify-between gap-2">
                             <div>
                               <h4 className="font-bold text-xl text-foreground capitalize">{title}</h4>
-                              <p className="text-xs text-muted-foreground font-mono">ID: {cattle.cattleId || cattle.id}</p>
+                              <p className="text-xs text-muted-foreground font-mono">ID: {getLocalizedText(cattle.cattleId || cattle.id)}</p>
                             </div>
                             <div className="flex items-center gap-1.5">
                               {cattle.species && (
                                 <span className="inline-flex items-center px-2.5 py-1 rounded-xl text-xs font-bold bg-primary/10 text-primary border border-primary/20">
-                                  {cattle.species}
+                                  {getLocalizedText(cattle.species, "Cow")}
                                 </span>
                               )}
                               <Button
@@ -1038,19 +1041,19 @@ function UserDetail() {
                               <span className="font-semibold text-foreground">Breed:</span> {breed}
                             </div>
                             <div>
-                              <span className="font-semibold text-foreground">Species:</span> {cattle.species || "Cow"}
+                              <span className="font-semibold text-foreground">Species:</span> {getLocalizedText(cattle.species, "Cow")}
                             </div>
                             <div>
-                              <span className="font-semibold text-foreground">RFID Tag:</span> {cattle.rfid || "—"}
+                              <span className="font-semibold text-foreground">RFID Tag:</span> {getLocalizedText(cattle.rfid, "—")}
                             </div>
                             <div>
                               <span className="font-semibold text-foreground">Registered:</span> {regDate}
                             </div>
                             <div>
-                              <span className="font-semibold text-foreground">Owner UID:</span> <span className="font-mono text-[11px] truncate block max-w-[130px]">{cattle.ownerUid || userId}</span>
+                              <span className="font-semibold text-foreground">Owner UID:</span> <span className="font-mono text-[11px] truncate block max-w-[130px]">{getLocalizedText(cattle.ownerUid || userId)}</span>
                             </div>
                             <div>
-                              <span className="font-semibold text-foreground">Source:</span> {cattle.source || "cattle_details"}
+                              <span className="font-semibold text-foreground">Source:</span> {getLocalizedText(cattle.source, "cattle_details")}
                             </div>
                           </div>
                         </div>
@@ -1261,11 +1264,14 @@ function UserDetail() {
                       Specializations
                     </h4>
                     <div className="flex flex-wrap gap-1.5">
-                      {vetDoc.specialization.map((spec: string, sIdx: number) => (
-                        <span key={sIdx} className="px-3 py-1 rounded-xl bg-primary/10 text-primary text-xs font-semibold border border-primary/20 capitalize">
-                          {spec.replace(/_/g, " ")}
-                        </span>
-                      ))}
+                      {vetDoc.specialization.map((spec: any, sIdx: number) => {
+                        const specStr = getLocalizedText(spec?.key || spec);
+                        return (
+                          <span key={sIdx} className="px-3 py-1 rounded-xl bg-primary/10 text-primary text-xs font-semibold border border-primary/20 capitalize">
+                            {specStr.replace(/_/g, " ")}
+                          </span>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -1276,11 +1282,14 @@ function UserDetail() {
                       Clinical & Healthcare Services Offered ({vetDoc.services.length})
                     </h4>
                     <div className="flex flex-wrap gap-1.5">
-                      {vetDoc.services.map((srv: string, sIdx: number) => (
-                        <span key={sIdx} className="px-2.5 py-1 rounded-lg bg-muted text-foreground text-xs font-medium border border-border/50">
-                          {srv}
-                        </span>
-                      ))}
+                      {vetDoc.services.map((srv: any, sIdx: number) => {
+                        const srvStr = getLocalizedText(srv?.key || srv);
+                        return (
+                          <span key={sIdx} className="px-2.5 py-1 rounded-lg bg-muted text-foreground text-xs font-medium border border-border/50">
+                            {srvStr}
+                          </span>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -2046,52 +2055,52 @@ function UserDetail() {
                     <span className="font-semibold text-foreground">Cattle Name:</span> {getLocalizedText(selectedCattleDetail.cattleName || selectedCattleDetail.title || "—")}
                   </div>
                   <div>
-                    <span className="font-semibold text-foreground">Species:</span> {selectedCattleDetail.species || "Cow"}
+                    <span className="font-semibold text-foreground">Species:</span> {getLocalizedText(selectedCattleDetail.species, "Cow")}
                   </div>
                   <div>
                     <span className="font-semibold text-foreground">Breed:</span> {getLocalizedText(selectedCattleDetail.breed?.key || selectedCattleDetail.breed || "—")}
                   </div>
                   <div>
-                    <span className="font-semibold text-foreground">RFID / Tag No:</span> {selectedCattleDetail.rfid || selectedCattleDetail.tagNo || "—"}
+                    <span className="font-semibold text-foreground">RFID / Tag No:</span> {getLocalizedText(selectedCattleDetail.rfid || selectedCattleDetail.tagNo || "—")}
                   </div>
                   <div>
-                    <span className="font-semibold text-foreground">Gender:</span> <span className="capitalize">{selectedCattleDetail.gender || "Female"}</span>
+                    <span className="font-semibold text-foreground">Gender:</span> <span className="capitalize">{getLocalizedText(selectedCattleDetail.gender, "Female")}</span>
                   </div>
                   <div>
-                    <span className="font-semibold text-foreground">Color:</span> {selectedCattleDetail.color || "—"}
+                    <span className="font-semibold text-foreground">Color:</span> {getLocalizedText(selectedCattleDetail.color, "—")}
                   </div>
                   <div>
-                    <span className="font-semibold text-foreground">Age:</span> {selectedCattleDetail.age ? `${selectedCattleDetail.age} months / yrs` : "—"}
+                    <span className="font-semibold text-foreground">Age:</span> {selectedCattleDetail.age ? `${getLocalizedText(selectedCattleDetail.age)} months / yrs` : "—"}
                   </div>
                   <div>
-                    <span className="font-semibold text-foreground">Milk Yield:</span> {selectedCattleDetail.milkYield ? `${selectedCattleDetail.milkYield} L/day` : "—"}
+                    <span className="font-semibold text-foreground">Milk Yield:</span> {selectedCattleDetail.milkYield ? `${getLocalizedText(selectedCattleDetail.milkYield)} L/day` : "—"}
                   </div>
                   <div>
-                    <span className="font-semibold text-foreground">Parity (Lactation):</span> {selectedCattleDetail.parity || "—"}
+                    <span className="font-semibold text-foreground">Parity (Lactation):</span> {getLocalizedText(selectedCattleDetail.parity, "—")}
                   </div>
                   <div>
-                    <span className="font-semibold text-foreground">Weight:</span> {selectedCattleDetail.weight || "—"}
+                    <span className="font-semibold text-foreground">Weight:</span> {getLocalizedText(selectedCattleDetail.weight, "—")}
                   </div>
                   <div>
-                    <span className="font-semibold text-foreground">Height:</span> {selectedCattleDetail.height || "—"}
+                    <span className="font-semibold text-foreground">Height:</span> {getLocalizedText(selectedCattleDetail.height, "—")}
                   </div>
                   <div>
-                    <span className="font-semibold text-foreground">Market Value:</span> {selectedCattleDetail.value || "—"}
+                    <span className="font-semibold text-foreground">Market Value:</span> {getLocalizedText(selectedCattleDetail.value, "—")}
                   </div>
                   <div>
-                    <span className="font-semibold text-foreground">Father Tag:</span> {selectedCattleDetail.fatherTagNo || "—"}
+                    <span className="font-semibold text-foreground">Father Tag:</span> {getLocalizedText(selectedCattleDetail.fatherTagNo, "—")}
                   </div>
                   <div>
-                    <span className="font-semibold text-foreground">Mother Tag:</span> {selectedCattleDetail.motherTagNo || "—"}
+                    <span className="font-semibold text-foreground">Mother Tag:</span> {getLocalizedText(selectedCattleDetail.motherTagNo, "—")}
                   </div>
                   <div>
                     <span className="font-semibold text-foreground">Insured:</span> {selectedCattleDetail.insurance ? "✅ Insured" : "No"}
                   </div>
                   <div>
-                    <span className="font-semibold text-foreground">Farm ID:</span> <span className="font-mono text-[11px]">{selectedCattleDetail.farmId || farmDoc?.farmId || farmDoc?.id || "—"}</span>
+                    <span className="font-semibold text-foreground">Farm ID:</span> <span className="font-mono text-[11px]">{getLocalizedText(selectedCattleDetail.farmId || farmDoc?.farmId || farmDoc?.id || "—")}</span>
                   </div>
                   <div>
-                    <span className="font-semibold text-foreground">Cattle ID:</span> <span className="font-mono text-[11px]">{selectedCattleDetail.cattleId || selectedCattleDetail.id}</span>
+                    <span className="font-semibold text-foreground">Cattle ID:</span> <span className="font-mono text-[11px]">{getLocalizedText(selectedCattleDetail.cattleId || selectedCattleDetail.id)}</span>
                   </div>
                   <div>
                     <span className="font-semibold text-foreground">Owner UID:</span> <span className="font-mono text-[11px] truncate block">{selectedCattleDetail.ownerUid || userId}</span>

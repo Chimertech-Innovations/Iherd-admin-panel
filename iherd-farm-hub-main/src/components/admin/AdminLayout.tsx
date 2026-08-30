@@ -13,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { AppSidebar } from "./AppSidebar";
+import { NotificationBellPopover } from "./NotificationBellPopover";
 import { useAuth } from "@/hooks/useAuth";
 
 export function AdminLayout({ children }: { children: ReactNode }) {
@@ -60,16 +61,7 @@ export function AdminLayout({ children }: { children: ReactNode }) {
               >
                 <Search className="h-4.5 w-4.5 text-foreground/80" />
               </button>
-              <button
-                type="button"
-                aria-label="Notifications"
-                className="relative grid h-10 w-10 place-items-center rounded-xl bg-muted/60 hover:bg-muted transition-colors"
-              >
-                <Bell className="h-4.5 w-4.5 text-foreground/80" />
-                <Badge className="absolute -right-1 -top-1 h-4 min-w-4 px-1 text-[10px] bg-destructive">
-                  7
-                </Badge>
-              </button>
+              <NotificationBellPopover />
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button

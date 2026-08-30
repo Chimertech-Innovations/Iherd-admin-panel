@@ -12,6 +12,8 @@ import {
   Megaphone,
   LifeBuoy,
   Settings,
+  Building,
+  Beef,
   UserCircle,
   FileText,
   Stethoscope,
@@ -42,6 +44,8 @@ const main = [
 const people = [
   { title: "App Users", url: "/users", icon: UserCircle },
   { title: "Farmers", url: "/farmers", icon: Users },
+  { title: "Registered Farms", url: "/farms", icon: Building },
+  { title: "Cattle Register", url: "/cattle", icon: Beef },
   { title: "Sellers", url: "/sellers", icon: Store },
   { title: "Veterinarians", url: "/vets", icon: Stethoscope },
 ];

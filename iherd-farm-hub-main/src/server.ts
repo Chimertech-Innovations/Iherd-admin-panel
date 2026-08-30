@@ -30,7 +30,16 @@ async function normalizeCatastrophicSsrResponse(response: Response): Promise<Res
     return response;
   }
 
-  console.error(consumeLastCapturedError() ?? new Error(`h3 swallowed SSR error: ${body}`));
+  const capturedErr = consumeLastCapturedError();
+  const errMsg = (capturedErr as any)?.message || (typeof capturedErr === "string" ? capturedErr : "");
+  const errCode = (capturedErr as any)?.code || "";
+
+  // Ignore benign client aborts / disconnections during browser reloads or HMR
+  if (errMsg === "aborted" || errMsg.includes("aborted") || errCode === "ECONNRESET") {
+    return response;
+  }
+
+  console.error(capturedErr ?? new Error(`h3 swallowed SSR error: ${body}`));
   return new Response(renderErrorPage(), {
     status: 500,
     headers: { "content-type": "text/html; charset=utf-8" },

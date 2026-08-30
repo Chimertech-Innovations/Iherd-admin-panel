@@ -909,16 +909,56 @@ app.post("/api/admin/user-farm-data/:userId", async (req, res) => {
 });
 
 // REST API to list all Firebase Authentication users
-app.get("/api/admin/users", async (req, res) => {
+app.get(["/api/admin/users", "/get/api/admin/users"], async (req, res) => {
   try {
     const auth = getAuth();
     const db = getFirestore();
     
-    // Prefetch all Firestore user documents to merge profile metadata
-    const fsSnapshot = await db.collection("users").get();
+    // Prefetch all Firestore user documents, farms subcollections, and cattle to extract full farmer profiles
+    const [fsSnapshot, farmsSnapshot, cattleSnapshot] = await Promise.all([
+      db.collection("users").get(),
+      db.collectionGroup("farms").get().catch(() => ({ forEach: () => {} })),
+      db.collection("cattle_details").get().catch(() => ({ forEach: () => {} })),
+    ]);
+
     const fsUsersMap = {};
     fsSnapshot.forEach((doc) => {
       fsUsersMap[doc.id] = doc.data();
+    });
+
+    const farmOwnersMap = {};
+    farmsSnapshot.forEach((doc) => {
+      const data = doc.data();
+      const path = doc.ref.path;
+      const parts = path.split("/");
+      let ownerUid = data.ownerUid || data.userId;
+      if (!ownerUid && parts[0] === "users" && parts[1]) ownerUid = parts[1];
+      if (ownerUid) {
+        farmOwnersMap[ownerUid] = {
+          name: data.ownerName || data.farmerName || (data.name !== "Registered Dairy Farm" ? data.name : null),
+          phone: data.farmPhoneNumber || data.phoneNumber || data.phone,
+          village: data.village,
+          district: data.district,
+          state: data.state,
+          farmName: data.name || data.farmName,
+          farmId: data.farmId || doc.id,
+        };
+      }
+    });
+
+    const cattleOwnersMap = {};
+    cattleSnapshot.forEach((doc) => {
+      const data = doc.data();
+      const ownerUid = data.ownerUid || data.userId || data.farmerId || data.sellerId;
+      if (ownerUid && !cattleOwnersMap[ownerUid]) {
+        cattleOwnersMap[ownerUid] = {
+          name: data.ownerName || data.farmerName || data.sellerName,
+          phone: data.ownerPhone || data.phone || data.sellerPhone,
+          village: data.village,
+          district: data.district,
+          state: data.state,
+        };
+      }
     });
 
     let authUsers = [];
@@ -930,19 +970,53 @@ app.get("/api/admin/users", async (req, res) => {
         const listUsersResult = await auth.listUsers(1000, nextPageToken);
         const batch = listUsersResult.users.map((userRecord) => {
           const fsUser = fsUsersMap[userRecord.uid] || {};
-          const roles = fsUser.roles || (fsUser.role ? [fsUser.role] : ["User"]);
+          const farmMeta = farmOwnersMap[userRecord.uid] || {};
+          const cattleMeta = cattleOwnersMap[userRecord.uid] || {};
+          const farmerProfile = fsUser.farmer || {};
+
+          const resolvedName =
+            (farmMeta.name && farmMeta.name !== "User" && farmMeta.name !== "Farmer") ? farmMeta.name :
+            (cattleMeta.name && cattleMeta.name !== "User" && cattleMeta.name !== "Farmer") ? cattleMeta.name :
+            (farmerProfile.name && farmerProfile.name !== "User" && farmerProfile.name !== "Farmer") ? farmerProfile.name :
+            (farmerProfile.farmerName && farmerProfile.farmerName !== "User") ? farmerProfile.farmerName :
+            (fsUser.farmerName && fsUser.farmerName !== "User") ? fsUser.farmerName :
+            (fsUser.fullName && fsUser.fullName !== "User") ? fsUser.fullName :
+            (fsUser.name && fsUser.name !== "User") ? fsUser.name :
+            (fsUser.displayName && fsUser.displayName !== "User") ? fsUser.displayName :
+            (userRecord.displayName && userRecord.displayName !== "User") ? userRecord.displayName :
+            (farmMeta.phone ? `Farmer (${farmMeta.phone})` : (userRecord.phoneNumber ? `Farmer (${userRecord.phoneNumber})` : `Farmer #${userRecord.uid.slice(-6).toUpperCase()}`));
+
+          const resolvedPhone =
+            (userRecord.phoneNumber && userRecord.phoneNumber !== "—") ? userRecord.phoneNumber :
+            (fsUser.phoneNumber && fsUser.phoneNumber !== "—") ? fsUser.phoneNumber :
+            (fsUser.phone && fsUser.phone !== "—") ? fsUser.phone :
+            (farmMeta.phone && farmMeta.phone !== "—") ? farmMeta.phone :
+            (cattleMeta.phone && cattleMeta.phone !== "—") ? cattleMeta.phone :
+            (farmerProfile.farmerPhoneNumber && farmerProfile.farmerPhoneNumber !== "—") ? farmerProfile.farmerPhoneNumber :
+            "—";
+
+          const roles = fsUser.roles || (fsUser.role ? [fsUser.role] : (farmMeta.name || farmMeta.farmName ? ["Farmer"] : ["User"]));
           
           return {
             uid: userRecord.uid,
             email: userRecord.email || fsUser.email || null,
-            phoneNumber: userRecord.phoneNumber || fsUser.phoneNumber || fsUser.phone || "—",
-            displayName: userRecord.displayName || fsUser.name || fsUser.displayName || "User",
+            phoneNumber: resolvedPhone,
+            displayName: resolvedName,
+            name: resolvedName,
             roles: roles,
             createdAt: userRecord.metadata.creationTime || fsUser.createdAt || null,
             lastLoginAt: userRecord.metadata.lastSignInTime || fsUser.updatedAt || null,
-            farms: fsUser.farms || null,
-            farmer: fsUser.farmer || null,
-            isFarmer: fsUser.isFarmer || false,
+            farms: fsUser.farms || (farmMeta.farmName ? { name: farmMeta.farmName, id: farmMeta.farmId } : null),
+            farmer: {
+              ...farmerProfile,
+              name: resolvedName,
+              farmerPhoneNumber: resolvedPhone,
+              village: farmMeta.village || cattleMeta.village || farmerProfile.village || fsUser.village || "—",
+              district: farmMeta.district || cattleMeta.district || farmerProfile.district || fsUser.district || "—",
+              state: farmMeta.state || cattleMeta.state || farmerProfile.state || fsUser.state || "—",
+              farmName: farmMeta.farmName || farmerProfile.farmName || null,
+            },
+            isFarmer: roles.some((r) => String(r).toLowerCase().includes("farmer")) || Boolean(farmMeta.farmName || farmMeta.name),
             status: fsUser.status || "Active",
             seller: fsUser.seller || null,
             veterinarian: fsUser.veterinarian || fsUser.vet || null,
@@ -969,24 +1043,58 @@ app.get("/api/admin/users", async (req, res) => {
       // Fallback: Map all users from Firestore map
       result = Object.keys(fsUsersMap).map((uid) => {
         const fsUser = fsUsersMap[uid];
-        const roles = fsUser.roles || (fsUser.role ? [fsUser.role] : ["User"]);
+        const farmMeta = farmOwnersMap[uid] || {};
+        const cattleMeta = cattleOwnersMap[uid] || {};
+        const farmerProfile = fsUser.farmer || {};
+
+        const resolvedName =
+          (farmMeta.name && farmMeta.name !== "User" && farmMeta.name !== "Farmer") ? farmMeta.name :
+          (cattleMeta.name && cattleMeta.name !== "User" && cattleMeta.name !== "Farmer") ? cattleMeta.name :
+          (farmerProfile.name && farmerProfile.name !== "User" && farmerProfile.name !== "Farmer") ? farmerProfile.name :
+          (farmerProfile.farmerName && farmerProfile.farmerName !== "User") ? farmerProfile.farmerName :
+          (fsUser.farmerName && fsUser.farmerName !== "User") ? fsUser.farmerName :
+          (fsUser.fullName && fsUser.fullName !== "User") ? fsUser.fullName :
+          (fsUser.name && fsUser.name !== "User") ? fsUser.name :
+          (fsUser.displayName && fsUser.displayName !== "User") ? fsUser.displayName :
+          (farmMeta.phone ? `Farmer (${farmMeta.phone})` : (fsUser.phoneNumber ? `Farmer (${fsUser.phoneNumber})` : `Farmer #${uid.slice(-6).toUpperCase()}`));
+
+        const resolvedPhone =
+          (fsUser.phoneNumber && fsUser.phoneNumber !== "—") ? fsUser.phoneNumber :
+          (fsUser.phone && fsUser.phone !== "—") ? fsUser.phone :
+          (farmMeta.phone && farmMeta.phone !== "—") ? farmMeta.phone :
+          (cattleMeta.phone && cattleMeta.phone !== "—") ? cattleMeta.phone :
+          "—";
+
+        const roles = fsUser.roles || (fsUser.role ? [fsUser.role] : (farmMeta.name || farmMeta.farmName ? ["Farmer"] : ["User"]));
         return {
           uid: uid,
           email: fsUser.email || null,
-          phoneNumber: fsUser.phoneNumber || fsUser.phone || "—",
-          displayName: fsUser.name || fsUser.displayName || "User",
+          phoneNumber: resolvedPhone,
+          displayName: resolvedName,
+          name: resolvedName,
           roles: roles,
           createdAt: fsUser.createdAt ? (fsUser.createdAt.seconds ? fsUser.createdAt.seconds * 1000 : fsUser.createdAt) : null,
           lastLoginAt: fsUser.updatedAt ? (fsUser.updatedAt.seconds ? fsUser.updatedAt.seconds * 1000 : fsUser.updatedAt) : null,
-          farms: fsUser.farms || null,
-          farmer: fsUser.farmer || null,
-          isFarmer: fsUser.isFarmer || false,
+          farms: fsUser.farms || (farmMeta.farmName ? { name: farmMeta.farmName, id: farmMeta.farmId } : null),
+          farmer: {
+            ...farmerProfile,
+            name: resolvedName,
+            farmerPhoneNumber: resolvedPhone,
+            village: farmMeta.village || cattleMeta.village || farmerProfile.village || fsUser.village || "—",
+            district: farmMeta.district || cattleMeta.district || farmerProfile.district || fsUser.district || "—",
+            state: farmMeta.state || cattleMeta.state || farmerProfile.state || fsUser.state || "—",
+            farmName: farmMeta.farmName || farmerProfile.farmName || null,
+          },
+          isFarmer: roles.some((r) => String(r).toLowerCase().includes("farmer")) || Boolean(farmMeta.farmName || farmMeta.name),
           status: fsUser.status || "Active",
           seller: fsUser.seller || null,
           veterinarian: fsUser.veterinarian || fsUser.vet || null,
         };
       });
     }
+
+    // Sort all users by creation/registration time descending (latest first)
+    result.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
 
     res.json({ users: result });
   } catch (error) {
@@ -1109,6 +1217,116 @@ app.get("/api/admin/product-orders", async (req, res) => {
   }
 });
 
+// REST API to update Product Order tracking details and status
+app.put(["/api/admin/product-orders/:id"], async (req, res) => {
+  try {
+    const db = getFirestore();
+    const { id } = req.params;
+    const body = req.body || {};
+
+    const orderKey = body.orderId || body.id || id;
+    const totalAmt = body.totalAmount !== undefined 
+      ? Number(body.totalAmount) 
+      : (body.price !== undefined ? Number(body.price) : (body.amount !== undefined ? Number(body.amount) : undefined));
+
+    // Strictly whitelist and map only the exact fields requested
+    const updateData = {};
+    if (orderKey !== undefined) {
+      updateData.id = orderKey;
+      updateData.orderId = orderKey;
+    }
+    if (body.userId !== undefined) updateData.userId = body.userId;
+    if (body.buyerName !== undefined) updateData.buyerName = body.buyerName;
+    if (body.buyerPhone !== undefined) updateData.buyerPhone = body.buyerPhone;
+    if (body.buyerAddress !== undefined) updateData.buyerAddress = body.buyerAddress;
+    if (body.sellerName !== undefined) updateData.sellerName = body.sellerName;
+    if (body.items !== undefined) {
+      updateData.items = body.items;
+      updateData.itemCount = Array.isArray(body.items) ? body.items.length : (body.itemCount || 1);
+    } else if (body.itemCount !== undefined) {
+      updateData.itemCount = Number(body.itemCount);
+    }
+    if (totalAmt !== undefined) {
+      updateData.totalAmount = totalAmt;
+      updateData.price = totalAmt;
+      updateData.amount = totalAmt;
+    }
+    if (body.shippingFee !== undefined) updateData.shippingFee = Number(body.shippingFee);
+    if (body.discount !== undefined) updateData.discount = Number(body.discount);
+    if (body.invoiceNumber !== undefined) updateData.invoiceNumber = body.invoiceNumber;
+    if (body.invoiceUrl !== undefined) updateData.invoiceUrl = body.invoiceUrl;
+    if (body.trackingId !== undefined) updateData.trackingId = body.trackingId;
+    if (body.deliveryDate !== undefined || body.estimatedDeliveryDate !== undefined) {
+      updateData.deliveryDate = body.deliveryDate || body.estimatedDeliveryDate;
+    }
+    if (body.status !== undefined) updateData.status = body.status;
+    if (body.createdAt !== undefined) updateData.createdAt = body.createdAt;
+    updateData.updatedAt = body.updatedAt || new Date().toISOString();
+
+    let updated = false;
+
+    // 1. Try direct doc ID in ProductOrders
+    const pRef = db.collection("ProductOrders").doc(id);
+    const pDoc = await pRef.get();
+    if (pDoc.exists) {
+      await pRef.set(updateData, { merge: true });
+      updated = true;
+    }
+
+    // 2. Try direct doc ID in product_orders
+    const legacyRef = db.collection("product_orders").doc(id);
+    const legacyDoc = await legacyRef.get();
+    if (legacyDoc.exists) {
+      await legacyRef.set(updateData, { merge: true });
+      updated = true;
+    }
+
+    // 3. Search by orderId field in ProductOrders
+    const qSnap = await db.collection("ProductOrders").where("orderId", "==", id).get();
+    if (!qSnap.empty) {
+      for (const d of qSnap.docs) {
+        await d.ref.set(updateData, { merge: true });
+        updated = true;
+      }
+    }
+
+    // 4. Search by orderId field in product_orders
+    const qLegacySnap = await db.collection("product_orders").where("orderId", "==", id).get();
+    if (!qLegacySnap.empty) {
+      for (const d of qLegacySnap.docs) {
+        await d.ref.set(updateData, { merge: true });
+        updated = true;
+      }
+    }
+
+    // 5. Update user subcollection if userId provided or found
+    const targetUserId = body.userId || (pDoc.exists ? pDoc.data()?.userId : null);
+    if (targetUserId) {
+      try {
+        const userOrderRef = db.collection("users").doc(targetUserId).collection("ProductOrders").doc(id);
+        const userOrderDoc = await userOrderRef.get();
+        if (userOrderDoc.exists) {
+          await userOrderRef.set(updateData, { merge: true });
+          updated = true;
+        }
+      } catch (subErr) {
+        console.warn("Could not update user subcollection:", subErr.message);
+      }
+    }
+
+    // If doc was not found anywhere, create/set it in ProductOrders
+    if (!updated) {
+      await pRef.set(updateData, { merge: true });
+    }
+
+    console.log(`Updated product order ${id} with exact fields:`, updateData);
+    res.json({ success: true, message: "Order updated successfully", orderId: id, data: updateData });
+  } catch (error) {
+    console.error("Error in PUT /api/admin/product-orders/:id:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // REST API to list all Cattle Orders (bypasses client security rules)
 app.get("/api/admin/cattle-orders", async (req, res) => {
   try {
@@ -1227,6 +1445,270 @@ app.get("/api/admin/cattle-orders", async (req, res) => {
   } catch (error) {
     console.error("Error in /api/admin/cattle-orders:", error);
     res.status(500).json({ error: error.message, orders: [] });
+  }
+});
+
+// REST API to list all Cattle Register Details from cattle_details & cattle-marketplace
+app.get("/api/admin/cattle", async (req, res) => {
+  try {
+    const db = getFirestore();
+    const [cdSnap, cmSnap, usersSnap] = await Promise.all([
+      db.collection("cattle_details").get().catch(() => ({ docs: [] })),
+      db.collection("cattle-marketplace").get().catch(() => ({ docs: [] })),
+      db.collection("users").get().catch(() => ({ docs: [] })),
+    ]);
+
+    const usersMap = new Map();
+    usersSnap.docs.forEach((d) => {
+      const uData = d.data();
+      usersMap.set(d.id, { id: d.id, ...uData });
+      if (uData.uid) usersMap.set(uData.uid, { id: d.id, ...uData });
+    });
+
+    const cattleMap = new Map();
+
+    const processCattleItem = (item, sourceName) => {
+      if (!item) return;
+      const cattleKey = item.cattleId || item.rfid || item.tagNo || item.id;
+      if (!cattleKey) return;
+
+      const ownerUid = item.ownerUid || item.sellerId || item.farmerId || item.userId || item.uid || item.postedBy || "";
+      const ownerUser = usersMap.get(ownerUid) || {};
+
+      const ownerName =
+        item.ownerName ||
+        item.sellerName ||
+        item.farmerName ||
+        ownerUser.name ||
+        ownerUser.displayName ||
+        (ownerUid ? `Farmer (${ownerUid.slice(0, 8)}...)` : "iHerd Farmer");
+
+      const ownerPhone =
+        item.sellerPhone ||
+        item.phone ||
+        item.phoneNumber ||
+        ownerUser.phoneNumber ||
+        ownerUser.phone ||
+        "—";
+
+      const faceView = item.faceViewImagePath || item.faceView || item.face || (Array.isArray(item.images) && item.images[0]) || item.imageUrl || null;
+      const leftView = item.leftViewImagePath || item.leftView || (Array.isArray(item.images) && item.images[1]) || null;
+      const rightView = item.rightViewImagePath || item.rightView || (Array.isArray(item.images) && item.images[2]) || null;
+      const muzzleView = item.muzzleViewImagePath || item.muzzleView || null;
+      const udderView = item.udderViewImagePath || item.udderView || null;
+      const bottomView = item.topViewImagePath || item.bottomView || item.topview || null;
+      const farmerView = item.farmerViewImagePath || item.farmerView || null;
+
+      const title = item.cattleName || item.title || item.name || (item.tagNo ? `Cattle #${item.tagNo}` : "Dairy Cattle");
+      const breed = item.breed?.key || item.breed || "—";
+      const species = item.species || "Cow";
+      const rfid = item.rfid || item.tagNo || cattleKey;
+      const status = item.status || (item.onSale ? "On Sale" : "Active");
+      const price = item.price || item.value || item.marketValue || 0;
+
+      const rawDate = item.createdAt || item.registeredAt || item.date || null;
+
+      const enriched = {
+        id: cattleKey,
+        cattleId: cattleKey,
+        title,
+        cattleName: title,
+        breed,
+        species,
+        rfid,
+        tagNo: rfid,
+        gender: item.gender || "female",
+        color: item.color || "—",
+        age: item.age || "—",
+        weight: item.weight || "—",
+        height: item.height || "—",
+        milkYield: item.milkYield || item.dailyYield || "—",
+        parity: item.parity || item.lactation || "—",
+        price: Number(price) || 0,
+        value: item.value || price || "—",
+        fatherTagNo: item.fatherTagNo || "—",
+        motherTagNo: item.motherTagNo || "—",
+        insurance: Boolean(item.insurance),
+        status,
+        ownerUid,
+        ownerName,
+        ownerPhone,
+        farmId: item.farmId || "—",
+        farmName: item.farmName || "—",
+        village: item.village || ownerUser.village || "—",
+        district: item.district || ownerUser.district || "—",
+        state: item.state || ownerUser.state || "—",
+        faceView,
+        leftView,
+        rightView,
+        muzzleView,
+        udderView,
+        bottomView,
+        farmerView,
+        images: [faceView, leftView, rightView, muzzleView, udderView, bottomView, farmerView].filter(Boolean),
+        source: sourceName,
+        createdAt: rawDate,
+      };
+
+      if (!cattleMap.has(cattleKey)) {
+        cattleMap.set(cattleKey, enriched);
+      } else {
+        cattleMap.set(cattleKey, { ...cattleMap.get(cattleKey), ...enriched });
+      }
+    };
+
+    cdSnap.docs.forEach((d) => processCattleItem({ id: d.id, ...d.data() }, "cattle_details"));
+    cmSnap.docs.forEach((d) => processCattleItem({ id: d.id, ...d.data() }, "cattle-marketplace"));
+
+    // Also fetch nested farm cattles from users
+    for (const uDoc of usersSnap.docs) {
+      try {
+        const uId = uDoc.id;
+        const farmsSnap = await db.collection("users").doc(uId).collection("roles").doc("farmer").collection("farms").get().catch(() => ({ docs: [] }));
+        for (const fDoc of farmsSnap.docs) {
+          const catSnap = await fDoc.ref.collection("cattles").get().catch(() => ({ docs: [] }));
+          catSnap.docs.forEach((cd) => {
+            processCattleItem({ id: cd.id, ownerUid: uId, farmId: fDoc.id, farmName: fDoc.data()?.name, ...cd.data() }, "nested_farm_cattle");
+          });
+        }
+      } catch (e) {}
+    }
+
+    const sortedCattle = Array.from(cattleMap.values()).sort(
+      (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+    );
+
+    console.log(`Fetched and enriched ${sortedCattle.length} cattle register records`);
+    res.json({ cattle: sortedCattle });
+  } catch (error) {
+    console.error("Error in /api/admin/cattle:", error);
+    res.status(500).json({ error: error.message, cattle: [] });
+  }
+});
+
+// REST API to list all Registered Farms from /users/{uid}/roles/farmer/farms & all collections
+app.get("/api/admin/farms", async (req, res) => {
+  try {
+    const db = getFirestore();
+    const [groupFarmsSnap, usersSnap, cattleDetailsSnap, cattleMarketplaceSnap] = await Promise.all([
+      db.collectionGroup("farms").get().catch(() => ({ docs: [] })),
+      db.collection("users").get().catch(() => ({ docs: [] })),
+      db.collection("cattle_details").get().catch(() => ({ docs: [] })),
+      db.collection("cattle-marketplace").get().catch(() => ({ docs: [] })),
+    ]);
+
+    // Build users map
+    const usersMap = new Map();
+    usersSnap.docs.forEach((uDoc) => {
+      const uData = uDoc.data();
+      usersMap.set(uDoc.id, { id: uDoc.id, ...uData });
+      if (uData.uid) usersMap.set(uData.uid, { id: uDoc.id, ...uData });
+    });
+
+    // Build cattle count map by owner UID and farm ID
+    const cattleByOwner = new Map();
+    const cattleByFarm = new Map();
+
+    const processCattleForFarms = (cDoc) => {
+      const c = cDoc.data ? cDoc.data() : cDoc;
+      const owner = c.ownerUid || c.userId || c.farmerId || c.sellerId || c.postedBy;
+      const farm = c.farmId;
+      if (owner) {
+        cattleByOwner.set(owner, (cattleByOwner.get(owner) || 0) + 1);
+      }
+      if (farm) {
+        cattleByFarm.set(farm, (cattleByFarm.get(farm) || 0) + 1);
+      }
+    };
+
+    cattleDetailsSnap.docs.forEach(processCattleForFarms);
+    cattleMarketplaceSnap.docs.forEach(processCattleForFarms);
+
+    const farmsMap = new Map();
+
+    const addFarm = (f, sourcePath, defaultOwner = {}) => {
+      if (!f) return;
+      const farmKey = f.farmId || f.id;
+      if (!farmKey) return;
+      if (farmsMap.has(farmKey)) return;
+
+      const ownerUid = f.userId || f.ownerUid || defaultOwner.id || defaultOwner.uid || "";
+      const ownerName = f.ownerName || f.farmerName || defaultOwner.name || defaultOwner.displayName || "Registered Farmer";
+      const farmPhone = f.farmPhoneNumber || f.farmerPhoneNumber || f.phone || defaultOwner.phoneNumber || defaultOwner.phone || "—";
+
+      const realCattleCount = cattleByFarm.get(farmKey) || cattleByOwner.get(ownerUid) || Number(f.numberOfAnimals || f.cattleCount || 0);
+
+      farmsMap.set(farmKey, {
+        id: farmKey,
+        farmId: farmKey,
+        name: f.name || f.farmName || (ownerName ? `${ownerName}'s Dairy Farm` : "Registered Dairy Farm"),
+        ownerUid,
+        ownerName,
+        farmPhoneNumber: farmPhone,
+        animal: f.animal || "Cow / Cattle",
+        farmTechnique: f.farmTechnique || "Modern Dairy Management",
+        numberOfEmployees: f.numberOfEmployees || "1 - 2 Workers",
+        farmEquipmentList: Array.isArray(f.farmEquipmentList) ? f.farmEquipmentList : [],
+        village: f.village || defaultOwner.village || "—",
+        taluk: f.taluk || defaultOwner.taluk || "—",
+        postoffice: f.postoffice || defaultOwner.postoffice || "—",
+        district: f.district || defaultOwner.district || "—",
+        state: f.state || defaultOwner.state || "—",
+        pincode: f.pincode || defaultOwner.pincode || "—",
+        country: f.country || defaultOwner.country || "🇮🇳 India",
+        address: f.address || defaultOwner.address || "—",
+        latitude: f.latitude || null,
+        longitude: f.longitude || null,
+        veterinaryName: f.veterinaryName || null,
+        veterinarianPhoneNumber: f.veterinarianPhoneNumber || null,
+        imagePath: f.imagePath || f.imageUrl || null,
+        sourcePath,
+        cattleCount: realCattleCount,
+        status: f.status || "Active",
+        createdAt: f.createdAt || defaultOwner.createdAt || null,
+      });
+    };
+
+    // 1. Process all farms from collectionGroup("farms")
+    groupFarmsSnap.docs.forEach((fd) => {
+      const fData = fd.data();
+      const path = fd.ref.path;
+      const pathSegments = path.split("/");
+
+      let ownerUid = fData.ownerUid || fData.userId || "";
+      if (!ownerUid && pathSegments[0] === "users" && pathSegments[1]) {
+        ownerUid = pathSegments[1];
+      } else if (!ownerUid && pathSegments[0] === "farmers" && pathSegments[1]) {
+        ownerUid = pathSegments[1];
+      }
+
+      const defaultOwner = usersMap.get(ownerUid) || {};
+      addFarm({ id: fd.id, ...fData }, path, { id: ownerUid, ...defaultOwner });
+    });
+
+    // 2. Also check explicit farm objects inside users documents (if any)
+    usersSnap.docs.forEach((uDoc) => {
+      const uData = uDoc.data();
+      const uId = uDoc.id;
+      if (uData.farms && typeof uData.farms === "object") {
+        const farmObj = Array.isArray(uData.farms) ? uData.farms : [uData.farms];
+        farmObj.forEach((fo, idx) => {
+          if (fo && (fo.farmName || fo.name || fo.animal)) {
+            addFarm({ id: fo.id || fo.farmId || `user-farm-${uId}-${idx}`, ...fo }, `/users/${uId}`, { id: uId, ...uData });
+          }
+        });
+      }
+    });
+
+    const sortedFarms = Array.from(farmsMap.values()).sort(
+      (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+    );
+
+    console.log(`[Backend /api/admin/farms] Fetched and enriched ${sortedFarms.length} registered farms via collectionGroup`);
+    res.json({ farms: sortedFarms });
+  } catch (error) {
+    console.error("Error in /api/admin/farms:", error);
+    res.status(500).json({ error: error.message, farms: [] });
   }
 });
 
@@ -1561,7 +2043,20 @@ app.get("/api/admin/coupons", async (req, res) => {
 app.post("/api/admin/coupons", async (req, res) => {
   try {
     const db = getFirestore();
-    const { code, type = "PERCENT", value = 0, minOrder = 0, maxDiscount = 1000, active = true, expiresAt, allowedFlow = "PRODUCT", excludedProductIds = [], productIds = [] } = req.body;
+    const {
+      code,
+      type = "PERCENT",
+      value = 0,
+      minOrder = 0,
+      maxDiscount = 1000,
+      active = true,
+      expiresAt,
+      allowedFlow = "PRODUCT",
+      excludedProductIds = [],
+      productIds = [],
+      usedUserIds,
+      includeUsedUserIds,
+    } = req.body;
     
     if (!code) {
       return res.status(400).json({ error: "Coupon code is required" });
@@ -1578,9 +2073,15 @@ app.post("/api/admin/coupons", async (req, res) => {
       allowedFlow,
       excludedProductIds: Array.isArray(excludedProductIds) ? excludedProductIds : [],
       productIds: Array.isArray(productIds) ? productIds : [],
-      usedUserIds: req.body.usedUserIds || [],
       updatedAt: new Date().toISOString(),
     };
+
+  // For coupon Code used Selection 
+    if (Array.isArray(usedUserIds)) {
+      couponData.usedUserIds = usedUserIds;
+    } else if (includeUsedUserIds) {
+      couponData.usedUserIds = [];
+    }
 
     if (expiresAt) {
       couponData.expiresAt = new Date(expiresAt);

@@ -26,24 +26,28 @@ export function getLocalizedText(val: any, fallback = "—"): string {
     if (typeof val.pa === "string" && val.pa.trim()) return val.pa;
     if (typeof val.ta === "string" && val.ta.trim()) return val.ta;
 
-    if (val.name) return getLocalizedText(val.name, fallback);
-    if (val.title) return getLocalizedText(val.title, fallback);
-    if (val.label) return getLocalizedText(val.label, fallback);
-    if (val.text) return getLocalizedText(val.text, fallback);
-    if (val.value !== undefined) return getLocalizedText(val.value, fallback);
+    if (val.key !== undefined && val.key !== null) return getLocalizedText(val.key, fallback);
+    if (val.name !== undefined && val.name !== null) return getLocalizedText(val.name, fallback);
+    if (val.title !== undefined && val.title !== null) return getLocalizedText(val.title, fallback);
+    if (val.label !== undefined && val.label !== null) return getLocalizedText(val.label, fallback);
+    if (val.text !== undefined && val.text !== null) return getLocalizedText(val.text, fallback);
+    if (val.value !== undefined && val.value !== null) return getLocalizedText(val.value, fallback);
 
     for (const key of Object.keys(val)) {
       if (typeof val[key] === "string" && val[key].trim()) {
         return val[key];
       }
+      if (typeof val[key] === "number") {
+        return String(val[key]);
+      }
     }
     return fallback;
   }
-  return String(val);
+  return typeof val === "object" ? fallback : String(val);
 }
 
 /**
- * Formats image URLs, converting Google Drive sharing/preview URLs to direct image stream URLs.
+ * Formats image URLs, converting Google Drive sharing/preview URLs to direct CDN image stream URLs.
  */
 export function formatImageUrl(url: any): string {
   if (!url) return "";
@@ -56,14 +60,14 @@ export function formatImageUrl(url: any): string {
   const trimmed = url.trim();
   if (!trimmed) return "";
 
-  // 1. Convert Google Drive Links
+  // 1. Convert Google Drive Links to direct high-speed Google CDN
   const driveFileMatch = trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
   if (driveFileMatch && driveFileMatch[1]) {
-    return `https://drive.google.com/thumbnail?id=${driveFileMatch[1]}&sz=w1000`;
+    return `https://lh3.googleusercontent.com/d/${driveFileMatch[1]}`;
   }
   const driveIdMatch = trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
   if (trimmed.includes("drive.google.com") && driveIdMatch && driveIdMatch[1]) {
-    return `https://drive.google.com/thumbnail?id=${driveIdMatch[1]}&sz=w1000`;
+    return `https://lh3.googleusercontent.com/d/${driveIdMatch[1]}`;
   }
 
   return trimmed;

@@ -1,197 +1,521 @@
+import { useMemo, useState, useEffect } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { DataPage } from "@/components/admin/DataPage";
 import { StatusBadge } from "@/components/admin/StatusBadge";
+import { Button } from "@/components/ui/button";
+import {
+  Users,
+  User,
+  MapPin,
+  Phone,
+  Beef,
+  Building,
+  CheckCircle2,
+  Calendar,
+  ExternalLink,
+} from "lucide-react";
 import { useAdminUsers } from "../hooks/useAdminUsers";
-import { useFirebaseCollection } from "../hooks/useFirebaseData";
+import { useFirebaseCollection, useFirebaseCollectionGroup } from "../hooks/useFirebaseData";
 import { getLocalizedText } from "@/lib/utils";
 
 export const Route = createFileRoute("/farmers/")({
-  head: () => ({ meta: [{ title: "Farmers — iHerd Admin" }] }),
+  head: () => ({ meta: [{ title: "Farmers Directory — iHerd Admin" }] }),
   component: FarmersPage,
 });
 
+function parseTime(val: any): number {
+  if (!val) return 0;
+  if (typeof val === "number") return val;
+  if (val instanceof Date) return val.getTime();
+  if (typeof val === "object" && (val._seconds || val.seconds)) {
+    return (val._seconds || val.seconds) * 1000;
+  }
+  const d = new Date(val).getTime();
+  return isNaN(d) ? 0 : d;
+}
+
+function formatDate(ms: number): string {
+  if (!ms || isNaN(ms)) return "—";
+  return new Date(ms).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 function FarmersPage() {
   const { data: authUsers = [], isLoading: authLoading } = useAdminUsers();
-  const { data: firestoreUsers = [], isLoading: firestoreLoading } = useFirebaseCollection<any>("users");
+  const { data: firestoreUsers = [], isLoading: fsLoading } = useFirebaseCollection<any>("users");
   const { data: directFarmers = [], isLoading: directLoading } = useFirebaseCollection<any>("farmers");
+  const { data: cattleList = [] } = useFirebaseCollection<any>("cattle_details");
+  const { data: topFarms = [] } = useFirebaseCollection<any>("farms");
+  const { data: groupFarms = [] } = useFirebaseCollectionGroup<any>("farms");
 
-  const isLoading = authLoading || firestoreLoading || directLoading;
+  const [backendFarms, setBackendFarms] = useState<any[]>([]);
 
-  // Build full farmer list by merging Auth users and Firestore users
+  // Fetch backend registered farms with multi-endpoint fallback
+  useEffect(() => {
+    let isMounted = true;
+    const fetchBackendFarms = async () => {
+      const endpoints = [
+        "http://localhost:5000",
+        "http://127.0.0.1:5000",
+        (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, ""),
+        "https://iherdadminpanel.onrender.com",
+      ].filter(Boolean) as string[];
+
+      for (const base of endpoints) {
+        try {
+          const res = await fetch(`${base}/api/admin/farms`);
+          if (res.ok) {
+            const json = await res.json();
+            if (Array.isArray(json.farms) && json.farms.length > 0 && isMounted) {
+              setBackendFarms(json.farms);
+              break;
+            }
+          }
+        } catch {}
+      }
+    };
+
+    fetchBackendFarms();
+    return () => { isMounted = false; };
+  }, []);
+
+  const isLoading = authLoading || fsLoading || directLoading;
+
+  // Build cattle count map by owner UID
+  const cattleCountMap = useMemo(() => {
+    const map = new Map<string, number>();
+    cattleList.forEach((c: any) => {
+      const owner = c.ownerUid || c.userId || c.farmerId || c.sellerId;
+      if (owner) {
+        map.set(owner, (map.get(owner) || 0) + 1);
+      }
+    });
+    return map;
+  }, [cattleList]);
+
+  // Build consolidated metadata resolver for farmer name, phone, village, district, state from farms & cattle
+  const farmerMetaMap = useMemo(() => {
+    const map = new Map<string, {
+      name?: string;
+      phone?: string;
+      village?: string;
+      district?: string;
+      state?: string;
+      farmName?: string;
+      farmId?: string;
+    }>();
+
+    // 1. Process backend farms
+    backendFarms.forEach((f: any) => {
+      const owner = f.ownerUid || f.userId || f.farmerUid;
+      if (!owner) return;
+      const ownerName = getLocalizedText(f.ownerName || f.farmerName, "");
+      const phone = getLocalizedText(f.farmPhoneNumber || f.phone || f.phoneNumber || f.farmerPhoneNumber, "");
+      const village = getLocalizedText(f.village, "");
+      const district = getLocalizedText(f.district, "");
+      const state = getLocalizedText(f.state, "");
+      const farmName = getLocalizedText(f.name || f.farmName, "");
+
+      const existing = map.get(owner) || {};
+      map.set(owner, {
+        name: (ownerName && ownerName !== "Farmer" && ownerName !== "User") ? ownerName : existing.name,
+        phone: (phone && phone !== "—") ? phone : existing.phone,
+        village: (village && village !== "—") ? village : existing.village,
+        district: (district && district !== "—") ? district : existing.district,
+        state: (state && state !== "—") ? state : existing.state,
+        farmName: farmName || existing.farmName,
+        farmId: f.farmId || f.id || existing.farmId,
+      });
+    });
+
+    // 2. Traverse registered farm subcollections (/users/{uid}/roles/farmer/farms/{farmId})
+    groupFarms.forEach((f: any) => {
+      const path = f._path || "";
+      const segments = path.split("/");
+      let owner = f.ownerUid || f.userId;
+      if (!owner && segments[0] === "users" && segments[1]) owner = segments[1];
+      else if (!owner && segments[0] === "farmers" && segments[1]) owner = segments[1];
+      if (!owner) return;
+
+      const ownerName = getLocalizedText(f.ownerName || f.farmerName, "");
+      const phone = getLocalizedText(f.farmPhoneNumber || f.phone || f.phoneNumber, "");
+      const village = getLocalizedText(f.village, "");
+      const district = getLocalizedText(f.district, "");
+      const state = getLocalizedText(f.state, "");
+      const farmName = getLocalizedText(f.name || f.farmName, "");
+
+      const existing = map.get(owner) || {};
+      map.set(owner, {
+        name: (ownerName && ownerName !== "Farmer" && ownerName !== "User") ? ownerName : existing.name,
+        phone: (phone && phone !== "—") ? phone : existing.phone,
+        village: (village && village !== "—") ? village : existing.village,
+        district: (district && district !== "—") ? district : existing.district,
+        state: (state && state !== "—") ? state : existing.state,
+        farmName: farmName || existing.farmName,
+        farmId: f.farmId || f.id || existing.farmId,
+      });
+    });
+
+    // 3. Traverse top-level farms collection
+    topFarms.forEach((f: any) => {
+      const owner = f.ownerUid || f.userId;
+      if (!owner) return;
+      const ownerName = getLocalizedText(f.ownerName || f.farmerName, "");
+      const phone = getLocalizedText(f.farmPhoneNumber || f.phone || f.phoneNumber, "");
+      const village = getLocalizedText(f.village, "");
+      const district = getLocalizedText(f.district, "");
+      const state = getLocalizedText(f.state, "");
+      const farmName = getLocalizedText(f.name || f.farmName, "");
+
+      const existing = map.get(owner) || {};
+      map.set(owner, {
+        name: (ownerName && ownerName !== "Farmer" && ownerName !== "User") ? ownerName : existing.name,
+        phone: (phone && phone !== "—") ? phone : existing.phone,
+        village: (village && village !== "—") ? village : existing.village,
+        district: (district && district !== "—") ? district : existing.district,
+        state: (state && state !== "—") ? state : existing.state,
+        farmName: farmName || existing.farmName,
+        farmId: f.farmId || f.id || existing.farmId,
+      });
+    });
+
+    // 4. Traverse cattle_details
+    cattleList.forEach((c: any) => {
+      const owner = c.ownerUid || c.userId || c.farmerId || c.sellerId;
+      if (!owner) return;
+      const ownerName = getLocalizedText(c.ownerName || c.farmerName || c.sellerName, "");
+      const phone = getLocalizedText(c.phone || c.sellerPhone || c.phoneNumber || c.ownerPhone, "");
+      const village = getLocalizedText(c.village, "");
+      const district = getLocalizedText(c.district, "");
+      const state = getLocalizedText(c.state, "");
+
+      const existing = map.get(owner) || {};
+      map.set(owner, {
+        name: (ownerName && ownerName !== "Farmer" && ownerName !== "User") ? ownerName : existing.name,
+        phone: (phone && phone !== "—") ? phone : existing.phone,
+        village: (village && village !== "—") ? village : existing.village,
+        district: (district && district !== "—") ? district : existing.district,
+        state: (state && state !== "—") ? state : existing.state,
+        farmName: existing.farmName,
+        farmId: existing.farmId,
+      });
+    });
+
+    return map;
+  }, [backendFarms, groupFarms, topFarms, cattleList]);
+
   const farmerMap = new Map<string, any>();
 
   // 1. Process Auth users merged with Firestore profiles
   authUsers.forEach((authUser: any) => {
-    const fsUser = firestoreUsers.find((fu: any) => fu.id === authUser.uid || fu.uid === authUser.uid);
-    const directFarmer = directFarmers.find((df: any) => df.id === authUser.uid || df.uid === authUser.uid);
-    
+    const uid = authUser.uid;
+    const fsUser = firestoreUsers.find((fu: any) => fu.id === uid || fu.uid === uid);
+    const directFarmer = directFarmers.find((df: any) => df.id === uid || df.uid === uid);
+    const meta = farmerMetaMap.get(uid) || {};
+
     const roles: string[] = fsUser?.roles || (fsUser?.role ? [fsUser.role] : authUser?.roles || []);
     const isFarmer =
       roles.some((r: any) => typeof r === "string" && r.toLowerCase().includes("farmer")) ||
       Boolean(fsUser && (fsUser.farms || fsUser.farmer || fsUser.isFarmer)) ||
-      Boolean(authUser && (authUser.farms || authUser.farmer)) ||
-      Boolean(directFarmer);
+      Boolean(authUser && (authUser.farms || authUser.farmer || authUser.isFarmer)) ||
+      Boolean(directFarmer) ||
+      Boolean(meta.farmName || meta.name);
 
     if (isFarmer) {
       const farmerProfile = fsUser?.farmer || authUser?.farmer || directFarmer || {};
-      const farmDetails = (fsUser?.farms && !Array.isArray(fsUser.farms))
-        ? fsUser.farms
-        : (authUser?.farms && !Array.isArray(authUser.farms))
-        ? authUser.farms
-        : (directFarmer?.farms && !Array.isArray(directFarmer.farms))
-        ? directFarmer.farms
-        : {};
+      const rawTimestamp = parseTime(
+        fsUser?.createdAt ||
+        farmerProfile?.createdAt ||
+        authUser?.createdAt ||
+        directFarmer?.createdAt ||
+        authUser?.metadata?.creationTime
+      );
 
-      const rawJoined = fsUser?.createdAt || authUser?.createdAt || directFarmer?.createdAt;
-      let joined = "—";
-      if (rawJoined) {
-        const ms = rawJoined.seconds ? rawJoined.seconds * 1000 : new Date(rawJoined).getTime();
-        if (!isNaN(ms)) {
-          joined = new Date(ms).toLocaleDateString();
+      const phone =
+        (authUser?.phoneNumber && authUser.phoneNumber !== "—") ? authUser.phoneNumber :
+        (fsUser?.phoneNumber && fsUser.phoneNumber !== "—") ? fsUser.phoneNumber :
+        (meta.phone && meta.phone !== "—") ? meta.phone :
+        (farmerProfile.farmerPhoneNumber && farmerProfile.farmerPhoneNumber !== "—") ? farmerProfile.farmerPhoneNumber :
+        (fsUser?.phone && fsUser.phone !== "—") ? fsUser.phone :
+        (authUser?.phone && authUser.phone !== "—") ? authUser.phone :
+        "—";
+
+      let resolvedName =
+        (meta.name && meta.name !== "User" && meta.name !== "Farmer") ? meta.name :
+        (farmerProfile.name && farmerProfile.name !== "User" && farmerProfile.name !== "Farmer") ? farmerProfile.name :
+        (farmerProfile.farmerName && farmerProfile.farmerName !== "User") ? farmerProfile.farmerName :
+        (fsUser?.farmerName && fsUser?.farmerName !== "User") ? fsUser.farmerName :
+        (fsUser?.fullName && fsUser?.fullName !== "User") ? fsUser.fullName :
+        (fsUser?.name && fsUser?.name !== "User") ? fsUser.name :
+        (fsUser?.displayName && fsUser?.displayName !== "User") ? fsUser.displayName :
+        (authUser?.displayName && authUser?.displayName !== "User") ? authUser.displayName :
+        "";
+
+      if (!resolvedName || resolvedName.toLowerCase() === "user" || resolvedName.toLowerCase() === "farmer") {
+        if (phone && phone !== "—") {
+          resolvedName = `Farmer (${phone})`;
+        } else {
+          resolvedName = `Farmer #${uid.slice(-6).toUpperCase()}`;
         }
       }
 
-      const farmName = farmDetails.name || farmerProfile.farmName || farmerProfile.farm || farmerProfile.village || farmerProfile.address || fsUser?.village || "—";
-      const stateName = farmerProfile.state || farmDetails.state || fsUser?.state || "—";
-      const name = farmerProfile.name || farmDetails.name || fsUser?.name || fsUser?.displayName || authUser?.displayName || "Unknown Farmer";
-      const cattle = farmDetails.cattle || farmerProfile.cattle || fsUser?.cattle || directFarmer?.cattle || 0;
-      const status = farmerProfile.status || farmDetails.status || fsUser?.status || authUser?.status || "Active";
+      const village = meta.village || farmerProfile.village || fsUser?.village || "—";
+      const district = meta.district || farmerProfile.district || fsUser?.district || "—";
+      const state = meta.state || farmerProfile.state || fsUser?.state || "—";
 
-      const uid = authUser.uid;
+      const trackedCattle = cattleCountMap.get(uid) || Number(farmerProfile.cattle || fsUser?.cattle || 0);
+      const registeredFarmName = meta.farmName || (fsUser?.farms?.name || farmerProfile?.farmName || null);
+
       farmerMap.set(uid, {
         id: uid,
-        name: getLocalizedText(name),
-        farm: getLocalizedText(farmName),
-        state: getLocalizedText(stateName),
-        cattle: typeof cattle === "number" ? cattle : parseInt(cattle) || 0,
-        joined,
-        status,
-        phoneNumber: fsUser?.phoneNumber || fsUser?.phone || authUser?.phoneNumber || directFarmer?.phone || "—",
+        uid,
+        name: getLocalizedText(resolvedName),
+        phone,
+        village: getLocalizedText(village),
+        district: getLocalizedText(district),
+        state: getLocalizedText(state),
+        cattleCount: trackedCattle,
+        registeredFarmName,
+        hasFarm: Boolean(registeredFarmName),
+        joined: formatDate(rawTimestamp),
+        rawTimestamp,
+        status: fsUser?.status || authUser?.status || farmerProfile.status || "Active",
       });
     }
   });
 
-  // 2. Include any standalone Firestore user documents not present in authUsers
+  // 2. Process standalone Firestore users with farmer roles
   firestoreUsers.forEach((fsUser: any) => {
     const uid = fsUser.id || fsUser.uid;
     if (!uid || farmerMap.has(uid)) return;
 
+    const meta = farmerMetaMap.get(uid) || {};
     const roles: string[] = fsUser.roles || (fsUser.role ? [fsUser.role] : []);
     const isFarmer =
       roles.some((r: any) => typeof r === "string" && r.toLowerCase().includes("farmer")) ||
-      Boolean(fsUser.farms || fsUser.farmer || fsUser.isFarmer);
+      Boolean(fsUser.farmer || fsUser.isFarmer || fsUser.farms) ||
+      Boolean(meta.farmName || meta.name);
 
     if (isFarmer) {
       const directFarmer = directFarmers.find((df: any) => df.id === uid || df.uid === uid);
       const farmerProfile = fsUser.farmer || directFarmer || {};
-      const farmDetails = (fsUser.farms && !Array.isArray(fsUser.farms))
-        ? fsUser.farms
-        : (directFarmer?.farms && !Array.isArray(directFarmer.farms))
-        ? directFarmer.farms
-        : {};
+      const rawTimestamp = parseTime(
+        fsUser.createdAt ||
+        farmerProfile?.createdAt ||
+        directFarmer?.createdAt
+      );
 
-      const rawJoined = fsUser.createdAt || directFarmer?.createdAt;
-      let joined = "—";
-      if (rawJoined) {
-        const ms = rawJoined.seconds ? rawJoined.seconds * 1000 : new Date(rawJoined).getTime();
-        if (!isNaN(ms)) {
-          joined = new Date(ms).toLocaleDateString();
+      const phone =
+        (fsUser.phoneNumber && fsUser.phoneNumber !== "—") ? fsUser.phoneNumber :
+        (meta.phone && meta.phone !== "—") ? meta.phone :
+        (farmerProfile.farmerPhoneNumber && farmerProfile.farmerPhoneNumber !== "—") ? farmerProfile.farmerPhoneNumber :
+        (fsUser.phone && fsUser.phone !== "—") ? fsUser.phone :
+        "—";
+
+      let resolvedName =
+        (meta.name && meta.name !== "User" && meta.name !== "Farmer") ? meta.name :
+        (farmerProfile.name && farmerProfile.name !== "User" && farmerProfile.name !== "Farmer") ? farmerProfile.name :
+        (farmerProfile.farmerName && farmerProfile.farmerName !== "User") ? farmerProfile.farmerName :
+        (fsUser.farmerName && fsUser.farmerName !== "User") ? fsUser.farmerName :
+        (fsUser.fullName && fsUser.fullName !== "User") ? fsUser.fullName :
+        (fsUser.name && fsUser.name !== "User") ? fsUser.name :
+        (fsUser.displayName && fsUser.displayName !== "User") ? fsUser.displayName :
+        "";
+
+      if (!resolvedName || resolvedName.toLowerCase() === "user" || resolvedName.toLowerCase() === "farmer") {
+        if (phone && phone !== "—") {
+          resolvedName = `Farmer (${phone})`;
+        } else {
+          resolvedName = `Farmer #${uid.slice(-6).toUpperCase()}`;
         }
       }
 
-      const farmName = farmDetails.name || farmerProfile.farmName || farmerProfile.farm || farmerProfile.village || farmerProfile.address || fsUser.village || "—";
-      const stateName = farmerProfile.state || farmDetails.state || fsUser.state || "—";
-      const name = farmerProfile.name || farmDetails.name || fsUser.name || fsUser.displayName || "Unknown Farmer";
-      const cattle = farmDetails.cattle || farmerProfile.cattle || fsUser.cattle || directFarmer?.cattle || 0;
-      const status = farmerProfile.status || farmDetails.status || fsUser.status || "Active";
+      const village = meta.village || farmerProfile.village || fsUser.village || "—";
+      const district = meta.district || farmerProfile.district || fsUser.district || "—";
+      const state = meta.state || farmerProfile.state || fsUser.state || "—";
+
+      const trackedCattle = cattleCountMap.get(uid) || Number(farmerProfile.cattle || fsUser.cattle || 0);
+      const registeredFarmName = meta.farmName || (fsUser.farms?.name || farmerProfile?.farmName || null);
 
       farmerMap.set(uid, {
         id: uid,
-        name: getLocalizedText(name),
-        farm: getLocalizedText(farmName),
-        state: getLocalizedText(stateName),
-        cattle: typeof cattle === "number" ? cattle : parseInt(cattle) || 0,
-        joined,
-        status,
-        phoneNumber: fsUser.phoneNumber || fsUser.phone || directFarmer?.phone || "—",
+        uid,
+        name: getLocalizedText(resolvedName),
+        phone,
+        village: getLocalizedText(village),
+        district: getLocalizedText(district),
+        state: getLocalizedText(state),
+        cattleCount: trackedCattle,
+        registeredFarmName,
+        hasFarm: Boolean(registeredFarmName),
+        joined: formatDate(rawTimestamp),
+        rawTimestamp,
+        status: fsUser.status || farmerProfile.status || "Active",
       });
     }
   });
 
-  // 3. Include any standalone direct farmers collection documents
-  directFarmers.forEach((df: any) => {
-    const id = df.id || df.uid;
-    if (!id || farmerMap.has(id)) return;
+  // Sort by newest registration first
+  const allFarmers = Array.from(farmerMap.values()).sort(
+    (a, b) => (b.rawTimestamp || 0) - (a.rawTimestamp || 0)
+  );
 
-    const farmDetails = (df.farms && !Array.isArray(df.farms)) ? df.farms : {};
-    const rawJoined = df.createdAt;
-    let joined = "—";
-    if (rawJoined) {
-      const ms = rawJoined.seconds ? rawJoined.seconds * 1000 : new Date(rawJoined).getTime();
-      if (!isNaN(ms)) {
-        joined = new Date(ms).toLocaleDateString();
-      }
-    }
-
-    farmerMap.set(id, {
-      id: id,
-      name: getLocalizedText(df.name || farmDetails.name || "Unknown Farmer"),
-      farm: getLocalizedText(farmDetails.name || df.farm || df.village || df.address || "—"),
-      state: getLocalizedText(df.state || farmDetails.state || "—"),
-      cattle: typeof df.cattle === "number" ? df.cattle : parseInt(df.cattle) || 0,
-      joined,
-      status: df.status || "Active",
-      phoneNumber: df.phone || df.phoneNumber || "—",
-    });
-  });
-
-  const farmers = Array.from(farmerMap.values());
-  const totalFarmers = farmers.length;
-  const activeFarmers = farmers.filter((f) => f.status === "Active" || !f.status).length;
-  const pendingFarmers = farmers.filter((f) => f.status === "Pending" || f.status === "In Review").length;
-  const suspendedFarmers = farmers.filter((f) => f.status === "Suspended" || f.status === "Rejected").length;
+  const totalFarmers = allFarmers.length;
+  const activeFarmers = allFarmers.filter((f) => f.status.toLowerCase() === "active" || !f.status).length;
+  const farmersWithFarms = allFarmers.filter((f) => f.hasFarm).length;
+  const farmersWithCattle = allFarmers.filter((f) => f.cattleCount > 0).length;
 
   return (
-    <DataPage
-      title="Farmer management"
-      description="Onboard, verify and manage farmers on iHerd."
-      primaryAction="Add farmer"
-      isLoading={isLoading}
-      filters={["Active", "Pending", "Suspended"]}
-      rowHref={(r) => `/users/${r.id}`}
-      kpis={[
-        { label: "Total farmers", value: totalFarmers.toLocaleString(), hint: pendingFarmers > 0 ? `+${pendingFarmers} pending KYC` : undefined },
-        { label: "Active", value: activeFarmers.toLocaleString() },
-        { label: "Pending KYC", value: pendingFarmers.toLocaleString() },
-        { label: "Suspended", value: suspendedFarmers.toLocaleString() },
-      ]}
-      data={farmers}
-      columns={[
-        {
-          key: "name",
-          label: "Farmer",
-          render: (r) => (
-            <Link
-              to="/users/$userId"
-              params={{ userId: r.id }}
-              className="flex items-center gap-3 min-w-0 group"
-            >
-              <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary/10 text-primary text-xs font-semibold">
-                {(r.name || "FM").split(" ").map((n: string) => n[0]).slice(0, 2).join("").toUpperCase()}
+    <div className="space-y-6">
+      <DataPage
+        title="Farmers Directory"
+        description="All registered farmers, contact info, locations, and linked farm and livestock records."
+        stats={[
+          {
+            label: "Total Registered Farmers",
+            value: String(totalFarmers),
+            change: `${activeFarmers} active farmers`,
+            up: true,
+          },
+          {
+            label: "Farmers with Registered Farms",
+            value: String(farmersWithFarms),
+            change: "Have active farms",
+            up: true,
+          },
+          {
+            label: "Farmers with Cattle",
+            value: String(farmersWithCattle),
+            change: "Have livestock tracked",
+            up: true,
+          },
+          {
+            label: "Active Verification Rate",
+            value: totalFarmers > 0 ? `${Math.round((activeFarmers / totalFarmers) * 100)}%` : "0%",
+            change: "Verified accounts",
+            up: true,
+          },
+        ]}
+        searchKeys={["name", "phone", "village", "district", "state", "registeredFarmName"]}
+        searchPlaceholder="Search farmers by name, phone, village, or state..."
+        statusOptions={["Active", "Pending", "Verified"]}
+        data={allFarmers}
+        columns={[
+          {
+            key: "name",
+            label: "Farmer Profile",
+            render: (r) => (
+              <div className="flex items-center gap-3">
+                <div className="h-9 w-9 rounded-2xl bg-primary/10 text-primary flex items-center justify-center font-bold text-xs shrink-0 border border-primary/20">
+                  <User className="h-4 w-4" />
+                </div>
+                <div className="space-y-0.5 min-w-0">
+                  <Link
+                    to="/users/$userId"
+                    params={{ userId: r.uid }}
+                    search={{ tab: "farmer" } as any}
+                    className="font-bold text-xs text-foreground hover:text-primary transition-colors truncate block"
+                  >
+                    {r.name}
+                  </Link>
+                  <div className="text-[10px] text-muted-foreground font-mono truncate">
+                    UID: {r.uid}
+                  </div>
+                </div>
               </div>
-              <div className="min-w-0">
-                <div className="font-medium truncate group-hover:text-primary transition-colors">{r.name}</div>
-                <div className="text-xs text-muted-foreground truncate">{r.id}</div>
+            ),
+          },
+          {
+            key: "phone",
+            label: "Contact",
+            render: (r) => (
+              <div className="space-y-0.5 text-xs text-muted-foreground">
+                <div className="flex items-center gap-1 font-medium text-foreground">
+                  <Phone className="h-3 w-3 text-muted-foreground" />
+                  <span>{r.phone}</span>
+                </div>
               </div>
-            </Link>
-          ),
-        },
-        { key: "farm", label: "Farm" },
-        { key: "state", label: "State" },
-        { key: "cattle", label: "Cattle", render: (r) => <span className="font-medium">{r.cattle}</span> },
-        { key: "joined", label: "Joined" },
-        { key: "status", label: "Status", render: (r) => <StatusBadge status={r.status} /> },
-      ]}
-    />
+            ),
+          },
+          {
+            key: "location",
+            label: "Location",
+            render: (r) => (
+              <div className="space-y-0.5 text-xs text-muted-foreground">
+                <div className="flex items-center gap-1 font-medium text-foreground">
+                  <MapPin className="h-3 w-3 text-primary shrink-0" />
+                  <span>{r.village !== "—" ? r.village : r.district}</span>
+                </div>
+                <div>{r.state !== "—" ? r.state : "India"}</div>
+              </div>
+            ),
+          },
+          {
+            key: "farmStatus",
+            label: "Registered Farm",
+            render: (r) => (
+              <div className="space-y-0.5 text-xs">
+                {r.hasFarm ? (
+                  <Link
+                    to="/farms"
+                    className="font-semibold text-primary flex items-center gap-1 hover:underline"
+                  >
+                    <Building className="h-3 w-3 shrink-0" />
+                    <span className="truncate max-w-[140px]">{r.registeredFarmName}</span>
+                  </Link>
+                ) : (
+                  <span className="text-muted-foreground text-[11px]">No Farm Registered</span>
+                )}
+              </div>
+            ),
+          },
+          {
+            key: "cattleCount",
+            label: "Livestock Count",
+            render: (r) => (
+              <div className="space-y-0.5 text-xs">
+                <span className="font-bold text-foreground">
+                  {r.cattleCount > 0 ? `${r.cattleCount} Cattle` : "0 Tracked"}
+                </span>
+              </div>
+            ),
+          },
+          {
+            key: "joined",
+            label: "Joined Date",
+            render: (r) => (
+              <div className="space-y-0.5 text-xs text-muted-foreground">
+                <div className="flex items-center gap-1 font-medium text-foreground">
+                  <Calendar className="h-3 w-3 text-muted-foreground" />
+                  <span>{r.joined}</span>
+                </div>
+              </div>
+            ),
+          },
+          {
+            key: "status",
+            label: "Status",
+            render: (r) => <StatusBadge status={r.status} />,
+          },
+          {
+            key: "actions",
+            label: "Actions",
+            render: (r) => (
+              <div className="flex items-center gap-1.5 justify-end">
+                <Button asChild size="sm" variant="outline" className="h-8 text-xs gap-1 rounded-xl">
+                  <Link to="/users/$userId" params={{ userId: r.uid }} search={{ tab: "farmer" } as any}>
+                    <User className="h-3.5 w-3.5" /> View Profile
+                  </Link>
+                </Button>
+              </div>
+            ),
+            className: "text-right",
+          },
+        ]}
+      />
+    </div>
   );
 }

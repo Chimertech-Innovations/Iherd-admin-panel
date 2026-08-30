@@ -11,7 +11,9 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as BannersRouteImport } from './routes/banners'
+import { Route as CattleRouteImport } from './routes/cattle'
 import { Route as DashboardRouteImport } from './routes/dashboard'
+import { Route as FarmsRouteImport } from './routes/farms'
 import { Route as InvoicesRouteImport } from './routes/invoices'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as NotificationsRouteImport } from './routes/notifications'
@@ -47,9 +49,19 @@ const BannersRoute = BannersRouteImport.update({
   path: '/banners',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CattleRoute = CattleRouteImport.update({
+  id: '/cattle',
+  path: '/cattle',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DashboardRoute = DashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FarmsRoute = FarmsRouteImport.update({
+  id: '/farms',
+  path: '/farms',
   getParentRoute: () => rootRouteImport,
 } as any)
 const InvoicesRoute = InvoicesRouteImport.update({
@@ -176,7 +188,9 @@ const VetsIndexRoute = VetsIndexRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/banners': typeof BannersRoute
+  '/cattle': typeof CattleRoute
   '/dashboard': typeof DashboardRoute
+  '/farms': typeof FarmsRoute
   '/invoices': typeof InvoicesRoute
   '/login': typeof LoginRoute
   '/notifications': typeof NotificationsRoute
@@ -205,7 +219,9 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/banners': typeof BannersRoute
+  '/cattle': typeof CattleRoute
   '/dashboard': typeof DashboardRoute
+  '/farms': typeof FarmsRoute
   '/invoices': typeof InvoicesRoute
   '/login': typeof LoginRoute
   '/notifications': typeof NotificationsRoute
@@ -235,7 +251,9 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/banners': typeof BannersRoute
+  '/cattle': typeof CattleRoute
   '/dashboard': typeof DashboardRoute
+  '/farms': typeof FarmsRoute
   '/invoices': typeof InvoicesRoute
   '/login': typeof LoginRoute
   '/notifications': typeof NotificationsRoute
@@ -266,7 +284,9 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/banners'
+    | '/cattle'
     | '/dashboard'
+    | '/farms'
     | '/invoices'
     | '/login'
     | '/notifications'
@@ -295,7 +315,9 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/banners'
+    | '/cattle'
     | '/dashboard'
+    | '/farms'
     | '/invoices'
     | '/login'
     | '/notifications'
@@ -324,7 +346,9 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/banners'
+    | '/cattle'
     | '/dashboard'
+    | '/farms'
     | '/invoices'
     | '/login'
     | '/notifications'
@@ -354,7 +378,9 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   BannersRoute: typeof BannersRoute
+  CattleRoute: typeof CattleRoute
   DashboardRoute: typeof DashboardRoute
+  FarmsRoute: typeof FarmsRoute
   InvoicesRoute: typeof InvoicesRoute
   LoginRoute: typeof LoginRoute
   NotificationsRoute: typeof NotificationsRoute
@@ -397,11 +423,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof BannersRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/cattle': {
+      id: '/cattle'
+      path: '/cattle'
+      fullPath: '/cattle'
+      preLoaderRoute: typeof CattleRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/dashboard': {
       id: '/dashboard'
       path: '/dashboard'
       fullPath: '/dashboard'
       preLoaderRoute: typeof DashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/farms': {
+      id: '/farms'
+      path: '/farms'
+      fullPath: '/farms'
+      preLoaderRoute: typeof FarmsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/invoices': {
@@ -578,7 +618,9 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   BannersRoute: BannersRoute,
+  CattleRoute: CattleRoute,
   DashboardRoute: DashboardRoute,
+  FarmsRoute: FarmsRoute,
   InvoicesRoute: InvoicesRoute,
   LoginRoute: LoginRoute,
   NotificationsRoute: NotificationsRoute,

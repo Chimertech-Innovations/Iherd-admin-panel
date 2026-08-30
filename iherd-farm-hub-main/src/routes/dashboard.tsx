@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import {
   Users,
   ShoppingBag,
@@ -17,6 +17,26 @@ import {
   Flame,
   Ticket,
   Coins,
+  Download,
+  Calendar as CalendarIcon,
+  Filter,
+  FileSpreadsheet,
+  CheckCircle2,
+  RefreshCw,
+  UserPlus,
+  Mail,
+  Send,
+  LogIn,
+  Eye,
+  ExternalLink,
+  ChevronRight,
+  Search,
+  X,
+  Phone,
+  ShieldCheck,
+  Clock,
+  Landmark,
+  MapPin,
 } from "lucide-react";
 import {
   AreaChart,
@@ -32,8 +52,7 @@ import {
   CartesianGrid,
   Legend,
 } from "recharts";
-import { useState } from "react";
-import { UserPlus, Mail, Send } from "lucide-react";
+import { useState, useMemo } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -56,9 +75,25 @@ import {
 import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/admin/PageHeader";
 import { StatusBadge } from "@/components/admin/StatusBadge";
 import { useAdminUsers } from "../hooks/useAdminUsers";
+import { useAuth } from "@/hooks/useAuth";
+import { useQuery } from "@tanstack/react-query";
+import {
+  useFirebaseCollection,
+  useFirebaseCollectionGroup,
+  useCoupons,
+  useTokenAdvance,
+  useBestSellers,
+} from "../hooks/useFirebaseData";
+import { getLocalizedText } from "@/lib/utils";
+
+const API_BASE =
+  (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ||
+  "https://iherdadminpanel.onrender.com";
+const FALLBACK_API_BASE = "https://iherdadminpanel.onrender.com";
 
 function InviteUserDialog() {
   const [open, setOpen] = useState(false);
@@ -79,7 +114,7 @@ function InviteUserDialog() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button size="sm" className="gap-1.5 bg-gradient-to-br from-primary to-primary-glow">
+        <Button size="sm" className="gap-1.5 bg-gradient-to-br from-primary to-primary-glow rounded-xl">
           <UserPlus className="h-4 w-4" /> Invite user
         </Button>
       </DialogTrigger>
@@ -98,22 +133,36 @@ function InviteUserDialog() {
         <form onSubmit={handleInvite} className="space-y-4 pt-2">
           <div className="space-y-1.5">
             <Label htmlFor="invite-name">Full name</Label>
-            <Input id="invite-name" placeholder="e.g. Ravi Patel" value={name} onChange={(e) => setName(e.target.value)} />
+            <Input
+              id="invite-name"
+              placeholder="e.g. Ravi Patel"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="rounded-xl"
+            />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="invite-email">Email address</Label>
             <div className="relative">
               <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input id="invite-email" type="email" required placeholder="name@iherd.app" className="pl-9" value={email} onChange={(e) => setEmail(e.target.value)} />
+              <Input
+                id="invite-email"
+                type="email"
+                required
+                placeholder="name@iherd.app"
+                className="pl-9 rounded-xl"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
             </div>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="invite-role">Role</Label>
             <Select value={role} onValueChange={setRole}>
-              <SelectTrigger id="invite-role">
+              <SelectTrigger id="invite-role" className="rounded-xl">
                 <SelectValue placeholder="Select role" />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className="rounded-xl">
                 <SelectItem value="admin">Admin</SelectItem>
                 <SelectItem value="farmer">Farmer</SelectItem>
                 <SelectItem value="seller">Seller</SelectItem>
@@ -123,9 +172,11 @@ function InviteUserDialog() {
           </div>
           <DialogFooter className="gap-2 sm:gap-2">
             <DialogClose asChild>
-              <Button type="button" variant="outline">Cancel</Button>
+              <Button type="button" variant="outline" className="rounded-xl">
+                Cancel
+              </Button>
             </DialogClose>
-            <Button type="submit" className="gap-1.5 bg-gradient-to-br from-primary to-primary-glow">
+            <Button type="submit" className="gap-1.5 bg-gradient-to-br from-primary to-primary-glow rounded-xl">
               <Send className="h-4 w-4" /> Send invite
             </Button>
           </DialogFooter>
@@ -145,126 +196,138 @@ export const Route = createFileRoute("/dashboard")({
   component: Dashboard,
 });
 
-const userGrowthData = [
-  { m: "Jan", farmers: 6200, sellers: 240 },
-  { m: "Feb", farmers: 6800, sellers: 268 },
-  { m: "Mar", farmers: 7400, sellers: 295 },
-  { m: "Apr", farmers: 8100, sellers: 322 },
-  { m: "May", farmers: 8900, sellers: 358 },
-  { m: "Jun", farmers: 9600, sellers: 392 },
-  { m: "Jul", farmers: 10300, sellers: 421 },
-  { m: "Aug", farmers: 10900, sellers: 458 },
-  { m: "Sep", farmers: 11400, sellers: 492 },
-  { m: "Oct", farmers: 11800, sellers: 524 },
-  { m: "Nov", farmers: 12100, sellers: 561 },
-  { m: "Dec", farmers: 12486, sellers: 598 },
+const MONTHS = [
+  { value: "all", label: "All Months" },
+  { value: "0", label: "January" },
+  { value: "1", label: "February" },
+  { value: "2", label: "March" },
+  { value: "3", label: "April" },
+  { value: "4", label: "May" },
+  { value: "5", label: "June" },
+  { value: "6", label: "July" },
+  { value: "7", label: "August" },
+  { value: "8", label: "September" },
+  { value: "9", label: "October" },
+  { value: "10", label: "November" },
+  { value: "11", label: "December" },
 ];
 
-const cattleMarketData = [
-  { m: "Jan", listed: 420, sold: 286 },
-  { m: "Feb", listed: 510, sold: 342 },
-  { m: "Mar", listed: 612, sold: 408 },
-  { m: "Apr", listed: 588, sold: 391 },
-  { m: "May", listed: 705, sold: 482 },
-  { m: "Jun", listed: 812, sold: 561 },
-  { m: "Jul", listed: 894, sold: 624 },
-  { m: "Aug", listed: 921, sold: 658 },
-  { m: "Sep", listed: 1042, sold: 738 },
-  { m: "Oct", listed: 1180, sold: 821 },
-  { m: "Nov", listed: 1268, sold: 902 },
-  { m: "Dec", listed: 1382, sold: 985 },
+const YEARS = [
+  { value: "all", label: "All Years" },
+  { value: "2026", label: "2026" },
+  { value: "2025", label: "2025" },
+  { value: "2024", label: "2024" },
 ];
 
-const productSalesData = [
-  { m: "Jan", orders: 320 },
-  { m: "Feb", orders: 360 },
-  { m: "Mar", orders: 410 },
-  { m: "Apr", orders: 380 },
-  { m: "May", orders: 470 },
-  { m: "Jun", orders: 520 },
-  { m: "Jul", orders: 560 },
-  { m: "Aug", orders: 540 },
-  { m: "Sep", orders: 610 },
-  { m: "Oct", orders: 670 },
-  { m: "Nov", orders: 720 },
-  { m: "Dec", orders: 780 },
-];
+function parseRecordDate(record: any): Date | null {
+  if (!record) return null;
+  const val =
+    record.createdAt ||
+    record.date ||
+    record.joined ||
+    record.joinedDate ||
+    record.timestamp ||
+    record.metadata?.creationTime ||
+    record.lastLoginAt ||
+    record.lastSignInTime ||
+    record.updatedAt;
 
-const cattleOrdersData = [
-  { m: "Jan", orders: 142, gmv: 118 },
-  { m: "Feb", orders: 168, gmv: 142 },
-  { m: "Mar", orders: 196, gmv: 168 },
-  { m: "Apr", orders: 184, gmv: 156 },
-  { m: "May", orders: 224, gmv: 192 },
-  { m: "Jun", orders: 268, gmv: 232 },
-  { m: "Jul", orders: 298, gmv: 258 },
-  { m: "Aug", orders: 312, gmv: 274 },
-  { m: "Sep", orders: 348, gmv: 308 },
-  { m: "Oct", orders: 386, gmv: 342 },
-  { m: "Nov", orders: 412, gmv: 362 },
-  { m: "Dec", orders: 458, gmv: 408 },
-];
-
-const revenueData = [
-  { m: "Jan", revenue: 28400 },
-  { m: "Feb", revenue: 31200 },
-  { m: "Mar", revenue: 35800 },
-  { m: "Apr", revenue: 33100 },
-  { m: "May", revenue: 41200 },
-  { m: "Jun", revenue: 46800 },
-  { m: "Jul", revenue: 51200 },
-  { m: "Aug", revenue: 49800 },
-  { m: "Sep", revenue: 57400 },
-  { m: "Oct", revenue: 62100 },
-  { m: "Nov", revenue: 68900 },
-  { m: "Dec", revenue: 74300 },
-];
-
-const recentActivity = [
-  { who: "Marketplace", what: "New cattle listing pending approval — Gir cow", when: "8m ago", tag: "pending" },
-  { who: "Order #IH-7821", what: "Payment captured — ₹4,820", when: "14m ago", tag: "paid" },
-  { who: "Seller onboarding", what: "Sharma Feeds — KYC approved", when: "26m ago", tag: "approved" },
-  { who: "Support", what: "New issue from Rajesh Farms — feed delivery delay", when: "42m ago", tag: "open" },
-  { who: "Farmer KYC", what: "Lakshmi Devi — ownership document under review", when: "1h ago", tag: "inreview" },
-];
-
-function Kpi({
-  label, value, delta, up, icon: Icon, tint,
-}: {
-  label: string; value: string; delta: string; up: boolean; icon: any; tint: string;
-}) {
-  return (
-    <Card className="p-5 rounded-2xl relative overflow-hidden">
-      <div className="flex items-start justify-between">
-        <div className="min-w-0">
-          <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
-          <div className="mt-2 text-3xl font-bold tracking-tight">{value}</div>
-          <div className={`mt-2 inline-flex items-center gap-1 text-xs font-medium ${up ? "text-success" : "text-destructive"}`}>
-            {up ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
-            {delta} vs last month
-          </div>
-        </div>
-        <div className={`grid h-11 w-11 shrink-0 place-items-center rounded-xl ${tint}`}>
-          <Icon className="h-5 w-5" />
-        </div>
-      </div>
-    </Card>
-  );
+  if (!val) return null;
+  if (val instanceof Date) return isNaN(val.getTime()) ? null : val;
+  if (typeof val === "object" && (val._seconds || val.seconds)) {
+    return new Date((val._seconds || val.seconds) * 1000);
+  }
+  const d = new Date(val);
+  return isNaN(d.getTime()) ? null : d;
 }
 
-const metricRanges: Record<string, { label: string; mult: number }> = {
-  today: { label: "Today", mult: 0.03 },
-  week: { label: "This week", mult: 0.18 },
-  month: { label: "This month", mult: 1 },
-  quarter: { label: "This quarter", mult: 2.8 },
-  year: { label: "This year", mult: 11 },
-};
+function parseLastLogin(record: any): Date | null {
+  if (!record) return null;
+  const val = record.lastLoginAt || record.lastSignInTime || record.updatedAt || record.createdAt;
+  if (!val) return null;
+  if (val instanceof Date) return isNaN(val.getTime()) ? null : val;
+  if (typeof val === "object" && (val._seconds || val.seconds)) {
+    return new Date((val._seconds || val.seconds) * 1000);
+  }
+  const d = new Date(val);
+  return isNaN(d.getTime()) ? null : d;
+}
 
-function scaleNum(base: number, mult: number) {
-  const v = Math.round(base * mult);
-  if (v >= 100000) return `${(v / 100000).toFixed(1)}L`;
-  if (v >= 1000) return v.toLocaleString();
-  return v.toString();
+function formatTimeAgo(d: Date | null): string {
+  if (!d) return "Recently";
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffMins < 1) return "Just now";
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return d.toLocaleDateString();
+}
+
+function Kpi({
+  label,
+  value,
+  delta,
+  up,
+  icon: Icon,
+  tint,
+  onClick,
+}: {
+  label: string;
+  value: string | number;
+  delta?: string;
+  up?: boolean;
+  icon: any;
+  tint: string;
+  onClick?: () => void;
+}) {
+  return (
+    <Card
+      onClick={onClick}
+      className={`p-5 rounded-2xl relative overflow-hidden border shadow-sm transition-all duration-200 ${
+        onClick
+          ? "cursor-pointer hover:shadow-lg hover:border-primary/50 hover:bg-muted/10 group"
+          : "hover:shadow-md"
+      }`}
+    >
+      <div className="flex items-start justify-between">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5 text-xs uppercase tracking-wider text-muted-foreground font-semibold">
+            {label}
+            {onClick && (
+              <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60 group-hover:text-primary group-hover:translate-x-0.5 transition-all" />
+            )}
+          </div>
+          <div className="mt-2 text-3xl font-bold tracking-tight text-foreground">
+            {value}
+          </div>
+          {delta && (
+            <div
+              className={`mt-2 inline-flex items-center gap-1 text-xs font-medium ${
+                up ? "text-emerald-600 dark:text-emerald-400" : "text-destructive"
+              }`}
+            >
+              {up ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
+              {delta}
+            </div>
+          )}
+        </div>
+        <div className={`grid h-12 w-12 shrink-0 place-items-center rounded-2xl ${tint} group-hover:scale-105 transition-transform`}>
+          <Icon className="h-6 w-6" />
+        </div>
+      </div>
+      {onClick && (
+        <div className="mt-3 pt-2 border-t border-border/40 flex items-center justify-between text-[11px] text-muted-foreground group-hover:text-primary font-medium transition-colors">
+          <span>Click to view details</span>
+          <Eye className="h-3.5 w-3.5" />
+        </div>
+      )}
+    </Card>
+  );
 }
 
 const tooltipStyle = {
@@ -273,219 +336,1307 @@ const tooltipStyle = {
   borderRadius: 12,
 };
 
-import { useAuth } from "@/hooks/useAuth";
-import { useQuery } from "@tanstack/react-query";
-import { useFirebaseCollection, useCoupons, useTokenAdvance, useBestSellers } from "../hooks/useFirebaseData";
-import { getLocalizedText } from "@/lib/utils";
-
 function Dashboard() {
-  const [range, setRange] = useState<keyof typeof metricRanges>("month");
-  const m = metricRanges[range].mult;
+  const now = new Date();
+  const currentMonthStr = String(now.getMonth());
+  const currentYearStr = String(now.getFullYear());
+
+  const [selectedMonth, setSelectedMonth] = useState<string>(currentMonthStr);
+  const [selectedYear, setSelectedYear] = useState<string>(currentYearStr);
+
+  // Modal inspection state
+  const [modalType, setModalType] = useState<
+    "farmers" | "verified_farmers" | "farms" | "sellers" | "cattle" | "products" | "best_sellers" | "coupons" | "logins" | "orders" | null
+  >(null);
+  const [searchQuery, setSearchQuery] = useState("");
+
   const { profile } = useAuth();
   const displayName = profile?.name ? profile.name.split(" ")[0] : "Admin";
 
   const { data: allUsers = [] } = useAdminUsers();
   const { data: firestoreUsers = [] } = useFirebaseCollection<any>("users");
   const { data: cattle = [] } = useFirebaseCollection("cattle-marketplace");
-  const { data: orders = [] } = useFirebaseCollection("CattleOrders");
+  const { data: cattleDetails = [] } = useFirebaseCollection("cattle_details");
+  const { data: cattleOrders = [] } = useFirebaseCollection("CattleOrders");
   const { data: products = [] } = useFirebaseCollection("product_marketplace/main/products");
   const { data: productOrders = [] } = useFirebaseCollection("ProductOrders");
-  const { data: issues = [] } = useFirebaseCollection("issues");
+  const { data: groupFarms = [] } = useFirebaseCollectionGroup<any>("farms");
+  const { data: topFarms = [] } = useFirebaseCollection<any>("farms");
   const { data: coupons = [] } = useCoupons();
   const { data: tokenAdvData } = useTokenAdvance();
   const { data: bestSellers = [] } = useBestSellers();
 
-  // Extract farmers and sellers dynamically from merged users list
-  const farmers = allUsers.filter((u: any) => {
-    const fsUser = firestoreUsers.find((fu: any) => fu.id === u.uid || fu.uid === u.uid);
-    const roles = fsUser?.roles || (fsUser?.role ? [fsUser.role] : u.roles || []);
-    return (
-      roles.some((r: any) => typeof r === "string" && r.toLowerCase().includes("farmer")) ||
-      Boolean(fsUser && (fsUser.farms || fsUser.farmer || fsUser.isFarmer)) ||
-      Boolean(u && (u.farms || u.farmer))
-    );
-  });
-  const sellers = allUsers.filter((u: any) => {
-    const fsUser = firestoreUsers.find((fu: any) => fu.id === u.uid || fu.uid === u.uid);
-    const roles = fsUser?.roles || (fsUser?.role ? [fsUser.role] : u.roles || []);
-    return (
-      roles.some((r: any) => typeof r === "string" && r.toLowerCase().includes("seller")) ||
-      Boolean(fsUser && (fsUser.seller || fsUser.isSeller)) ||
-      Boolean(u && u.seller)
-    );
+  // Enriched product orders from API
+  const { data: apiProductOrders = [] } = useQuery({
+    queryKey: ["dashboardProductOrders"],
+    queryFn: async () => {
+      const endpoints = [API_BASE, FALLBACK_API_BASE];
+      for (const base of endpoints) {
+        try {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 6000);
+          const res = await fetch(`${base}/api/admin/product-orders`, { signal: controller.signal });
+          clearTimeout(timer);
+          if (res.ok) {
+            const data = await res.json();
+            return data.orders || [];
+          }
+        } catch {
+          // try next
+        }
+      }
+      return [];
+    },
+    staleTime: 20_000,
   });
 
-  // Strictly bind counts to active Firebase collections
-  const farmersCount = farmers.length;
-  const activeFarmersCount = farmers.filter((f: any) => f.status === "Active").length;
-  const sellersCount = sellers.length;
-  const cattleCount = cattle ? cattle.length : 0;
-  const ordersCount = orders ? orders.length : 0;
-  const productsCount = products ? products.length : 0;
-  const productOrdersCount = productOrders ? productOrders.length : 0;
-  const issuesCount = issues ? issues.length : 0;
+  // Enriched registered farms from API (which searches /users/{uid}/roles/farmer/farms subcollections)
+  const { data: apiFarms = [] } = useQuery({
+    queryKey: ["dashboardFarms"],
+    queryFn: async () => {
+      const endpoints = [API_BASE, FALLBACK_API_BASE];
+      for (const base of endpoints) {
+        try {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 6000);
+          const res = await fetch(`${base}/api/admin/farms`, { signal: controller.signal });
+          clearTimeout(timer);
+          if (res.ok) {
+            const data = await res.json();
+            return data.farms || [];
+          }
+        } catch {
+          // try next
+        }
+      }
+      return [];
+    },
+    staleTime: 20_000,
+  });
+
+  const effectiveProductOrders = apiProductOrders.length > 0 ? apiProductOrders : productOrders;
+
+  // Extract all farmers and sellers
+  const allFarmers = useMemo(() => {
+    return allUsers.filter((u: any) => {
+      const fsUser = firestoreUsers.find((fu: any) => fu.id === u.uid || fu.uid === u.uid);
+      const roles = fsUser?.roles || (fsUser?.role ? [fsUser.role] : u.roles || []);
+      return (
+        roles.some((r: any) => typeof r === "string" && r.toLowerCase().includes("farmer")) ||
+        Boolean(fsUser && (fsUser.farms || fsUser.farmer || fsUser.isFarmer)) ||
+        Boolean(u && (u.farms || u.farmer))
+      );
+    });
+  }, [allUsers, firestoreUsers]);
+
+  const allSellers = useMemo(() => {
+    return allUsers.filter((u: any) => {
+      const fsUser = firestoreUsers.find((fu: any) => fu.id === u.uid || fu.uid === u.uid);
+      const roles = fsUser?.roles || (fsUser?.role ? [fsUser.role] : u.roles || []);
+      return (
+        roles.some((r: any) => typeof r === "string" && r.toLowerCase().includes("seller")) ||
+        Boolean(fsUser && (fsUser.seller || fsUser.isSeller)) ||
+        Boolean(u && u.seller)
+      );
+    });
+  }, [allUsers, firestoreUsers]);
+
+  // Extract all farms across Firestore users & collectionGroup query
+  const allFarms = useMemo(() => {
+    const map = new Map<string, any>();
+
+    // 1. Process live Firestore collectionGroup `farms` (includes /users/{uid}/roles/farmer/farms)
+    groupFarms.forEach((gf: any) => {
+      const key = gf.farmId || gf.id;
+      if (!key) return;
+      const path = gf._path || "";
+      const segments = path.split("/");
+      let ownerUid = gf.ownerUid || gf.userId || "";
+      if (!ownerUid && segments[0] === "users" && segments[1]) ownerUid = segments[1];
+      else if (!ownerUid && segments[0] === "farmers" && segments[1]) ownerUid = segments[1];
+
+      const ownerObj = firestoreUsers.find((fu: any) => fu.id === ownerUid || fu.uid === ownerUid) || allUsers.find((au: any) => au.uid === ownerUid) || {};
+
+      map.set(key, {
+        ...gf,
+        id: key,
+        userId: ownerUid,
+        name: getLocalizedText(gf.name || gf.farmName, "Registered Dairy Farm"),
+        farmerName: getLocalizedText(gf.ownerName || gf.farmerName || ownerObj.name || ownerObj.displayName, "Farmer"),
+        state: getLocalizedText(gf.state || ownerObj.state, "—"),
+        district: getLocalizedText(gf.district || ownerObj.district, "—"),
+        cattle: gf.numberOfAnimals || gf.cattleCount || 0,
+        phone: gf.farmPhoneNumber || gf.phone || ownerObj.phoneNumber || ownerObj.phone || "—",
+        createdAt: gf.createdAt || ownerObj.createdAt,
+      });
+    });
+
+    // 2. Process backend API farms
+    apiFarms.forEach((f: any) => {
+      const key = f.id || f.farmId;
+      if (!key || map.has(key)) return;
+      map.set(key, {
+        ...f,
+        id: key,
+        userId: f.ownerUid || f.userId,
+        name: getLocalizedText(f.name || f.farmName, "Registered Dairy Farm"),
+        farmerName: getLocalizedText(f.ownerName || f.farmerName, "Farmer"),
+        state: getLocalizedText(f.state, "—"),
+        district: getLocalizedText(f.district, "—"),
+        cattle: f.cattleCount || 0,
+        phone: f.farmPhoneNumber || f.phone || "—",
+        createdAt: f.createdAt,
+      });
+    });
+
+    // 3. Process topFarms collection
+    topFarms.forEach((tf: any) => {
+      const key = tf.id || tf.farmId;
+      if (!key || map.has(key)) return;
+      map.set(key, {
+        ...tf,
+        id: key,
+        userId: tf.ownerUid || tf.userId,
+        name: getLocalizedText(tf.name || tf.farmName, "Registered Dairy Farm"),
+        farmerName: getLocalizedText(tf.ownerName || tf.farmerName, "Farmer"),
+        state: getLocalizedText(tf.state, "—"),
+        district: getLocalizedText(tf.district, "—"),
+        cattle: tf.cattleCount || 0,
+        phone: tf.farmPhoneNumber || tf.phone || "—",
+        createdAt: tf.createdAt,
+      });
+    });
+
+    // 4. Process explicit user fields
+    firestoreUsers.forEach((u: any) => {
+      if (u.farms) {
+        if (Array.isArray(u.farms)) {
+          u.farms.forEach((f: any, idx: number) => {
+            const key = f.id || f.farmId || `${u.id}-farm-${idx}`;
+            if (!map.has(key)) {
+              map.set(key, {
+                id: key,
+                userId: u.id || u.uid,
+                name: getLocalizedText(f.name || f.farmName || `${u.name || "Farmer"}'s Farm`),
+                farmerName: getLocalizedText(u.name || u.displayName || "Farmer"),
+                state: getLocalizedText(f.state || u.state || "—"),
+                district: getLocalizedText(f.district || u.district || "—"),
+                cattle: f.cattle || f.totalCattle || 0,
+                phone: u.phoneNumber || u.phone || "—",
+                createdAt: f.createdAt || u.createdAt,
+              });
+            }
+          });
+        }
+      }
+    });
+
+    return Array.from(map.values());
+  }, [groupFarms, apiFarms, topFarms, firestoreUsers, allUsers]);
+
+  // Filter items by selected month and year
+  const isMatchDate = (item: any): boolean => {
+    if (selectedMonth === "all" && selectedYear === "all") return true;
+
+    const d = parseRecordDate(item);
+    if (!d) {
+      // If no valid date, include only when viewing All Time
+      return selectedMonth === "all" && selectedYear === "all";
+    }
+
+    const itemYear = d.getFullYear();
+    const itemMonth = d.getMonth();
+
+    if (selectedYear !== "all" && itemYear !== Number(selectedYear)) {
+      return false;
+    }
+    if (selectedMonth !== "all" && itemMonth !== Number(selectedMonth)) {
+      return false;
+    }
+
+    return true;
+  };
+
+  // Logged-in / Active App Users in period
+  const activeLogins = useMemo(() => {
+    return [...allUsers]
+      .filter((u: any) => u.lastLoginAt || u.lastSignInTime || u.createdAt)
+      .map((u: any) => {
+        const fsUser = firestoreUsers.find((fu: any) => fu.id === u.uid || fu.uid === u.uid);
+        const roles = fsUser?.roles || (fsUser?.role ? [fsUser.role] : u.roles || ["User"]);
+        const lastLoginDate = parseLastLogin(u) || parseLastLogin(fsUser);
+        return {
+          ...u,
+          displayName: fsUser?.name || fsUser?.displayName || u.displayName || "User",
+          phoneNumber: fsUser?.phoneNumber || fsUser?.phone || u.phoneNumber || "—",
+          roles,
+          lastLoginDate,
+          lastLoginFormatted: lastLoginDate ? lastLoginDate.toLocaleString() : "Recently",
+          timeAgo: formatTimeAgo(lastLoginDate),
+        };
+      })
+      .filter(isMatchDate)
+      .sort((a, b) => {
+        const timeA = a.lastLoginDate ? a.lastLoginDate.getTime() : 0;
+        const timeB = b.lastLoginDate ? b.lastLoginDate.getTime() : 0;
+        return timeB - timeA;
+      });
+  }, [allUsers, firestoreUsers, selectedMonth, selectedYear]);
+
+  const filteredFarmers = useMemo(() => allFarmers.filter(isMatchDate), [allFarmers, selectedMonth, selectedYear]);
+  const filteredVerifiedFarmers = useMemo(
+    () => filteredFarmers.filter((f: any) => f.status === "Active" || !f.status),
+    [filteredFarmers]
+  );
+  const filteredFarms = useMemo(() => allFarms.filter(isMatchDate), [allFarms, selectedMonth, selectedYear]);
+  const filteredSellers = useMemo(() => allSellers.filter(isMatchDate), [allSellers, selectedMonth, selectedYear]);
+  const allCattleCombined = useMemo(() => {
+    const map = new Map<string, any>();
+    cattleDetails.forEach((c: any) => {
+      const key = c.cattleId || c.rfid || c.tagNo || c.id;
+      if (!key) return;
+      map.set(key, {
+        ...c,
+        id: key,
+        title: getLocalizedText(c.cattleName || c.name || c.title || (c.tagNo ? `Cattle #${c.tagNo}` : "Dairy Cattle")),
+        breed: getLocalizedText(c.breed?.key || c.breed || "—"),
+        species: getLocalizedText(c.species, "Cow"),
+        rfid: getLocalizedText(c.rfid || c.tagNo, key),
+        status: getLocalizedText(c.status, "Active"),
+        price: Number(c.price || c.value || 0),
+        milkYield: getLocalizedText(c.milkYield || c.dailyYield, "—"),
+        ownerName: getLocalizedText(c.ownerName || c.farmerName || c.sellerName, "Farmer"),
+        ownerPhone: c.phone || c.sellerPhone || c.phoneNumber || "—",
+        ownerUid: c.ownerUid || c.userId || c.farmerId || "",
+        village: getLocalizedText(c.village || c.district || c.location, "—"),
+        state: getLocalizedText(c.state, "—"),
+        images: [c.faceViewImagePath || c.faceView, c.leftViewImagePath || c.leftView, c.rightViewImagePath || c.rightView, c.muzzleViewImagePath || c.muzzleView, c.udderViewImagePath || c.udderView, c.topViewImagePath || c.bottomView || c.topview, c.farmerViewImagePath || c.farmerView].filter(Boolean),
+        source: "cattle_details",
+        createdAt: c.createdAt || c.registeredAt || null,
+      });
+    });
+    cattle.forEach((c: any) => {
+      const key = c.cattleId || c.rfid || c.tagNo || c.id;
+      if (!key) return;
+      const existing = map.get(key) || {};
+      map.set(key, {
+        ...existing,
+        ...c,
+        id: key,
+        title: getLocalizedText(c.title || c.cattleName || existing.title || (c.tagNo ? `Cattle #${c.tagNo}` : "Dairy Cattle")),
+        breed: getLocalizedText(c.breed?.key || c.breed || existing.breed || "—"),
+        species: getLocalizedText(c.species || existing.species, "Cow"),
+        rfid: getLocalizedText(c.rfid || c.tagNo || existing.rfid, key),
+        status: getLocalizedText(c.status || existing.status, "Active"),
+        price: Number(c.price || existing.price || 0),
+        milkYield: getLocalizedText(c.milkYield || c.dailyYield || existing.milkYield, "—"),
+        ownerName: getLocalizedText(c.ownerName || c.sellerName || existing.ownerName, "Farmer"),
+        ownerPhone: c.phone || c.sellerPhone || existing.ownerPhone || "—",
+        ownerUid: c.ownerUid || c.sellerId || existing.ownerUid || "",
+        state: getLocalizedText(c.state || existing.state, "—"),
+        images: (c.images && Array.isArray(c.images) && c.images.length > 0) ? c.images : existing.images || [],
+        createdAt: c.createdAt || existing.createdAt || null,
+      });
+    });
+    return Array.from(map.values());
+  }, [cattleDetails, cattle]);
+
+  const filteredCattle = useMemo(() => allCattleCombined.filter(isMatchDate), [allCattleCombined, selectedMonth, selectedYear]);
+  const filteredProducts = useMemo(() => products.filter(isMatchDate), [products, selectedMonth, selectedYear]);
+  const filteredProductOrders = useMemo(
+    () => effectiveProductOrders.filter(isMatchDate),
+    [effectiveProductOrders, selectedMonth, selectedYear]
+  );
+  const filteredCattleOrders = useMemo(
+    () => cattleOrders.filter(isMatchDate),
+    [cattleOrders, selectedMonth, selectedYear]
+  );
+  const filteredBestSellers = useMemo(
+    () => products.filter((p: any) => p.bestSeller || p.isBestSeller),
+    [products]
+  );
+
+  // Exact Counts
+  const farmersCount = filteredFarmers.length;
+  const verifiedFarmersCount = filteredVerifiedFarmers.length;
+  const farmsCount = filteredFarms.length > 0 ? filteredFarms.length : allFarms.length;
+  const sellersCount = filteredSellers.length;
+  const cattleCount = filteredCattle.length;
+  const productsCount = products.length;
+  const periodProductsCount = filteredProducts.length;
+  const bestSellersCount = filteredBestSellers.length || bestSellers.length;
   const activeCouponsCount = coupons ? coupons.filter((c) => c.active !== false).length : 0;
-  const bestSellersCount = products.filter((p: any) => p.bestSeller || p.isBestSeller).length || bestSellers.length;
   const cowAdvanceRate = tokenAdvData?.rates?.cow ?? 200;
-  const buffaloAdvanceRate = tokenAdvData?.rates?.buffalo ?? 250;
 
+  // Selected period display label
+  const periodLabel = useMemo(() => {
+    const mLabel = MONTHS.find((m) => m.value === selectedMonth)?.label || "Month";
+    const yLabel = selectedYear === "all" ? "All Years" : selectedYear;
+    if (selectedMonth === "all" && selectedYear === "all") return "All Time";
+    if (selectedMonth === "all") return `Full Year ${yLabel}`;
+    if (selectedYear === "all") return `${mLabel} (All Years)`;
+    return `${mLabel} ${yLabel}`;
+  }, [selectedMonth, selectedYear]);
 
-  // Build dynamic growth data from actual farmers and sellers
+  // Quick Preset Handlers
+  const handleSetPreset = (preset: "this_month" | "last_month" | "this_year" | "all_time") => {
+    const d = new Date();
+    if (preset === "this_month") {
+      setSelectedMonth(String(d.getMonth()));
+      setSelectedYear(String(d.getFullYear()));
+    } else if (preset === "last_month") {
+      const last = new Date(d.getFullYear(), d.getMonth() - 1, 1);
+      setSelectedMonth(String(last.getMonth()));
+      setSelectedYear(String(last.getFullYear()));
+    } else if (preset === "this_year") {
+      setSelectedMonth("all");
+      setSelectedYear(String(d.getFullYear()));
+    } else if (preset === "all_time") {
+      setSelectedMonth("all");
+      setSelectedYear("all");
+    }
+  };
+
+  // CSV Export Functionality
+  const handleExportCSV = () => {
+    try {
+      const rows: string[][] = [];
+
+      // 1. Report Header
+      rows.push(["iHerd Farm Hub - Executive Analytics & Operations Report"]);
+      rows.push([`Period: ${periodLabel}`]);
+      rows.push([`Generated On: ${new Date().toLocaleString("en-IN")}`]);
+      rows.push([]);
+
+      // 2. Summary KPI Metrics Table
+      rows.push(["--- KEY METRICS SUMMARY ---"]);
+      rows.push(["Metric", "Count / Value"]);
+      rows.push(["Total Registered Farmers", String(farmersCount)]);
+      rows.push(["Verified / Active Farmers", String(verifiedFarmersCount)]);
+      rows.push(["Total Registered Farms", String(farmsCount)]);
+      rows.push(["Total Registered Sellers", String(sellersCount)]);
+      rows.push(["Cattle Listed in Marketplace", String(cattleCount)]);
+      rows.push(["Total Products Catalog", String(productsCount)]);
+      rows.push(["Best Seller Products", String(bestSellersCount)]);
+      rows.push(["Active Coupons", String(activeCouponsCount)]);
+      rows.push(["Active App User Logins", String(activeLogins.length)]);
+      rows.push(["Product Marketplace Orders", String(filteredProductOrders.length)]);
+      rows.push(["Cattle Orders & Deals", String(filteredCattleOrders.length)]);
+      rows.push([]);
+
+      // 3. User Logins Activity Table
+      rows.push(["--- RECENT APP LOGINS & SESSIONS ---"]);
+      rows.push(["User ID", "Name", "Phone", "Email", "Roles", "Last Login Time"]);
+      activeLogins.slice(0, 50).forEach((u: any) => {
+        const name = `"${(u.displayName || "User").replace(/"/g, '""')}"`;
+        const phone = u.phoneNumber || "—";
+        const email = u.email || "—";
+        const roles = `"${(Array.isArray(u.roles) ? u.roles.join(", ") : u.roles || "User").replace(/"/g, '""')}"`;
+        const lastLogin = u.lastLoginFormatted || "—";
+        rows.push([u.uid || u.id, name, phone, email, roles, lastLogin]);
+      });
+      rows.push([]);
+
+      // 4. Product Orders Detail Table
+      rows.push(["--- PRODUCT ORDERS IN SELECTED PERIOD ---"]);
+      rows.push(["Order ID", "Customer Name", "Customer Phone", "Date", "Status", "Items Count", "Total Amount (INR)", "Tracking ID", "Carrier"]);
+      if (filteredProductOrders.length === 0) {
+        rows.push(["No product orders found in this period"]);
+      } else {
+        filteredProductOrders.forEach((po: any) => {
+          const ordId = po.orderId || po.id || "—";
+          const buyer = `"${(po.buyerName || "Customer").replace(/"/g, '""')}"`;
+          const phone = po.buyerPhone || "—";
+          const date = po.createdAt ? new Date(po.createdAt).toLocaleDateString() : "—";
+          const status = po.status || "Ordered";
+          const items = Array.isArray(po.items) ? po.items.length : (po.itemCount || 1);
+          const amt = Number(po.totalAmount || po.price || 0);
+          const track = po.trackingId || "—";
+          const carrier = po.carrierName || po.courierPartner || "—";
+          rows.push([ordId, buyer, phone, date, status, String(items), String(amt), track, carrier]);
+        });
+      }
+
+      // Format into standard CSV text
+      const csvString = rows.map((r) => r.join(",")).join("\n");
+      const blob = new Blob([csvString], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      const filename = `iherd_analytics_${periodLabel.toLowerCase().replace(/[^a-z0-9]/g, "_")}.csv`;
+
+      link.setAttribute("href", url);
+      link.setAttribute("download", filename);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      toast.success(`Dashboard data exported successfully to ${filename}`);
+    } catch (err: any) {
+      toast.error(`Export failed: ${err.message}`);
+    }
+  };
+
+  // Month Names for 12-month Trend Charts
   const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const dynamicGrowth = monthNames.map((month) => {
-    const farmersJoined = farmers ? farmers.filter((f: any) => f.joined?.includes(month)).length : 0;
-    const sellersJoined = sellers ? sellers.filter((s: any) => s.joined?.includes(month)).length : 0;
-    return {
-      m: month,
-      farmers: farmersJoined,
-      sellers: sellersJoined
-    };
+    const fCount = allFarmers.filter((f: any) => {
+      const d = parseRecordDate(f);
+      return d && monthNames[d.getMonth()] === month;
+    }).length;
+    const sCount = allSellers.filter((s: any) => {
+      const d = parseRecordDate(s);
+      return d && monthNames[d.getMonth()] === month;
+    }).length;
+    return { m: month, farmers: fCount, sellers: sCount };
   });
 
-  // Dynamic product mix counts
-  const getCat = (p: any) => getLocalizedText(p.category || p.categoryName || p.categoryId).toLowerCase();
-  const feedCount = products ? products.filter((p: any) => getCat(p).includes("feed")).length : 0;
-  const medCount = products ? products.filter((p: any) => getCat(p).includes("med") || getCat(p).includes("disease")).length : 0;
-  const eqCount = products ? products.filter((p: any) => getCat(p).includes("equip") || getCat(p).includes("farm")).length : 0;
-  const suppCount = products ? products.filter((p: any) => getCat(p).includes("supp") || getCat(p).includes("breed")).length : 0;
-  const accCount = products ? products.filter((p: any) => getCat(p).includes("acc") || getCat(p).includes("herd")).length : 0;
-
-  // Dynamic recent activity
-  const dynamicActivity: any[] = [];
-  if (cattle && cattle.length > 0) {
-    cattle.slice(0, 2).forEach((c: any) => {
-      const titleStr = getLocalizedText(c.title || c.breed || c.name, "New listing");
-      const priceStr = getLocalizedText(c.price, "—");
-      dynamicActivity.push({
-        who: "Cattle Listing",
-        what: `${titleStr} · Price: ${priceStr}`,
-        when: getLocalizedText(c.joined || c.createdAt, "Just now"),
-        tag: getLocalizedText(c.status, "pending").toLowerCase()
-      });
-    });
-  }
-  if (orders && orders.length > 0) {
-    orders.slice(0, 2).forEach((o: any) => {
-      const sellerStr = getLocalizedText(o.seller || o.sellerName, "—");
-      const amtStr = getLocalizedText(o.amount || o.totalAmount, "—");
-      dynamicActivity.push({
-        who: `Order #${getLocalizedText(o.id)}`,
-        what: `Seller: ${sellerStr} · Amount: ${amtStr}`,
-        when: getLocalizedText(o.date || o.createdAt, "Just now"),
-        tag: getLocalizedText(o.status) === "Completed" ? "paid" : "pending"
-      });
-    });
-  }
-  if (farmers && farmers.length > 0) {
-    farmers.slice(0, 1).forEach((f: any) => {
-      const nameStr = getLocalizedText(f.displayName || f.name, "Farmer");
-      dynamicActivity.push({
-        who: "Farmer KYC",
-        what: `${nameStr} — KYC status under review`,
-        when: getLocalizedText(f.joined || f.createdAt, "Just now"),
-        tag: getLocalizedText(f.status, "inreview").toLowerCase()
-      });
-    });
-  }
-
-  // Today at a glance counts
-  const pendingProductApprovals = products ? products.filter((p: any) => getLocalizedText(p.status).toLowerCase() === "pending").length : 0;
-  const kycPendingCount = farmers ? farmers.filter((f: any) => getLocalizedText(f.status).toLowerCase() === "pending").length : 0;
-
-
-  // Dynamic cattle market growth data
-  const dynamicCattleMarket = monthNames.map((month) => {
-    const listedCount = cattle ? cattle.filter((c: any) => c.joined?.includes(month)).length : 0;
-    const soldCount = orders ? orders.filter((o: any) => o.date?.includes(month) && o.status === "Completed").length : 0;
-    return {
-      m: month,
-      listed: listedCount,
-      sold: soldCount
-    };
-  });
-
-  // Dynamic product sales trend
   const dynamicProductSales = monthNames.map((month) => {
-    const pOrdersCount = productOrders ? productOrders.filter((o: any) => o.date?.includes(month)).length : 0;
-    return {
-      m: month,
-      orders: pOrdersCount
-    };
+    const pCount = effectiveProductOrders.filter((o: any) => {
+      const d = parseRecordDate(o);
+      return d && monthNames[d.getMonth()] === month;
+    }).length;
+    return { m: month, orders: pCount };
   });
 
-  // Dynamic revenue trend
   const dynamicRevenue = monthNames.map((month) => {
-    const monthOrders = orders ? orders.filter((o: any) => o.date?.includes(month)) : [];
-    const revenueSum = monthOrders.reduce((acc: number, curr: any) => {
-      const amtStr = String(curr.amount || "").replace(/[^0-9]/g, "");
-      return acc + (Number(amtStr) || 0);
-    }, 0);
-    return {
-      m: month,
-      revenue: revenueSum
-    };
+    const monthOrders = effectiveProductOrders.filter((o: any) => {
+      const d = parseRecordDate(o);
+      return d && monthNames[d.getMonth()] === month;
+    });
+    const rev = monthOrders.reduce((sum: number, o: any) => sum + Number(o.totalAmount || o.price || 0), 0);
+    return { m: month, revenue: rev };
   });
 
-  // Dynamic cattle orders trend
-  const dynamicCattleOrders = monthNames.map((month) => {
-    const monthCattleOrders = orders ? orders.filter((o: any) => o.date?.includes(month)) : [];
-    const gmvSum = monthCattleOrders.reduce((acc: number, curr: any) => {
-      const amtStr = String(curr.amount || "").replace(/[^0-9]/g, "");
-      return acc + (Number(amtStr) || 0);
-    }, 0);
-    return {
-      m: month,
-      orders: monthCattleOrders.length,
-      gmv: Math.round(gmvSum / 100000)
-    };
-  });
+  // Render inspected modal content
+  const renderModalData = () => {
+    const q = searchQuery.toLowerCase().trim();
+
+    if (modalType === "farmers" || modalType === "verified_farmers") {
+      const list = (modalType === "verified_farmers" ? filteredVerifiedFarmers : filteredFarmers).filter((f: any) => {
+        if (!q) return true;
+        const name = (f.displayName || f.name || "").toLowerCase();
+        const phone = (f.phoneNumber || f.phone || "").toLowerCase();
+        const uid = (f.uid || f.id || "").toLowerCase();
+        return name.includes(q) || phone.includes(q) || uid.includes(q);
+      });
+
+      return (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="relative flex-1">
+              <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Search farmer by name, phone or ID..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 rounded-xl text-xs"
+              />
+            </div>
+            <Link to="/farmers" className="text-xs font-semibold text-primary hover:underline flex items-center gap-1">
+              Go to Farmers page <ExternalLink className="h-3 w-3" />
+            </Link>
+          </div>
+
+          <div className="max-h-[60vh] overflow-y-auto divide-y divide-border/40 border rounded-2xl">
+            {list.length === 0 ? (
+              <div className="p-8 text-center text-xs text-muted-foreground">No matching farmers found in {periodLabel}.</div>
+            ) : (
+              list.map((f: any, i: number) => (
+                <div key={i} className="p-3 flex items-center justify-between gap-3 text-xs hover:bg-muted/20">
+                  <div className="min-w-0">
+                    <div className="font-bold text-foreground truncate">{f.displayName || f.name || "Farmer"}</div>
+                    <div className="text-[11px] text-muted-foreground flex items-center gap-2 mt-0.5">
+                      <span className="font-mono">{f.uid || f.id}</span>
+                      <span>•</span>
+                      <span>{f.phoneNumber || f.phone || "No phone"}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <StatusBadge status={f.status || "Active"} />
+                    <Link
+                      to="/users/$userId"
+                      params={{ userId: f.uid || f.id }}
+                      className="px-2.5 py-1 rounded-lg bg-primary/10 text-primary font-semibold hover:bg-primary/20 transition-colors"
+                    >
+                      View Profile
+                    </Link>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    if (modalType === "farms") {
+      const list = filteredFarms.filter((f: any) => {
+        if (!q) return true;
+        const name = (f.name || "").toLowerCase();
+        const farmer = (f.farmerName || "").toLowerCase();
+        const state = (f.state || "").toLowerCase();
+        return name.includes(q) || farmer.includes(q) || state.includes(q);
+      });
+
+      return (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="relative flex-1">
+              <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Search farm by name, farmer or location..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 rounded-xl text-xs"
+              />
+            </div>
+            <Link to="/farms" className="text-xs font-semibold text-primary hover:underline flex items-center gap-1">
+              Go to Farms page <ExternalLink className="h-3 w-3" />
+            </Link>
+          </div>
+
+          <div className="max-h-[60vh] overflow-y-auto divide-y divide-border/40 border rounded-2xl">
+            {list.length === 0 ? (
+              <div className="p-8 text-center text-xs text-muted-foreground">No farms registered in {periodLabel}.</div>
+            ) : (
+              list.map((farm: any, i: number) => (
+                <div key={i} className="p-3 flex items-center justify-between gap-3 text-xs hover:bg-muted/20">
+                  <div className="min-w-0">
+                    <div className="font-bold text-foreground truncate">{farm.name}</div>
+                    <div className="text-[11px] text-muted-foreground flex items-center gap-2 mt-0.5">
+                      <span>Farmer: {farm.farmerName}</span>
+                      <span>•</span>
+                      <span>Location: {farm.state}</span>
+                      <span>•</span>
+                      <span>Cattle: {farm.cattle || 0}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Link
+                      to="/users/$userId"
+                      params={{ userId: farm.userId }}
+                      className="px-2.5 py-1 rounded-lg bg-primary/10 text-primary font-semibold hover:bg-primary/20 transition-colors"
+                    >
+                      View Farmer
+                    </Link>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    if (modalType === "sellers") {
+      const list = filteredSellers.filter((s: any) => {
+        if (!q) return true;
+        const name = (s.displayName || s.name || s.shopName || "").toLowerCase();
+        const phone = (s.phoneNumber || s.phone || "").toLowerCase();
+        return name.includes(q) || phone.includes(q);
+      });
+
+      return (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="relative flex-1">
+              <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Search seller by shop name or phone..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 rounded-xl text-xs"
+              />
+            </div>
+            <Link to="/sellers" className="text-xs font-semibold text-primary hover:underline flex items-center gap-1">
+              Go to Sellers page <ExternalLink className="h-3 w-3" />
+            </Link>
+          </div>
+
+          <div className="max-h-[60vh] overflow-y-auto divide-y divide-border/40 border rounded-2xl">
+            {list.length === 0 ? (
+              <div className="p-8 text-center text-xs text-muted-foreground">No matching sellers found in {periodLabel}.</div>
+            ) : (
+              list.map((s: any, i: number) => (
+                <div key={i} className="p-3 flex items-center justify-between gap-3 text-xs hover:bg-muted/20">
+                  <div className="min-w-0">
+                    <div className="font-bold text-foreground truncate">{s.displayName || s.name || s.shopName || "Seller Store"}</div>
+                    <div className="text-[11px] text-muted-foreground flex items-center gap-2 mt-0.5">
+                      <span>{s.phoneNumber || s.phone || "No phone"}</span>
+                      <span>•</span>
+                      <span>Category: {s.category || "General"}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <StatusBadge status={s.status || "Active"} />
+                    <Link
+                      to="/users/$userId"
+                      params={{ userId: s.uid || s.id }}
+                      className="px-2.5 py-1 rounded-lg bg-primary/10 text-primary font-semibold hover:bg-primary/20 transition-colors"
+                    >
+                      View Seller
+                    </Link>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    if (modalType === "cattle") {
+      const list = filteredCattle.filter((c: any) => {
+        if (!q) return true;
+        const breed = (c.breed || c.title || c.name || "").toLowerCase();
+        const state = (c.state || c.location || "").toLowerCase();
+        return breed.includes(q) || state.includes(q);
+      });
+
+      return (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="relative flex-1">
+              <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Search cattle by breed, title or location..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 rounded-xl text-xs"
+              />
+            </div>
+            <div className="flex items-center gap-3">
+              <Link to="/marketplace/cattle" className="text-xs font-semibold text-primary hover:underline flex items-center gap-1">
+                Marketplace <ExternalLink className="h-3 w-3" />
+              </Link>
+              <Link to="/orders/cattle" className="text-xs font-semibold text-amber-600 hover:underline flex items-center gap-1">
+                Orders <ExternalLink className="h-3 w-3" />
+              </Link>
+            </div>
+          </div>
+
+          <div className="max-h-[60vh] overflow-y-auto divide-y divide-border/40 border rounded-2xl">
+            {list.length === 0 ? (
+              <div className="p-8 text-center text-xs text-muted-foreground">No cattle listed in {periodLabel}.</div>
+            ) : (
+              list.map((c: any, i: number) => {
+                const img = c.images && c.images[0] ? c.images[0] : c.imageUrl || c.faceViewImagePath || null;
+                return (
+                  <div key={i} className="p-3 flex items-center justify-between gap-3 text-xs hover:bg-muted/20">
+                    <div className="flex items-center gap-3 min-w-0">
+                      {img ? (
+                        <img src={img} alt={c.title} className="h-10 w-10 rounded-xl object-cover border shrink-0" />
+                      ) : (
+                        <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary font-bold text-xs shrink-0">
+                          🐄
+                        </div>
+                      )}
+                      <div className="min-w-0">
+                        <div className="font-bold text-foreground truncate flex items-center gap-2">
+                          <span>{c.title || c.breed || "Cattle Listing"}</span>
+                          {c.rfid && (
+                            <span className="text-[10px] bg-muted px-1.5 py-0.5 rounded font-mono font-normal text-muted-foreground">
+                              {c.rfid}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[11px] text-muted-foreground flex items-center gap-2 mt-0.5">
+                          <span>Owner: {c.ownerName || "Farmer"}</span>
+                          <span>•</span>
+                          <span>Milk: {c.milkYield ? `${c.milkYield} L/d` : "—"}</span>
+                          <span>•</span>
+                          <span>{c.state || c.location || "India"}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="font-bold text-primary">{c.price ? `₹${Number(c.price).toLocaleString()}` : "Market"}</div>
+                      <div className="text-[10px] text-muted-foreground">{c.status || "Active"}</div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    if (modalType === "products" || modalType === "best_sellers") {
+      const sourceList = modalType === "best_sellers" ? filteredBestSellers : products;
+      const list = sourceList.filter((p: any) => {
+        if (!q) return true;
+        const name = (p.name || p.title || "").toLowerCase();
+        const cat = (p.category || p.categoryName || "").toLowerCase();
+        return name.includes(q) || cat.includes(q);
+      });
+
+      return (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="relative flex-1">
+              <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Search products by title or category..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 rounded-xl text-xs"
+              />
+            </div>
+            <Link to="/marketplace/products" className="text-xs font-semibold text-primary hover:underline flex items-center gap-1">
+              Manage Products <ExternalLink className="h-3 w-3" />
+            </Link>
+          </div>
+
+          <div className="max-h-[60vh] overflow-y-auto divide-y divide-border/40 border rounded-2xl">
+            {list.length === 0 ? (
+              <div className="p-8 text-center text-xs text-muted-foreground">No products found.</div>
+            ) : (
+              list.map((p: any, i: number) => (
+                <div key={i} className="p-3 flex items-center justify-between gap-3 text-xs hover:bg-muted/20">
+                  <div className="min-w-0">
+                    <div className="font-bold text-foreground truncate">{p.name || p.title || "Marketplace Product"}</div>
+                    <div className="text-[11px] text-muted-foreground flex items-center gap-2 mt-0.5">
+                      <span>Category: {p.category || p.categoryName || "General"}</span>
+                      <span>•</span>
+                      <span>Stock: {p.stock || p.quantity || "In Stock"}</span>
+                    </div>
+                  </div>
+                  <div className="shrink-0 font-bold text-primary">₹{p.price || p.sellingPrice || "—"}</div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    if (modalType === "orders") {
+      const list = filteredProductOrders.filter((o: any) => {
+        if (!q) return true;
+        const ordId = (o.orderId || o.id || "").toLowerCase();
+        const buyer = (o.buyerName || "").toLowerCase();
+        const phone = (o.buyerPhone || "").toLowerCase();
+        return ordId.includes(q) || buyer.includes(q) || phone.includes(q);
+      });
+
+      return (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="relative flex-1">
+              <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Search order by ID, customer name or phone..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 rounded-xl text-xs"
+              />
+            </div>
+            <Link to="/orders/products" className="text-xs font-semibold text-primary hover:underline flex items-center gap-1">
+              Go to Product Orders <ExternalLink className="h-3 w-3" />
+            </Link>
+          </div>
+
+          <div className="max-h-[60vh] overflow-y-auto divide-y divide-border/40 border rounded-2xl">
+            {list.length === 0 ? (
+              <div className="p-8 text-center text-xs text-muted-foreground">No product orders found in {periodLabel}.</div>
+            ) : (
+              list.map((o: any, i: number) => (
+                <div key={i} className="p-3 flex items-center justify-between gap-3 text-xs hover:bg-muted/20">
+                  <div className="min-w-0">
+                    <div className="font-bold text-foreground truncate">
+                      #{o.orderId || o.id} • {o.buyerName || "Customer"}
+                    </div>
+                    <div className="text-[11px] text-muted-foreground flex items-center gap-2 mt-0.5">
+                      <span>Phone: {o.buyerPhone || "—"}</span>
+                      <span>•</span>
+                      <span>{o.createdAt ? new Date(o.createdAt).toLocaleDateString() : "—"}</span>
+                      <span>•</span>
+                      <span>{Array.isArray(o.items) ? o.items.length : 1} item(s)</span>
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="font-bold text-primary">₹{Number(o.totalAmount || o.price || 0).toLocaleString()}</div>
+                    <StatusBadge status={o.status || "Ordered"} />
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    if (modalType === "logins") {
+      const list = activeLogins.filter((u: any) => {
+        if (!q) return true;
+        const name = (u.displayName || "").toLowerCase();
+        const phone = (u.phoneNumber || "").toLowerCase();
+        const email = (u.email || "").toLowerCase();
+        return name.includes(q) || phone.includes(q) || email.includes(q);
+      });
+
+      return (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="relative flex-1">
+              <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Search logged in user by name, phone or email..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 rounded-xl text-xs"
+              />
+            </div>
+            <Link to="/users" className="text-xs font-semibold text-primary hover:underline flex items-center gap-1">
+              All User Accounts <ExternalLink className="h-3 w-3" />
+            </Link>
+          </div>
+
+          <div className="max-h-[60vh] overflow-y-auto divide-y divide-border/40 border rounded-2xl">
+            {list.length === 0 ? (
+              <div className="p-8 text-center text-xs text-muted-foreground">No recent logins found in {periodLabel}.</div>
+            ) : (
+              list.map((u: any, i: number) => (
+                <div key={i} className="p-3 flex items-center justify-between gap-3 text-xs hover:bg-muted/20">
+                  <div className="min-w-0 flex items-center gap-3">
+                    <div className="h-9 w-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center font-bold shrink-0">
+                      {(u.displayName || "U")[0].toUpperCase()}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="font-bold text-foreground truncate">{u.displayName || "User"}</div>
+                      <div className="text-[11px] text-muted-foreground flex items-center gap-2 mt-0.5">
+                        <span>{u.phoneNumber}</span>
+                        <span>•</span>
+                        <span className="capitalize">{Array.isArray(u.roles) ? u.roles.join(", ") : u.roles || "User"}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <div className="text-right">
+                      <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 block">{u.timeAgo}</span>
+                      <span className="text-[10px] text-muted-foreground">{u.lastLoginFormatted}</span>
+                    </div>
+                    <Link
+                      to="/users/$userId"
+                      params={{ userId: u.uid || u.id }}
+                      className="px-2.5 py-1 rounded-lg bg-primary/10 text-primary font-semibold hover:bg-primary/20 transition-colors"
+                    >
+                      View
+                    </Link>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    if (modalType === "coupons") {
+      const list = coupons.filter((c: any) => {
+        if (!q) return true;
+        return (c.code || "").toLowerCase().includes(q) || (c.title || "").toLowerCase().includes(q);
+      });
+
+      return (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="relative flex-1">
+              <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Search coupon by code..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 rounded-xl text-xs"
+              />
+            </div>
+            <Link to="/marketplace/coupons" className="text-xs font-semibold text-primary hover:underline flex items-center gap-1">
+              Coupons Manager <ExternalLink className="h-3 w-3" />
+            </Link>
+          </div>
+
+          <div className="max-h-[60vh] overflow-y-auto divide-y divide-border/40 border rounded-2xl">
+            {list.length === 0 ? (
+              <div className="p-8 text-center text-xs text-muted-foreground">No coupons found.</div>
+            ) : (
+              list.map((c: any, i: number) => (
+                <div key={i} className="p-3 flex items-center justify-between gap-3 text-xs hover:bg-muted/20">
+                  <div>
+                    <span className="font-mono font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-md">{c.code}</span>
+                    <div className="text-[11px] text-muted-foreground mt-1">{c.description || c.title || "Marketplace discount"}</div>
+                  </div>
+                  <div className="text-right">
+                    <span className="font-bold text-foreground">{c.discountType === "percent" ? `${c.discountValue}% OFF` : `₹${c.discountValue} OFF`}</span>
+                    <StatusBadge status={c.active !== false ? "Active" : "Inactive"} />
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    return null;
+  };
+
+  const getModalTitle = () => {
+    switch (modalType) {
+      case "farmers":
+        return `Total Registered Farmers (${farmersCount})`;
+      case "verified_farmers":
+        return `Verified / Active Farmers (${verifiedFarmersCount})`;
+      case "farms":
+        return `Registered Farms (${farmsCount})`;
+      case "sellers":
+        return `Registered Marketplace Sellers (${sellersCount})`;
+      case "cattle":
+        return `Cattle Listed in Marketplace (${cattleCount})`;
+      case "orders":
+        return `Product Marketplace Orders (${filteredProductOrders.length})`;
+      case "products":
+        return `Total Marketplace Products (${productsCount})`;
+      case "best_sellers":
+        return `Best Seller Products (${bestSellersCount})`;
+      case "coupons":
+        return `Active Coupons & Offers (${activeCouponsCount})`;
+      case "logins":
+        return `User App Logins in ${periodLabel} (${activeLogins.length})`;
+      default:
+        return "Metric Details";
+    }
+  };
 
   return (
-    <div>
+    <div className="space-y-6">
       <PageHeader
         title={`Welcome back, ${displayName}`}
         description="Here's what's happening across the iHerd marketplace today."
-        actions={<InviteUserDialog />}
+        actions={
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExportCSV}
+              className="rounded-xl text-xs gap-1.5 font-semibold bg-background shadow-sm hover:bg-muted"
+            >
+              <Download className="h-3.5 w-3.5 text-primary" /> Export Data (CSV)
+            </Button>
+            <InviteUserDialog />
+          </div>
+        }
       />
 
-      <div className="flex items-center justify-between mb-3">
+      {/* Modern Filter Controls Bar */}
+      <div className="p-4 rounded-3xl bg-muted/40 border flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h3 className="text-sm font-semibold">Key metrics</h3>
-          <p className="text-xs text-muted-foreground">Filtered by {metricRanges[range].label.toLowerCase()}</p>
+          <div className="flex items-center gap-2">
+            <CalendarIcon className="h-4 w-4 text-primary" />
+            <h3 className="text-sm font-bold text-foreground">Analytics Period</h3>
+            <Badge variant="secondary" className="h-5 px-2 text-[11px] font-bold bg-primary/10 text-primary">
+              {periodLabel}
+            </Badge>
+          </div>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Showing verified Firebase counts and live records. Click any KPI card to inspect the exact data.
+          </p>
         </div>
-        <Select value={range} onValueChange={(v) => setRange(v as keyof typeof metricRanges)}>
-          <SelectTrigger className="w-[160px] h-9 rounded-xl">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {Object.entries(metricRanges).map(([k, v]) => (
-              <SelectItem key={k} value={k}>{v.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Quick Presets */}
+          <div className="flex items-center rounded-xl bg-background p-0.5 border text-xs shadow-sm">
+            <button
+              onClick={() => handleSetPreset("this_month")}
+              className={`px-2.5 py-1 rounded-lg font-medium transition-all ${
+                selectedMonth === currentMonthStr && selectedYear === currentYearStr
+                  ? "bg-primary text-primary-foreground font-bold shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              This Month
+            </button>
+            <button
+              onClick={() => handleSetPreset("last_month")}
+              className="px-2.5 py-1 rounded-lg font-medium text-muted-foreground hover:text-foreground transition-all"
+            >
+              Last Month
+            </button>
+            <button
+              onClick={() => handleSetPreset("this_year")}
+              className={`px-2.5 py-1 rounded-lg font-medium transition-all ${
+                selectedMonth === "all" && selectedYear === currentYearStr
+                  ? "bg-primary text-primary-foreground font-bold shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              This Year
+            </button>
+            <button
+              onClick={() => handleSetPreset("all_time")}
+              className={`px-2.5 py-1 rounded-lg font-medium transition-all ${
+                selectedMonth === "all" && selectedYear === "all"
+                  ? "bg-primary text-primary-foreground font-bold shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              All Time
+            </button>
+          </div>
+
+          {/* Month Dropdown */}
+          <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+            <SelectTrigger className="w-[130px] h-9 rounded-xl text-xs bg-background">
+              <SelectValue placeholder="Month" />
+            </SelectTrigger>
+            <SelectContent className="rounded-xl">
+              {MONTHS.map((m) => (
+                <SelectItem key={m.value} value={m.value}>
+                  {m.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {/* Year Dropdown */}
+          <Select value={selectedYear} onValueChange={setSelectedYear}>
+            <SelectTrigger className="w-[110px] h-9 rounded-xl text-xs bg-background">
+              <SelectValue placeholder="Year" />
+            </SelectTrigger>
+            <SelectContent className="rounded-xl">
+              {YEARS.map((y) => (
+                <SelectItem key={y.value} value={y.value}>
+                  {y.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4 mb-6">
-        <Kpi label="Total farmers" value={scaleNum(farmersCount, m)} delta="+8.2%" up icon={Users} tint="bg-primary/10 text-primary" />
-        <Kpi label="Verified farmers" value={scaleNum(activeFarmersCount, m)} delta="+6.4%" up icon={BadgeCheck} tint="bg-success/10 text-success" />
-        <Kpi label="Total sellers" value={scaleNum(sellersCount, m)} delta="+4.8%" up icon={Store} tint="bg-info/10 text-info" />
-        <Kpi label="Cattle registered" value={scaleNum(cattleCount, m)} delta="+3.6%" up icon={Beef} tint="bg-warning/10 text-warning-foreground" />
-        <Kpi label="Total products" value={scaleNum(productsCount, m)} delta="+5.7%" up icon={ShoppingBag} tint="bg-primary/10 text-primary" />
-        <Kpi label="Best seller items" value={scaleNum(bestSellersCount, m)} delta="+15.0%" up icon={Flame} tint="bg-amber-500/10 text-amber-600" />
-        <Kpi label="Active coupons" value={scaleNum(activeCouponsCount, m)} delta="+28.0%" up icon={Ticket} tint="bg-purple-500/10 text-purple-600" />
-        <Kpi label="Token advance (Cow)" value={`₹${cowAdvanceRate}`} delta="Locked" up icon={Coins} tint="bg-emerald-500/10 text-emerald-600" />
+      {/* 8 Primary Key Metrics Cards (All Clickable to inspect live Firebase data) */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Kpi
+          label="Total Farmers"
+          value={farmersCount.toLocaleString()}
+          delta={`${verifiedFarmersCount} Active`}
+          up
+          icon={Users}
+          tint="bg-primary/10 text-primary"
+          onClick={() => {
+            setSearchQuery("");
+            setModalType("farmers");
+          }}
+        />
+        <Kpi
+          label="Registered Farms"
+          value={farmsCount.toLocaleString()}
+          delta="Active farm locations"
+          up
+          icon={Landmark}
+          tint="bg-emerald-500/10 text-emerald-600"
+          onClick={() => {
+            setSearchQuery("");
+            setModalType("farms");
+          }}
+        />
+        <Kpi
+          label="Total Sellers"
+          value={sellersCount.toLocaleString()}
+          delta={`${filteredProductOrders.length} orders`}
+          up
+          icon={Store}
+          tint="bg-blue-500/10 text-blue-600"
+          onClick={() => {
+            setSearchQuery("");
+            setModalType("sellers");
+          }}
+        />
+        <Kpi
+          label="Cattle Registered"
+          value={cattleCount.toLocaleString()}
+          delta={`${filteredCattleOrders.length} booked`}
+          up
+          icon={Beef}
+          tint="bg-amber-500/10 text-amber-600"
+          onClick={() => {
+            setSearchQuery("");
+            setModalType("cattle");
+          }}
+        />
+        <Kpi
+          label="Total Products"
+          value={productsCount.toLocaleString()}
+          delta={`${periodProductsCount} in period`}
+          up
+          icon={ShoppingBag}
+          tint="bg-primary/10 text-primary"
+          onClick={() => {
+            setSearchQuery("");
+            setModalType("products");
+          }}
+        />
+        <Kpi
+          label="Product Orders"
+          value={filteredProductOrders.length.toLocaleString()}
+          delta="Marketplace orders"
+          up
+          icon={PackageCheck}
+          tint="bg-indigo-500/10 text-indigo-600"
+          onClick={() => {
+            setSearchQuery("");
+            setModalType("orders");
+          }}
+        />
+        <Kpi
+          label="Active Coupons"
+          value={activeCouponsCount.toLocaleString()}
+          delta="Live marketplace"
+          up
+          icon={Ticket}
+          tint="bg-purple-500/10 text-purple-600"
+          onClick={() => {
+            setSearchQuery("");
+            setModalType("coupons");
+          }}
+        />
+        <Kpi
+          label="App Logins in Period"
+          value={activeLogins.length.toLocaleString()}
+          delta="Active users"
+          up
+          icon={LogIn}
+          tint="bg-emerald-500/10 text-emerald-600"
+          onClick={() => {
+            setSearchQuery("");
+            setModalType("logins");
+          }}
+        />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2 mb-6">
-        <Card className="p-5 rounded-2xl">
+      {/* App User Logins Live Feed & Orders Row */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        {/* User App Logins & Active Sessions Card */}
+        <Card className="p-5 rounded-3xl border shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <div className="h-9 w-9 rounded-xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center">
+                <LogIn className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-sm text-foreground">Recent App Logins ({periodLabel})</h3>
+                <p className="text-xs text-muted-foreground">Live users logged into iHerd mobile / web app</p>
+              </div>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setSearchQuery("");
+                setModalType("logins");
+              }}
+              className="text-xs text-primary hover:underline font-semibold"
+            >
+              View all ({activeLogins.length}) →
+            </Button>
+          </div>
+
+          <div className="divide-y divide-border/40 max-h-72 overflow-y-auto">
+            {activeLogins.length === 0 ? (
+              <div className="text-center text-muted-foreground text-xs py-12">No recent login data in {periodLabel}.</div>
+            ) : (
+              activeLogins.slice(0, 6).map((u: any, idx: number) => (
+                <div key={idx} className="py-2.5 flex items-center justify-between gap-3 text-xs">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="h-8 w-8 rounded-full bg-primary/10 text-primary font-bold flex items-center justify-center shrink-0 text-xs">
+                      {(u.displayName || "U")[0].toUpperCase()}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="font-bold text-foreground truncate">{u.displayName || "User"}</div>
+                      <div className="text-muted-foreground text-[11px] flex items-center gap-1.5">
+                        <span>{u.phoneNumber}</span>
+                        <span>•</span>
+                        <span className="capitalize">{Array.isArray(u.roles) ? u.roles.join(", ") : u.roles || "User"}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <span className="font-bold text-emerald-600 dark:text-emerald-400 block text-[11px]">{u.timeAgo}</span>
+                    <span className="text-[10px] text-muted-foreground">{u.lastLoginFormatted}</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </Card>
+
+        {/* Product Orders in this period list */}
+        <Card className="p-5 rounded-3xl border shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <div className="h-9 w-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+                <ShoppingBag className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-sm text-foreground">
+                  Orders in {periodLabel} ({filteredProductOrders.length})
+                </h3>
+                <p className="text-xs text-muted-foreground">Live product orders placed in this period</p>
+              </div>
+            </div>
+            <Link
+              to="/orders/products"
+              className="text-xs text-primary hover:underline font-semibold"
+            >
+              View all →
+            </Link>
+          </div>
+
+          <div className="divide-y divide-border/40 max-h-72 overflow-y-auto">
+            {filteredProductOrders.length === 0 ? (
+              <div className="text-center text-muted-foreground text-xs py-12">
+                No orders recorded in {periodLabel}.
+              </div>
+            ) : (
+              filteredProductOrders.slice(0, 6).map((o: any, idx: number) => (
+                <div key={idx} className="py-2.5 flex items-center justify-between gap-3 text-xs">
+                  <div>
+                    <div className="font-bold text-foreground">
+                      #{o.orderId || o.id} • {o.buyerName || "Customer"}
+                    </div>
+                    <div className="text-muted-foreground text-[11px]">
+                      {o.createdAt ? new Date(o.createdAt).toLocaleDateString() : "—"} • {Array.isArray(o.items) ? o.items.length : 1} item(s)
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-bold text-primary">₹{Number(o.totalAmount || o.price || 0).toLocaleString()}</div>
+                    <StatusBadge status={o.status || "Ordered"} />
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </Card>
+      </div>
+
+      {/* Trend Charts */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card className="p-5 rounded-3xl border shadow-sm">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h3 className="font-semibold">User growth</h3>
-              <p className="text-xs text-muted-foreground">Farmers vs sellers — last 12 months</p>
+              <h3 className="font-bold text-sm text-foreground">User Growth Trend</h3>
+              <p className="text-xs text-muted-foreground">Farmers vs sellers — 12-month timeline</p>
             </div>
             <div className="flex gap-3">
-              <span className="inline-flex items-center gap-1.5 text-xs"><span className="h-2 w-2 rounded-full bg-primary" />Farmers</span>
-              <span className="inline-flex items-center gap-1.5 text-xs"><span className="h-2 w-2 rounded-full bg-chart-2" />Sellers</span>
+              <span className="inline-flex items-center gap-1.5 text-xs">
+                <span className="h-2.5 w-2.5 rounded-full bg-primary" />
+                Farmers
+              </span>
+              <span className="inline-flex items-center gap-1.5 text-xs">
+                <span className="h-2.5 w-2.5 rounded-full bg-chart-2" />
+                Sellers
+              </span>
             </div>
           </div>
           <div className="h-72">
@@ -495,67 +1646,33 @@ function Dashboard() {
                 <XAxis dataKey="m" stroke="var(--color-muted-foreground)" fontSize={12} />
                 <YAxis stroke="var(--color-muted-foreground)" fontSize={12} />
                 <Tooltip contentStyle={tooltipStyle} />
-                <Line type="monotone" dataKey="farmers" stroke="var(--color-primary)" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 5 }} />
-                <Line type="monotone" dataKey="sellers" stroke="var(--color-chart-2)" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                <Line
+                  type="monotone"
+                  dataKey="farmers"
+                  name="Farmers"
+                  stroke="var(--color-primary)"
+                  strokeWidth={2.5}
+                  dot={{ r: 3 }}
+                  activeDot={{ r: 5 }}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="sellers"
+                  name="Sellers"
+                  stroke="var(--color-chart-2)"
+                  strokeWidth={2.5}
+                  dot={{ r: 3 }}
+                  activeDot={{ r: 5 }}
+                />
               </LineChart>
             </ResponsiveContainer>
           </div>
         </Card>
 
-        <Card className="p-5 rounded-2xl">
+        <Card className="p-5 rounded-3xl border shadow-sm">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h3 className="font-semibold">Cattle marketplace growth</h3>
-              <p className="text-xs text-muted-foreground">Listed vs sold — last 12 months</p>
-            </div>
-          </div>
-          <div className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={dynamicCattleMarket} barGap={4}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
-                <XAxis dataKey="m" stroke="var(--color-muted-foreground)" fontSize={12} />
-                <YAxis stroke="var(--color-muted-foreground)" fontSize={12} />
-                <Tooltip contentStyle={tooltipStyle} />
-                <Legend iconType="circle" wrapperStyle={{ fontSize: 12 }} />
-                <Bar dataKey="listed" name="Listed" fill="var(--color-primary)" radius={[8, 8, 0, 0]} />
-                <Bar dataKey="sold" name="Sold" fill="var(--color-chart-2)" radius={[8, 8, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-2 mb-6">
-        <Card className="p-5 rounded-2xl">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="font-semibold">Product sales trend</h3>
-              <p className="text-xs text-muted-foreground">Monthly product orders</p>
-            </div>
-          </div>
-          <div className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={dynamicProductSales}>
-                <defs>
-                  <linearGradient id="gOrders" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="var(--color-chart-2)" stopOpacity={0.4} />
-                    <stop offset="100%" stopColor="var(--color-chart-2)" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
-                <XAxis dataKey="m" stroke="var(--color-muted-foreground)" fontSize={12} />
-                <YAxis stroke="var(--color-muted-foreground)" fontSize={12} />
-                <Tooltip contentStyle={tooltipStyle} />
-                <Area type="monotone" dataKey="orders" stroke="var(--color-chart-2)" strokeWidth={2} fill="url(#gOrders)" />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
-
-        <Card className="p-5 rounded-2xl">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="font-semibold">Revenue trend</h3>
+              <h3 className="font-bold text-sm text-foreground">Revenue Trend</h3>
               <p className="text-xs text-muted-foreground">Monthly marketplace revenue (₹)</p>
             </div>
           </div>
@@ -572,121 +1689,43 @@ function Dashboard() {
                 <XAxis dataKey="m" stroke="var(--color-muted-foreground)" fontSize={12} />
                 <YAxis stroke="var(--color-muted-foreground)" fontSize={12} />
                 <Tooltip contentStyle={tooltipStyle} />
-                <Area type="monotone" dataKey="revenue" stroke="var(--color-primary)" strokeWidth={2} fill="url(#gRev)" />
+                <Area
+                  type="monotone"
+                  dataKey="revenue"
+                  name="Revenue (₹)"
+                  stroke="var(--color-primary)"
+                  strokeWidth={2}
+                  fill="url(#gRev)"
+                />
               </AreaChart>
             </ResponsiveContainer>
           </div>
         </Card>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2 mb-6">
-        <Card className="p-5 rounded-2xl">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="font-semibold">Cattle orders trend</h3>
-              <p className="text-xs text-muted-foreground">Monthly cattle orders vs GMV (₹L)</p>
-            </div>
-            <div className="flex gap-3">
-              <span className="inline-flex items-center gap-1.5 text-xs"><span className="h-2 w-2 rounded-full bg-warning" />Orders</span>
-              <span className="inline-flex items-center gap-1.5 text-xs"><span className="h-2 w-2 rounded-full bg-primary" />GMV</span>
-            </div>
-          </div>
-          <div className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={dynamicCattleOrders} barGap={4}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
-                <XAxis dataKey="m" stroke="var(--color-muted-foreground)" fontSize={12} />
-                <YAxis stroke="var(--color-muted-foreground)" fontSize={12} />
-                <Tooltip contentStyle={tooltipStyle} />
-                <Bar dataKey="orders" name="Orders" fill="var(--color-warning)" radius={[8, 8, 0, 0]} />
-                <Bar dataKey="gmv" name="GMV (₹L)" fill="var(--color-primary)" radius={[8, 8, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
+      {/* Interactive Detail Modal Dialog */}
+      <Dialog open={modalType !== null} onOpenChange={(open) => !open && setModalType(null)}>
+        <DialogContent className="sm:max-w-2xl rounded-3xl p-6">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold text-foreground">
+              {getModalTitle()}
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              Filtered for {periodLabel}. Search and inspect detailed records below directly from Firebase.
+            </DialogDescription>
+          </DialogHeader>
 
-        <Card className="p-5 rounded-2xl">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="font-semibold">Product marketplace mix</h3>
-              <p className="text-xs text-muted-foreground">Active products by category</p>
-            </div>
+          <div className="mt-2">
+            {renderModalData()}
           </div>
-          <div className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart
-                layout="vertical"
-                data={[
-                  { name: "Feed", v: feedCount },
-                  { name: "Medicine", v: medCount },
-                  { name: "Equipment", v: eqCount },
-                  { name: "Supplements", v: suppCount },
-                  { name: "Accessories", v: accCount },
-                ]}
-              >
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" horizontal={false} />
-                <XAxis type="number" stroke="var(--color-muted-foreground)" fontSize={12} />
-                <YAxis type="category" dataKey="name" stroke="var(--color-muted-foreground)" fontSize={12} width={90} />
-                <Tooltip contentStyle={tooltipStyle} />
-                <Bar dataKey="v" name="Products" fill="var(--color-chart-2)" radius={[0, 8, 8, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
-      </div>
 
-      <div className="grid gap-4 lg:grid-cols-3 mb-6">
-        <Card className="lg:col-span-2 p-5 rounded-2xl">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold">Recent activity</h3>
-            <Button variant="ghost" size="sm">View all</Button>
-          </div>
-          {dynamicActivity.length === 0 ? (
-            <div className="text-center text-muted-foreground text-sm py-16">
-              No recent activity recorded in database.
-            </div>
-          ) : (
-            <ul className="divide-y">
-              {dynamicActivity.map((a, i) => (
-                <li key={i} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-3 sm:flex sm:flex-wrap">
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium truncate">{a.who}</div>
-                    <div className="text-xs text-muted-foreground truncate">{a.what}</div>
-                  </div>
-                  <div className="flex items-center gap-3 shrink-0 sm:ml-auto">
-                    <StatusBadge status={a.tag} />
-                    <span className="text-xs text-muted-foreground w-20 text-right">{a.when}</span>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
-
-        <Card className="p-5 rounded-2xl">
-          <h3 className="font-semibold mb-1">Today at a glance</h3>
-          <p className="text-xs text-muted-foreground mb-4">Live marketplace ops</p>
-          <ul className="space-y-3">
-            {[
-              { icon: Tag, label: "New cattle listings", val: cattleCount, tint: "bg-primary/10 text-primary" },
-              { icon: ShoppingBag, label: "Pending product approvals", val: pendingProductApprovals, tint: "bg-warning/10 text-warning-foreground" },
-              { icon: PackageCheck, label: "Orders placed", val: ordersCount, tint: "bg-info/10 text-info" },
-              { icon: Wallet, label: "Pending payouts", val: "₹0", tint: "bg-success/10 text-success" },
-              { icon: UserCheck, label: "KYC pending", val: kycPendingCount, tint: "bg-destructive/10 text-destructive" },
-            ].map((s) => (
-              <li key={s.label} className="flex items-center gap-3 rounded-xl bg-muted/40 p-3">
-                <div className={`grid h-10 w-10 shrink-0 place-items-center rounded-lg ${s.tint}`}>
-                  <s.icon className="h-5 w-5" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm text-muted-foreground truncate">{s.label}</div>
-                </div>
-                <div className="text-lg font-bold">{s.val}</div>
-              </li>
-            ))}
-          </ul>
-        </Card>
-      </div>
+          <DialogFooter className="mt-4">
+            <Button variant="outline" onClick={() => setModalType(null)} className="rounded-xl">
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
