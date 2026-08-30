@@ -257,14 +257,15 @@ function FarmersPage() {
         "—";
 
       let resolvedName =
-        (meta.name && meta.name !== "User" && meta.name !== "Farmer") ? meta.name :
-        (farmerProfile.name && farmerProfile.name !== "User" && farmerProfile.name !== "Farmer") ? farmerProfile.name :
-        (farmerProfile.farmerName && farmerProfile.farmerName !== "User") ? farmerProfile.farmerName :
-        (fsUser?.farmerName && fsUser?.farmerName !== "User") ? fsUser.farmerName :
-        (fsUser?.fullName && fsUser?.fullName !== "User") ? fsUser.fullName :
-        (fsUser?.name && fsUser?.name !== "User") ? fsUser.name :
-        (fsUser?.displayName && fsUser?.displayName !== "User") ? fsUser.displayName :
-        (authUser?.displayName && authUser?.displayName !== "User") ? authUser.displayName :
+        (meta.name && meta.name !== "User" && meta.name !== "Farmer" && !meta.name.startsWith("Farmer (") && !meta.name.startsWith("Farmer #")) ? meta.name :
+        (farmerProfile.name && farmerProfile.name !== "User" && farmerProfile.name !== "Farmer" && !farmerProfile.name.startsWith("Farmer (") && !farmerProfile.name.startsWith("Farmer #")) ? farmerProfile.name :
+        (farmerProfile.farmerName && farmerProfile.farmerName !== "User" && !farmerProfile.farmerName.startsWith("Farmer")) ? farmerProfile.farmerName :
+        (fsUser?.farmerName && fsUser?.farmerName !== "User" && !fsUser?.farmerName.startsWith("Farmer")) ? fsUser.farmerName :
+        (fsUser?.fullName && fsUser?.fullName !== "User" && !fsUser?.fullName.startsWith("Farmer")) ? fsUser.fullName :
+        (fsUser?.name && fsUser?.name !== "User" && !fsUser?.name.startsWith("Farmer")) ? fsUser.name :
+        (fsUser?.displayName && fsUser?.displayName !== "User" && !fsUser?.displayName.startsWith("Farmer")) ? fsUser.displayName :
+        (authUser?.displayName && authUser?.displayName !== "User" && !authUser?.displayName.startsWith("Farmer") && !authUser?.displayName.startsWith("User (")) ? authUser.displayName :
+        (authUser?.name && authUser?.name !== "User" && !authUser?.name.startsWith("Farmer")) ? authUser.name :
         "";
 
       if (!resolvedName || resolvedName.toLowerCase() === "user" || resolvedName.toLowerCase() === "farmer") {
@@ -340,13 +341,13 @@ function FarmersPage() {
         "—";
 
       let resolvedName =
-        (meta.name && meta.name !== "User" && meta.name !== "Farmer") ? meta.name :
-        (farmerProfile.name && farmerProfile.name !== "User" && farmerProfile.name !== "Farmer") ? farmerProfile.name :
-        (farmerProfile.farmerName && farmerProfile.farmerName !== "User") ? farmerProfile.farmerName :
-        (fsUser.farmerName && fsUser.farmerName !== "User") ? fsUser.farmerName :
-        (fsUser.fullName && fsUser.fullName !== "User") ? fsUser.fullName :
-        (fsUser.name && fsUser.name !== "User") ? fsUser.name :
-        (fsUser.displayName && fsUser.displayName !== "User") ? fsUser.displayName :
+        (meta.name && meta.name !== "User" && meta.name !== "Farmer" && !meta.name.startsWith("Farmer (") && !meta.name.startsWith("Farmer #")) ? meta.name :
+        (farmerProfile.name && farmerProfile.name !== "User" && farmerProfile.name !== "Farmer" && !farmerProfile.name.startsWith("Farmer (") && !farmerProfile.name.startsWith("Farmer #")) ? farmerProfile.name :
+        (farmerProfile.farmerName && farmerProfile.farmerName !== "User" && !farmerProfile.farmerName.startsWith("Farmer")) ? farmerProfile.farmerName :
+        (fsUser?.farmerName && fsUser?.farmerName !== "User" && !fsUser?.farmerName.startsWith("Farmer")) ? fsUser.farmerName :
+        (fsUser?.fullName && fsUser?.fullName !== "User" && !fsUser?.fullName.startsWith("Farmer")) ? fsUser.fullName :
+        (fsUser?.name && fsUser?.name !== "User" && !fsUser?.name.startsWith("Farmer")) ? fsUser.name :
+        (fsUser?.displayName && fsUser?.displayName !== "User" && !fsUser?.displayName.startsWith("Farmer")) ? fsUser.displayName :
         "";
 
       if (!resolvedName || resolvedName.toLowerCase() === "user" || resolvedName.toLowerCase() === "farmer") {

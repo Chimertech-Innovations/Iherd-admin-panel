@@ -408,6 +408,10 @@ app.get("/api/admin/user-full-data/:userId", async (req, res) => {
           if (!sq.empty) sellerDoc = { id: sq.docs[0].id, ...sq.docs[0].data() };
         }
       }
+      if (!sellerDoc) {
+        const storeSnap = await db.collection("stores").doc(resolvedDocId).get();
+        if (storeSnap.exists) sellerDoc = { id: storeSnap.id, ...storeSnap.data() };
+      }
     } catch (e) {}
 
     try {
@@ -930,9 +934,40 @@ app.post("/api/admin/user-farm-data/:userId", async (req, res) => {
       await db.collection("users").doc(userId).collection("roles").doc("farmer").set(roleFarmerUpdate, { merge: true });
     }
 
+    clearCache();
     res.json({ success: true, message: "Farm data updated successfully", farmId, data: cleanData });
   } catch (error) {
     console.error("Error updating farm data:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// REST API: Save or update seller profile data for a user
+app.post("/api/admin/user-seller-data/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const sellerData = req.body;
+    if (!sellerData) return res.status(400).json({ error: "Missing seller data payload" });
+
+    const cleanData = {
+      ...sellerData,
+      uid: userId,
+      userId,
+      isSeller: true,
+      updatedAt: new Date(),
+    };
+
+    // Save to users/{userId}/roles/seller, users/{userId}, and sellers/{userId}
+    await Promise.all([
+      db.collection("users").doc(userId).collection("roles").doc("seller").set(cleanData, { merge: true }),
+      db.collection("users").doc(userId).set({ seller: cleanData, isSeller: true }, { merge: true }),
+      db.collection("sellers").doc(userId).set(cleanData, { merge: true }),
+    ]);
+
+    clearCache();
+    res.json({ success: true, message: "Seller profile updated successfully", data: cleanData });
+  } catch (error) {
+    console.error("Error updating seller data:", error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -948,19 +983,76 @@ app.get(["/api/admin/users", "/get/api/admin/users"], async (req, res) => {
     const auth = getAuth();
     const db = getFirestore();
     
-    // Prefetch all Firestore user collections, farmers, sellers, vets, farms, and cattle
-    const [fsSnapshot, farmersSnapshot, sellersSnapshot, vetsSnapshot, farmsSnapshot, cattleSnapshot] = await Promise.all([
+    // Prefetch all Firestore user collections, farmers, sellers, vets, farms, cattle, and all role subcollections
+    const [
+      fsSnapshot,
+      farmersSnapshot,
+      sellersSnapshot,
+      vetsSnapshot,
+      farmsSnapshot,
+      cattleSnapshot,
+      groupRolesSnap,
+      groupFarmerSnap,
+      groupSellerSnap,
+      groupVetSnap,
+      storesSnap,
+    ] = await Promise.all([
       db.collection("users").get().catch(() => ({ docs: [] })),
       db.collection("farmers").get().catch(() => ({ docs: [] })),
       db.collection("sellers").get().catch(() => ({ docs: [] })),
       db.collection("vets").get().catch(() => ({ docs: [] })),
       db.collectionGroup("farms").get().catch(() => ({ docs: [] })),
       db.collection("cattle_details").get().catch(() => ({ docs: [] })),
+      db.collectionGroup("roles").get().catch(() => ({ docs: [] })),
+      db.collectionGroup("farmer").get().catch(() => ({ docs: [] })),
+      db.collectionGroup("seller").get().catch(() => ({ docs: [] })),
+      db.collectionGroup("veterinarian").get().catch(() => ({ docs: [] })),
+      db.collection("stores").get().catch(() => ({ docs: [] })),
     ]);
 
     const fsUsersMap = {};
     fsSnapshot.docs?.forEach((doc) => {
       fsUsersMap[doc.id] = doc.data();
+    });
+
+    const subRolesMap = {}; // uid -> { farmer, seller, vet }
+    const extractSubRole = (doc, defaultRole = null) => {
+      const d = doc.data();
+      const path = doc.ref.path;
+      const parts = path.split("/");
+      let uid = d.uid || d.userId;
+      if (!uid && parts[0] === "users" && parts[1]) uid = parts[1];
+      if (!uid && parts[0] === "farmers" && parts[1]) uid = parts[1];
+      if (!uid && parts[0] === "sellers" && parts[1]) uid = parts[1];
+      if (!uid && parts[0] === "vets" && parts[1]) uid = parts[1];
+      if (!uid) uid = doc.id;
+      if (!uid) return;
+
+      if (!subRolesMap[uid]) subRolesMap[uid] = {};
+
+      const roleId = (doc.id || defaultRole || d.role || "").toLowerCase();
+      if (roleId.includes("farm") || defaultRole === "farmer") {
+        subRolesMap[uid].farmer = { ...d, id: doc.id };
+      }
+      if (roleId.includes("sell") || defaultRole === "seller") {
+        subRolesMap[uid].seller = { ...d, id: doc.id };
+      }
+      if (roleId.includes("vet") || defaultRole === "veterinarian") {
+        subRolesMap[uid].vet = { ...d, id: doc.id };
+      }
+    };
+
+    groupRolesSnap.docs?.forEach((doc) => extractSubRole(doc));
+    groupFarmerSnap.docs?.forEach((doc) => extractSubRole(doc, "farmer"));
+    groupSellerSnap.docs?.forEach((doc) => extractSubRole(doc, "seller"));
+    groupVetSnap.docs?.forEach((doc) => extractSubRole(doc, "veterinarian"));
+    storesSnap.docs?.forEach((doc) => {
+      const d = doc.data();
+      const uid = d.userId || d.ownerUid || d.uid || doc.id;
+      if (uid) {
+        if (!subRolesMap[uid]) subRolesMap[uid] = {};
+        subRolesMap[uid].seller = { ...d, id: doc.id };
+      }
     });
 
     const directFarmersMap = {};
@@ -1035,10 +1127,11 @@ app.get(["/api/admin/users", "/get/api/admin/users"], async (req, res) => {
         const batch = listUsersResult.users.map((userRecord) => {
           const fsUser = fsUsersMap[userRecord.uid] || {};
           const cleanPhone = (userRecord.phoneNumber || fsUser.phoneNumber || fsUser.phone || "").replace(/\D/g, "").slice(-10);
+          const subRoles = subRolesMap[userRecord.uid] || {};
 
-          const farmerRecord = directFarmersMap[userRecord.uid] || (cleanPhone ? directFarmersMap[cleanPhone] : null) || fsUser.farmer || null;
-          const sellerRecord = directSellersMap[userRecord.uid] || (cleanPhone ? directSellersMap[cleanPhone] : null) || fsUser.seller || null;
-          const vetRecord = directVetsMap[userRecord.uid] || (cleanPhone ? directVetsMap[cleanPhone] : null) || fsUser.veterinarian || fsUser.vet || null;
+          const farmerRecord = directFarmersMap[userRecord.uid] || (cleanPhone ? directFarmersMap[cleanPhone] : null) || subRoles.farmer || fsUser.farmer || null;
+          const sellerRecord = directSellersMap[userRecord.uid] || (cleanPhone ? directSellersMap[cleanPhone] : null) || subRoles.seller || fsUser.seller || null;
+          const vetRecord = directVetsMap[userRecord.uid] || (cleanPhone ? directVetsMap[cleanPhone] : null) || subRoles.vet || fsUser.veterinarian || fsUser.vet || null;
           const farmMeta = farmOwnersMap[userRecord.uid] || null;
           const cattleMeta = cattleOwnersMap[userRecord.uid] || null;
 
@@ -1071,18 +1164,28 @@ app.get(["/api/admin/users", "/get/api/admin/users"], async (req, res) => {
           if (isVet) roles.push("Veterinarian");
           if (roles.length === 0) roles.push("User");
 
-          const resolvedName =
-            (userRecord.displayName && userRecord.displayName !== "User" && userRecord.displayName !== "Farmer") ? userRecord.displayName :
-            (fsUser.fullName && fsUser.fullName !== "User" && fsUser.fullName !== "Farmer") ? fsUser.fullName :
-            (fsUser.name && fsUser.name !== "User" && fsUser.name !== "Farmer") ? fsUser.name :
-            (fsUser.displayName && fsUser.displayName !== "User" && fsUser.displayName !== "Farmer") ? fsUser.displayName :
-            farmerRecord?.name && farmerRecord.name !== "User" ? farmerRecord.name :
-            sellerRecord?.name && sellerRecord.name !== "User" ? sellerRecord.name :
-            vetRecord?.name && vetRecord.name !== "User" ? vetRecord.name :
-            farmMeta?.name && farmMeta.name !== "User" ? farmMeta.name :
-            cattleMeta?.name && cattleMeta.name !== "User" ? cattleMeta.name :
-            userRecord.phoneNumber ? `User (${userRecord.phoneNumber})` :
-            `User #${userRecord.uid.slice(-6).toUpperCase()}`;
+          // Extract Genuine Real Name from all sources
+          const explicitRealName =
+            (userRecord.displayName && !userRecord.displayName.startsWith("Farmer") && !userRecord.displayName.startsWith("User") && !userRecord.displayName.startsWith("Seller") && !userRecord.displayName.startsWith("Dr.") ? userRecord.displayName : null) ||
+            (fsUser.fullName && !fsUser.fullName.startsWith("Farmer") && !fsUser.fullName.startsWith("User") ? fsUser.fullName : null) ||
+            (fsUser.name && !fsUser.name.startsWith("Farmer") && !fsUser.name.startsWith("User") ? fsUser.name : null) ||
+            (fsUser.displayName && !fsUser.displayName.startsWith("Farmer") && !fsUser.displayName.startsWith("User") ? fsUser.displayName : null) ||
+            (farmerRecord?.name && !farmerRecord.name.startsWith("Farmer") && !farmerRecord.name.startsWith("User") ? farmerRecord.name : null) ||
+            (farmerRecord?.farmerName && !farmerRecord.farmerName.startsWith("Farmer") ? farmerRecord.farmerName : null) ||
+            (sellerRecord?.name && !sellerRecord.name.startsWith("Seller") && !sellerRecord.name.startsWith("User") && !sellerRecord.name.startsWith("Farmer") ? sellerRecord.name : null) ||
+            (sellerRecord?.shopName && !sellerRecord.shopName.startsWith("Seller") ? sellerRecord.shopName : null) ||
+            (vetRecord?.name && !vetRecord.name.startsWith("User") ? (vetRecord.name.startsWith("Dr.") ? vetRecord.name : `Dr. ${vetRecord.name}`) : null) ||
+            (vetRecord?.doctorName ? (vetRecord.doctorName.startsWith("Dr.") ? vetRecord.doctorName : `Dr. ${vetRecord.doctorName}`) : null) ||
+            (farmMeta?.name && !farmMeta.name.startsWith("Farmer") ? farmMeta.name : null) ||
+            (cattleMeta?.name && !cattleMeta.name.startsWith("Farmer") ? cattleMeta.name : null);
+
+          let resolvedName = explicitRealName;
+          if (!resolvedName) {
+            if (isVet) resolvedName = userRecord.phoneNumber ? `Dr. (${userRecord.phoneNumber})` : `Dr. #${userRecord.uid.slice(-6).toUpperCase()}`;
+            else if (isSeller) resolvedName = userRecord.phoneNumber ? `Seller (${userRecord.phoneNumber})` : `Seller #${userRecord.uid.slice(-6).toUpperCase()}`;
+            else if (isFarmer) resolvedName = userRecord.phoneNumber ? `Farmer (${userRecord.phoneNumber})` : `Farmer #${userRecord.uid.slice(-6).toUpperCase()}`;
+            else resolvedName = userRecord.phoneNumber ? `User (${userRecord.phoneNumber})` : `User #${userRecord.uid.slice(-6).toUpperCase()}`;
+          }
 
           const resolvedPhone =
             (userRecord.phoneNumber && userRecord.phoneNumber !== "—") ? userRecord.phoneNumber :
@@ -1142,9 +1245,10 @@ app.get(["/api/admin/users", "/get/api/admin/users"], async (req, res) => {
       result = Object.keys(fsUsersMap).map((uid) => {
         const fsUser = fsUsersMap[uid];
         const cleanPhone = (fsUser.phoneNumber || fsUser.phone || "").replace(/\D/g, "").slice(-10);
-        const farmerRecord = directFarmersMap[uid] || (cleanPhone ? directFarmersMap[cleanPhone] : null) || fsUser.farmer || null;
-        const sellerRecord = directSellersMap[uid] || (cleanPhone ? directSellersMap[cleanPhone] : null) || fsUser.seller || null;
-        const vetRecord = directVetsMap[uid] || (cleanPhone ? directVetsMap[cleanPhone] : null) || fsUser.veterinarian || fsUser.vet || null;
+        const subRoles = subRolesMap[uid] || {};
+        const farmerRecord = directFarmersMap[uid] || (cleanPhone ? directFarmersMap[cleanPhone] : null) || subRoles.farmer || fsUser.farmer || null;
+        const sellerRecord = directSellersMap[uid] || (cleanPhone ? directSellersMap[cleanPhone] : null) || subRoles.seller || fsUser.seller || null;
+        const vetRecord = directVetsMap[uid] || (cleanPhone ? directVetsMap[cleanPhone] : null) || subRoles.vet || fsUser.veterinarian || fsUser.vet || null;
         const farmMeta = farmOwnersMap[uid] || null;
         const cattleMeta = cattleOwnersMap[uid] || null;
 
@@ -1163,17 +1267,26 @@ app.get(["/api/admin/users", "/get/api/admin/users"], async (req, res) => {
         if (isVet) roles.push("Veterinarian");
         if (roles.length === 0) roles.push("User");
 
-        const resolvedName =
-          (fsUser.fullName && fsUser.fullName !== "User" && fsUser.fullName !== "Farmer") ? fsUser.fullName :
-          (fsUser.name && fsUser.name !== "User" && fsUser.name !== "Farmer") ? fsUser.name :
-          (fsUser.displayName && fsUser.displayName !== "User" && fsUser.displayName !== "Farmer") ? fsUser.displayName :
-          farmerRecord?.name || sellerRecord?.name || vetRecord?.name || farmMeta?.name || cattleMeta?.name ||
-          (fsUser.phoneNumber ? `User (${fsUser.phoneNumber})` : `User #${uid.slice(-6).toUpperCase()}`);
+        const explicitRealName =
+          (fsUser.fullName && !fsUser.fullName.startsWith("Farmer") && !fsUser.fullName.startsWith("User") ? fsUser.fullName : null) ||
+          (fsUser.name && !fsUser.name.startsWith("Farmer") && !fsUser.name.startsWith("User") ? fsUser.name : null) ||
+          (fsUser.displayName && !fsUser.displayName.startsWith("Farmer") && !fsUser.displayName.startsWith("User") ? fsUser.displayName : null) ||
+          (farmerRecord?.name && !farmerRecord.name.startsWith("Farmer") ? farmerRecord.name : null) ||
+          (sellerRecord?.name && !sellerRecord.name.startsWith("Seller") ? sellerRecord.name : null) ||
+          (vetRecord?.name ? (vetRecord.name.startsWith("Dr.") ? vetRecord.name : `Dr. ${vetRecord.name}`) : null);
 
-        const resolvedPhone = fsUser.phoneNumber || fsUser.phone || farmerRecord?.phone || sellerRecord?.phone || vetRecord?.phone || farmMeta?.phone || cattleMeta?.phone || "—";
+        let resolvedName = explicitRealName;
+        if (!resolvedName) {
+          if (isVet) resolvedName = cleanPhone ? `Dr. (+91${cleanPhone})` : `Dr. #${uid.slice(-6).toUpperCase()}`;
+          else if (isSeller) resolvedName = cleanPhone ? `Seller (+91${cleanPhone})` : `Seller #${uid.slice(-6).toUpperCase()}`;
+          else if (isFarmer) resolvedName = cleanPhone ? `Farmer (+91${cleanPhone})` : `Farmer #${uid.slice(-6).toUpperCase()}`;
+          else resolvedName = cleanPhone ? `User (+91${cleanPhone})` : `User #${uid.slice(-6).toUpperCase()}`;
+        }
+
+        const resolvedPhone = fsUser.phoneNumber || fsUser.phone || farmerRecord?.phone || sellerRecord?.phone || vetRecord?.phone || "—";
 
         return {
-          uid: uid,
+          uid,
           email: fsUser.email || null,
           phoneNumber: resolvedPhone,
           displayName: resolvedName,
@@ -1211,54 +1324,331 @@ app.get(["/api/admin/users", "/get/api/admin/users"], async (req, res) => {
   }
 });
 
-// REST API to list all Sellers
+// REST API to list all Sellers across all known collections and role subcollections
 app.get("/api/admin/sellers", async (req, res) => {
   try {
     const db = getFirestore();
-    const [sSnap, usersSnap] = await Promise.all([
+    const [sSnap, usersSnap, groupSellerSnap, groupSellersSnap, storesSnap, vendorAppsSnap] = await Promise.all([
       db.collection("sellers").get().catch(() => ({ docs: [] })),
       db.collection("users").get().catch(() => ({ docs: [] })),
+      db.collectionGroup("seller").get().catch(() => ({ docs: [] })),
+      db.collectionGroup("sellers").get().catch(() => ({ docs: [] })),
+      db.collection("stores").get().catch(() => ({ docs: [] })),
+      db.collection("vendor_applications").get().catch(() => ({ docs: [] })),
     ]);
+
     const sellersMap = new Map();
+
+    // 1. Direct sellers collection
     sSnap.docs.forEach((doc) => {
-      sellersMap.set(doc.id, { id: doc.id, ...doc.data() });
+      const d = doc.data();
+      const id = doc.id;
+      const phone = d.phone || d.phoneNumber || d.sellerPhone || "—";
+      const name = d.shopName || d.storeName || d.name || d.sellerName || d.fullName || (phone !== "—" ? `Seller (${phone})` : `Seller #${id.slice(-6).toUpperCase()}`);
+      sellersMap.set(id, {
+        id,
+        uid: d.uid || d.userId || id,
+        ...d,
+        name,
+        shopName: d.shopName || d.storeName || name,
+        phone,
+        phoneNumber: phone,
+        category: d.category || d.shopCategory || d.storeType || "General",
+        products: d.products || d.productCount || 0,
+        status: d.status || "Active",
+        verified: Boolean(d.verified || d.isVerified),
+        createdAt: d.createdAt || d.timestamp || null,
+      });
     });
+
+    // 2. CollectionGroup 'seller' subcollections (/users/{uid}/roles/seller or /users/{uid}/seller)
+    groupSellerSnap.docs.forEach((doc) => {
+      const d = doc.data();
+      const path = doc.ref.path;
+      const segments = path.split("/");
+      let uid = d.uid || d.userId;
+      if (!uid && segments[0] === "users" && segments[1]) uid = segments[1];
+      const id = uid || doc.id;
+      if (!id) return;
+
+      const phone = d.phone || d.phoneNumber || d.sellerPhone || "—";
+      const name = d.shopName || d.storeName || d.name || d.sellerName || d.fullName || (phone !== "—" ? `Seller (${phone})` : `Seller #${id.slice(-6).toUpperCase()}`);
+
+      const existing = sellersMap.get(id) || {};
+      sellersMap.set(id, {
+        ...existing,
+        id,
+        uid: id,
+        ...d,
+        name: existing.name || name,
+        shopName: d.shopName || d.storeName || existing.shopName || name,
+        phone: phone !== "—" ? phone : existing.phone || "—",
+        phoneNumber: phone !== "—" ? phone : existing.phoneNumber || "—",
+        category: d.category || existing.category || "General",
+        products: d.products || existing.products || 0,
+        status: d.status || existing.status || "Active",
+        verified: Boolean(d.verified || existing.verified),
+        createdAt: d.createdAt || existing.createdAt || null,
+      });
+    });
+
+    // 3. CollectionGroup 'sellers'
+    groupSellersSnap.docs.forEach((doc) => {
+      const d = doc.data();
+      const path = doc.ref.path;
+      const segments = path.split("/");
+      let uid = d.uid || d.userId;
+      if (!uid && segments[0] === "users" && segments[1]) uid = segments[1];
+      const id = uid || doc.id;
+      if (!id || sellersMap.has(id)) return;
+
+      const phone = d.phone || d.phoneNumber || d.sellerPhone || "—";
+      const name = d.shopName || d.storeName || d.name || d.sellerName || (phone !== "—" ? `Seller (${phone})` : `Seller #${id.slice(-6).toUpperCase()}`);
+      sellersMap.set(id, {
+        id,
+        uid: id,
+        ...d,
+        name,
+        shopName: d.shopName || d.storeName || name,
+        phone,
+        phoneNumber: phone,
+        category: d.category || "General",
+        products: d.products || 0,
+        status: d.status || "Active",
+        verified: Boolean(d.verified),
+        createdAt: d.createdAt || null,
+      });
+    });
+
+    // 4. Stores collection
+    storesSnap.docs.forEach((doc) => {
+      const d = doc.data();
+      const id = d.userId || d.ownerUid || d.uid || doc.id;
+      if (!id || sellersMap.has(id)) return;
+      const phone = d.phone || d.phoneNumber || "—";
+      const name = d.shopName || d.storeName || d.name || (phone !== "—" ? `Seller (${phone})` : `Seller #${id.slice(-6).toUpperCase()}`);
+      sellersMap.set(id, {
+        id,
+        uid: id,
+        ...d,
+        name,
+        shopName: d.shopName || d.storeName || name,
+        phone,
+        phoneNumber: phone,
+        category: d.category || "General",
+        products: d.products || 0,
+        status: d.status || "Active",
+        verified: Boolean(d.verified),
+        createdAt: d.createdAt || null,
+      });
+    });
+
+    // 5. Users collection with seller profile
     usersSnap.docs.forEach((doc) => {
       const u = doc.data();
-      if (u.seller || (Array.isArray(u.roles) && u.roles.some((r) => String(r).toLowerCase().includes("seller")))) {
-        if (!sellersMap.has(doc.id)) {
-          sellersMap.set(doc.id, { id: doc.id, uid: doc.id, ...(u.seller || u) });
+      const id = doc.id;
+      const rawRoles = u.roles || (u.role ? [u.role] : []);
+      const roleList = Array.isArray(rawRoles) ? rawRoles : [String(rawRoles)];
+      const hasSellerRole = roleList.some((r) => String(r).toLowerCase().includes("seller"));
+      const sellerData = u.seller || null;
+
+      if (sellerData || hasSellerRole || u.isSeller) {
+        const d = (typeof sellerData === "object" && sellerData) ? sellerData : {};
+        const phone = d.phone || d.phoneNumber || d.sellerPhone || u.phoneNumber || u.phone || "—";
+        const name = d.shopName || d.storeName || d.name || d.sellerName || (u.fullName && u.fullName !== "User" && !u.fullName.startsWith("Farmer") ? u.fullName : (u.name && !u.name.startsWith("Farmer") ? u.name : (phone !== "—" ? `Seller (${phone})` : `Seller #${id.slice(-6).toUpperCase()}`)));
+
+        if (sellersMap.has(id)) {
+          const existing = sellersMap.get(id);
+          sellersMap.set(id, {
+            ...existing,
+            name: (existing.name && !existing.name.startsWith("Farmer")) ? existing.name : name,
+            phone: existing.phone !== "—" ? existing.phone : phone,
+            phoneNumber: existing.phoneNumber !== "—" ? existing.phoneNumber : phone,
+            email: u.email || existing.email || null,
+          });
+        } else {
+          sellersMap.set(id, {
+            id,
+            uid: id,
+            ...d,
+            name,
+            shopName: d.shopName || d.storeName || name,
+            phone,
+            phoneNumber: phone,
+            email: u.email || null,
+            category: d.category || "General",
+            products: d.products || 0,
+            status: u.status || d.status || "Active",
+            verified: Boolean(d.verified || u.verified),
+            createdAt: d.createdAt || u.createdAt || null,
+          });
         }
       }
     });
-    res.json({ sellers: Array.from(sellersMap.values()) });
+
+    const result = Array.from(sellersMap.values());
+    res.json({ sellers: result, count: result.length });
   } catch (error) {
+    console.error("Error in /api/admin/sellers:", error);
     res.status(500).json({ error: error.message, sellers: [] });
   }
 });
 
-// REST API to list all Veterinarians
+// REST API to list all Veterinarians across all known collections and role subcollections
 app.get("/api/admin/vets", async (req, res) => {
   try {
     const db = getFirestore();
-    const [vSnap, usersSnap] = await Promise.all([
+    const [vSnap, usersSnap, groupVetSnap, groupVetsSnap] = await Promise.all([
       db.collection("vets").get().catch(() => ({ docs: [] })),
       db.collection("users").get().catch(() => ({ docs: [] })),
+      db.collectionGroup("veterinarian").get().catch(() => ({ docs: [] })),
+      db.collectionGroup("vet").get().catch(() => ({ docs: [] })),
     ]);
+
     const vetsMap = new Map();
+
+    // 1. Direct vets collection
     vSnap.docs.forEach((doc) => {
-      vetsMap.set(doc.id, { id: doc.id, ...doc.data() });
+      const d = doc.data();
+      const id = doc.id;
+      const phone = d.phone || d.phoneNumber || d.vetPhoneNumber || d.vetPhone || "—";
+      const docName = d.doctorName || d.name || d.fullName || (phone !== "—" ? `Dr. (${phone})` : `Dr. #${id.slice(-6).toUpperCase()}`);
+      const formattedName = docName.startsWith("Dr.") ? docName : `Dr. ${docName}`;
+
+      vetsMap.set(id, {
+        id,
+        uid: d.uid || d.userId || id,
+        ...d,
+        name: formattedName,
+        doctorName: formattedName,
+        phone,
+        phoneNumber: phone,
+        clinic: d.clinic || d.hospital || d.addInstitution || "—",
+        qualification: d.qualification || d.degree || "B.V.Sc & A.H",
+        experience: d.yearsOfExperience || d.experience || "—",
+        specialization: Array.isArray(d.specialization) ? d.specialization : (d.specialization ? [d.specialization] : ["General Bovine Care"]),
+        status: d.status || "Active",
+        verified: Boolean(d.verified || d.isVerified),
+        createdAt: d.createdAt || d.timestamp || null,
+      });
     });
+
+    // 2. CollectionGroup 'veterinarian'
+    groupVetSnap.docs.forEach((doc) => {
+      const d = doc.data();
+      const path = doc.ref.path;
+      const segments = path.split("/");
+      let uid = d.uid || d.userId;
+      if (!uid && segments[0] === "users" && segments[1]) uid = segments[1];
+      const id = uid || doc.id;
+      if (!id) return;
+
+      const phone = d.phone || d.phoneNumber || d.vetPhoneNumber || d.vetPhone || "—";
+      const docName = d.doctorName || d.name || d.fullName || (phone !== "—" ? `Dr. (${phone})` : `Dr. #${id.slice(-6).toUpperCase()}`);
+      const formattedName = docName.startsWith("Dr.") ? docName : `Dr. ${docName}`;
+
+      const existing = vetsMap.get(id) || {};
+      vetsMap.set(id, {
+        ...existing,
+        id,
+        uid: id,
+        ...d,
+        name: existing.name || formattedName,
+        doctorName: existing.doctorName || formattedName,
+        phone: phone !== "—" ? phone : existing.phone || "—",
+        phoneNumber: phone !== "—" ? phone : existing.phoneNumber || "—",
+        clinic: d.clinic || d.hospital || d.addInstitution || existing.clinic || "—",
+        qualification: d.qualification || d.degree || existing.qualification || "B.V.Sc & A.H",
+        experience: d.yearsOfExperience || d.experience || existing.experience || "—",
+        specialization: Array.isArray(d.specialization) ? d.specialization : existing.specialization || ["General Bovine Care"],
+        status: d.status || existing.status || "Active",
+        verified: Boolean(d.verified || existing.verified),
+        createdAt: d.createdAt || existing.createdAt || null,
+      });
+    });
+
+    // 3. CollectionGroup 'vet'
+    groupVetsSnap.docs.forEach((doc) => {
+      const d = doc.data();
+      const path = doc.ref.path;
+      const segments = path.split("/");
+      let uid = d.uid || d.userId;
+      if (!uid && segments[0] === "users" && segments[1]) uid = segments[1];
+      const id = uid || doc.id;
+      if (!id || vetsMap.has(id)) return;
+
+      const phone = d.phone || d.phoneNumber || d.vetPhoneNumber || "—";
+      const docName = d.doctorName || d.name || (phone !== "—" ? `Dr. (${phone})` : `Dr. #${id.slice(-6).toUpperCase()}`);
+      const formattedName = docName.startsWith("Dr.") ? docName : `Dr. ${docName}`;
+
+      vetsMap.set(id, {
+        id,
+        uid: id,
+        ...d,
+        name: formattedName,
+        doctorName: formattedName,
+        phone,
+        phoneNumber: phone,
+        clinic: d.clinic || d.hospital || "—",
+        qualification: d.qualification || "B.V.Sc & A.H",
+        experience: d.yearsOfExperience || d.experience || "—",
+        specialization: Array.isArray(d.specialization) ? d.specialization : ["General Bovine Care"],
+        status: d.status || "Active",
+        verified: Boolean(d.verified),
+        createdAt: d.createdAt || null,
+      });
+    });
+
+    // 4. Users with vet profile
     usersSnap.docs.forEach((doc) => {
       const u = doc.data();
-      if (u.veterinarian || u.vet || (Array.isArray(u.roles) && u.roles.some((r) => String(r).toLowerCase().includes("vet")))) {
-        if (!vetsMap.has(doc.id)) {
-          vetsMap.set(doc.id, { id: doc.id, uid: doc.id, ...(u.veterinarian || u.vet || u) });
+      const id = doc.id;
+      const rawRoles = u.roles || (u.role ? [u.role] : []);
+      const roleList = Array.isArray(rawRoles) ? rawRoles : [String(rawRoles)];
+      const hasVetRole = roleList.some((r) => String(r).toLowerCase().includes("vet"));
+      const vetData = u.veterinarian || u.vet || null;
+
+      if (vetData || hasVetRole || u.isVet) {
+        const d = (typeof vetData === "object" && vetData) ? vetData : {};
+        const phone = d.phone || d.phoneNumber || d.vetPhoneNumber || u.phoneNumber || u.phone || "—";
+        const docName = d.doctorName || d.name || (u.fullName && !u.fullName.startsWith("Farmer") ? u.fullName : (u.name && !u.name.startsWith("Farmer") ? u.name : (phone !== "—" ? `Dr. (${phone})` : `Dr. #${id.slice(-6).toUpperCase()}`)));
+        const formattedName = docName.startsWith("Dr.") ? docName : `Dr. ${docName}`;
+
+        if (vetsMap.has(id)) {
+          const existing = vetsMap.get(id);
+          vetsMap.set(id, {
+            ...existing,
+            name: (existing.name && !existing.name.startsWith("Farmer")) ? existing.name : formattedName,
+            phone: existing.phone !== "—" ? existing.phone : phone,
+            phoneNumber: existing.phoneNumber !== "—" ? existing.phoneNumber : phone,
+            email: u.email || existing.email || null,
+          });
+        } else {
+          vetsMap.set(id, {
+            id,
+            uid: id,
+            ...d,
+            name: formattedName,
+            doctorName: formattedName,
+            phone,
+            phoneNumber: phone,
+            email: u.email || null,
+            clinic: d.clinic || d.hospital || d.addInstitution || "—",
+            qualification: d.qualification || "B.V.Sc & A.H",
+            experience: d.yearsOfExperience || d.experience || "—",
+            specialization: Array.isArray(d.specialization) ? d.specialization : ["General Bovine Care"],
+            status: u.status || d.status || "Active",
+            verified: Boolean(d.verified || u.verified),
+            createdAt: d.createdAt || u.createdAt || null,
+          });
         }
       }
     });
-    res.json({ vets: Array.from(vetsMap.values()) });
+
+    const result = Array.from(vetsMap.values());
+    res.json({ vets: result, count: result.length });
   } catch (error) {
+    console.error("Error in /api/admin/vets:", error);
     res.status(500).json({ error: error.message, vets: [] });
   }
 });
@@ -2622,12 +3012,12 @@ app.delete("/api/admin/banners/:id", async (req, res) => {
 });
 
 // Generic admin fallback endpoint to read collections when browser Firestore permissions are restricted
-app.get("/api/admin/collection/*", async (req, res) => {
+app.get("/api/admin/collection/*path", async (req, res) => {
   try {
-    const path = req.params[0];
-    if (!path) return res.status(400).json({ error: "Path is required" });
+    const collPath = Array.isArray(req.params.path) ? req.params.path.join("/") : (req.params.path || req.params[0] || "");
+    if (!collPath) return res.status(400).json({ error: "Path is required" });
     const db = getFirestore();
-    const snapshot = await db.collection(path).get();
+    const snapshot = await db.collection(collPath).get();
     const data = snapshot.docs.map((doc) => ({
       id: doc.id,
       ...doc.data(),

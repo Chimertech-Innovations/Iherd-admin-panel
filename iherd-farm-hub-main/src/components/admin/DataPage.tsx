@@ -52,6 +52,7 @@ export function DataPage<T extends Record<string, any>>({
   searchPlaceholder = "Search...",
   searchKeys,
   primaryAction = "Add new",
+  onPrimaryAction,
   rowHref,
   isLoading = false,
 }: {
@@ -66,7 +67,8 @@ export function DataPage<T extends Record<string, any>>({
   stats?: KPI[];
   searchPlaceholder?: string;
   searchKeys?: string[];
-  primaryAction?: string;
+  primaryAction?: ReactNode;
+  onPrimaryAction?: () => void;
   rowHref?: (row: T) => string | undefined;
   isLoading?: boolean;
 }) {
@@ -102,9 +104,13 @@ export function DataPage<T extends Record<string, any>>({
             <Button variant="outline" size="sm" className="gap-1.5">
               <Download className="h-4 w-4" /> Export
             </Button>
-            <Button size="sm" className="gap-1.5 bg-gradient-to-br from-primary to-primary-glow">
-              <Plus className="h-4 w-4" /> {primaryAction}
-            </Button>
+            {typeof primaryAction === "string" ? (
+              <Button size="sm" onClick={onPrimaryAction} className="gap-1.5 bg-gradient-to-br from-primary to-primary-glow">
+                <Plus className="h-4 w-4" /> {primaryAction}
+              </Button>
+            ) : (
+              primaryAction
+            )}
           </>
         }
       />
