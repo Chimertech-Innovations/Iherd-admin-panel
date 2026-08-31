@@ -71,18 +71,38 @@ function escapeCsvCell(cell: string): string {
 /**
  * Universal CSV Export function.
  * Exports any dataset into a well-formed CSV file with UTF-8 BOM encoding for seamless Excel / Google Sheets support.
+ * Supports both object options `{ filename, data, columns }` and positional args `exportToCsv(filename, data)`.
  */
-export function exportToCsv<T = any>({
-  filename,
-  data,
-  columns,
-  showToast = true,
-}: {
-  filename: string;
-  data: T[];
-  columns?: (CsvColumn<T> | string)[];
-  showToast?: boolean;
-}) {
+export function exportToCsv<T = any>(
+  optionsOrFilename:
+    | {
+        filename: string;
+        data: T[];
+        columns?: (CsvColumn<T> | string)[];
+        showToast?: boolean;
+      }
+    | string,
+  dataArg?: T[],
+  columnsArg?: (CsvColumn<T> | string)[],
+  showToastArg: boolean = true
+) {
+  let filename: string;
+  let data: T[];
+  let columns: (CsvColumn<T> | string)[] | undefined;
+  let showToast: boolean = true;
+
+  if (typeof optionsOrFilename === "string") {
+    filename = optionsOrFilename;
+    data = dataArg || [];
+    columns = columnsArg;
+    showToast = showToastArg;
+  } else {
+    filename = optionsOrFilename.filename;
+    data = optionsOrFilename.data;
+    columns = optionsOrFilename.columns;
+    showToast = optionsOrFilename.showToast ?? true;
+  }
+
   if (!data || data.length === 0) {
     if (showToast) toast.info("No data available to export.");
     return;

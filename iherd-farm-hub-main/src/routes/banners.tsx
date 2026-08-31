@@ -647,7 +647,7 @@ function BannersPage() {
       "Target Profiles": Array.isArray(b.profiles) ? b.profiles.join(", ") : "All",
       "Image URL": b.imageUrl,
     }));
-    exportToCsv(`iherd_${selectedType}_export`, exportData);
+    exportToCsv(`iherd_${selectedType}_export`, exportData );
     toast.success("Banners exported to CSV successfully!");
   };
 
