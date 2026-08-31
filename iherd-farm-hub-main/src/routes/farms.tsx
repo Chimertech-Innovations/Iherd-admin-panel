@@ -575,6 +575,31 @@ function FarmsPage() {
         <DataPage
           title="Registered Farms"
           description="Verified dairy farms, equipment setups, facility locations, and livestock counts."
+          exportFilename="iherd_registered_farms"
+          customExportColumns={[
+            { header: "Farm Name", accessor: (r) => r.name },
+            { header: "Farm ID", accessor: (r) => r.farmId || r.id },
+            { header: "Farmer / Owner Name", accessor: (r) => r.ownerName },
+            { header: "Farmer UID", accessor: (r) => r.ownerUid },
+            { header: "Farm Phone Number", accessor: (r) => r.farmPhoneNumber || "—" },
+            { header: "Animal Type", accessor: (r) => r.animal || "Cow / Cattle" },
+            { header: "Farm Management Technique", accessor: (r) => r.farmTechnique || "—" },
+            { header: "Number of Employees", accessor: (r) => r.numberOfEmployees || "—" },
+            { header: "Farm Equipment", accessor: (r) => Array.isArray(r.farmEquipmentList) ? r.farmEquipmentList.join("; ") : "—" },
+            { header: "Village", accessor: (r) => r.village || "—" },
+            { header: "Taluk", accessor: (r) => r.taluk || "—" },
+            { header: "District", accessor: (r) => r.district || "—" },
+            { header: "State", accessor: (r) => r.state || "—" },
+            { header: "Pincode", accessor: (r) => r.pincode || "—" },
+            { header: "Full Address", accessor: (r) => r.address || "—" },
+            { header: "Latitude", accessor: (r) => r.latitude || "—" },
+            { header: "Longitude", accessor: (r) => r.longitude || "—" },
+            { header: "Livestock Cattle Count", accessor: (r) => r.cattleCount || 0 },
+            { header: "Veterinarian Doctor Name", accessor: (r) => r.veterinaryName || "—" },
+            { header: "Veterinarian Doctor Phone", accessor: (r) => r.veterinarianPhoneNumber || "—" },
+            { header: "Registration Date", accessor: (r) => r.createdAt ? formatDate(r.createdAt) : "—" },
+            { header: "Farm Status", accessor: (r) => r.status || "Active" },
+          ]}
           stats={[
             {
               label: "Total Registered Farms",
@@ -754,6 +779,33 @@ function FarmsPage() {
         <DataPage
           title="Cattle & Livestock Register"
           description="Live cattle records fetched directly from Firestore `cattle_details`, with tag numbers, milk yields, owner proofs, and photos."
+          exportFilename="iherd_cattle_livestock"
+          customExportColumns={[
+            { header: "Tag No / RFID", accessor: (r) => r.tagNo || r.rfid || r.id },
+            { header: "Cattle ID", accessor: (r) => r.cattleId || r.id },
+            { header: "Cattle Title / Name", accessor: (r) => r.title },
+            { header: "Breed", accessor: (r) => r.breed },
+            { header: "Species", accessor: (r) => r.species },
+            { header: "Gender", accessor: (r) => r.gender },
+            { header: "Age (Years)", accessor: (r) => r.age },
+            { header: "Color", accessor: (r) => r.color },
+            { header: "Weight (kg)", accessor: (r) => r.weight },
+            { header: "Height", accessor: (r) => r.height },
+            { header: "Daily Milk Yield (L/day)", accessor: (r) => r.milkYield },
+            { header: "Parity / Lactation", accessor: (r) => r.parity },
+            { header: "Market Price / Value (INR)", accessor: (r) => r.price || r.value || 0 },
+            { header: "Father Tag No", accessor: (r) => r.fatherTagNo || "—" },
+            { header: "Mother Tag No", accessor: (r) => r.motherTagNo || "—" },
+            { header: "Insured", accessor: (r) => r.insurance ? "Yes" : "No" },
+            { header: "Owner Name", accessor: (r) => r.ownerName },
+            { header: "Owner Phone", accessor: (r) => r.ownerPhone },
+            { header: "Owner UID", accessor: (r) => r.ownerUid },
+            { header: "Farm Name", accessor: (r) => r.farmName || "—" },
+            { header: "Village / Location", accessor: (r) => r.village || "—" },
+            { header: "State", accessor: (r) => r.state || "—" },
+            { header: "Registration Date", accessor: (r) => r.createdAt ? formatDate(r.createdAt) : "—" },
+            { header: "Status", accessor: (r) => r.status || "Active" },
+          ]}
           stats={[
             {
               label: "Total Tracked Cattle",

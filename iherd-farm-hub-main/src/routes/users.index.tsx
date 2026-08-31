@@ -165,6 +165,23 @@ function UsersPage() {
         searchPlaceholder="Search by name, phone, UID, email, location..."
         searchKeys={["name", "displayName", "uid", "phoneNumber", "email", "village", "district", "state"]}
         rowHref={(r) => `/users/${r.uid}`}
+        exportFilename="iherd_user_accounts"
+        customExportColumns={[
+          { header: "User Name", accessor: (r) => r.name || r.displayName || "User" },
+          { header: "User UID", accessor: (r) => r.uid || r.id },
+          { header: "Phone Number", accessor: (r) => r.phoneNumber || "—" },
+          { header: "Email Address", accessor: (r) => r.email || "—" },
+          { header: "Primary Role", accessor: (r) => r.role || "User" },
+          { header: "All Roles", accessor: (r) => Array.isArray(r.roles) ? r.roles.join(", ") : r.role || "User" },
+          { header: "Connected Farm Name", accessor: (r) => r.farms?.name || r.farmer?.farmName || "—" },
+          { header: "Connected Store Name", accessor: (r) => r.seller?.name || r.seller?.shopName || "—" },
+          { header: "Connected Clinic / Vet", accessor: (r) => r.veterinarian?.clinic || r.veterinarian?.hospital || "—" },
+          { header: "Village", accessor: (r) => r.village || "—" },
+          { header: "District", accessor: (r) => r.district || "—" },
+          { header: "State", accessor: (r) => r.state || "—" },
+          { header: "Registration Date", accessor: (r) => r.createdAt ? new Date(r.createdAt).toLocaleString() : "—" },
+          { header: "Last Activity / Login", accessor: (r) => r.lastLoginAt ? new Date(r.lastLoginAt).toLocaleString() : "—" },
+        ]}
         kpis={[
           { label: "Total Accounts", value: totalUsers.toLocaleString(), change: "All registered users", up: true },
           { label: "Farmers", value: farmerUsers.toLocaleString(), change: "With farm & cattle data", up: true },

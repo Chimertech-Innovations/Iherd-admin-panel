@@ -36,9 +36,11 @@ import {
   Trash2,
   Radio,
   Sparkles,
+  Download,
 } from "lucide-react";
 import { useFirebaseCollection } from "../hooks/useFirebaseData";
 import { useAdminNotifications, AdminNotification } from "@/hooks/useAdminNotifications";
+import { exportToCsv } from "@/lib/csvExport";
 
 export const Route = createFileRoute("/notifications")({
   head: () => ({ meta: [{ title: "Notifications & Live Activity — iHerd Admin" }] }),
@@ -181,6 +183,30 @@ function NotificationCenter() {
     }
   };
 
+  const handleExportNotifications = () => {
+    const dataToExport = liveActivity.length > 0 ? liveActivity : notifications;
+    exportToCsv({
+      filename: `iherd_notifications_activity_${new Date().toISOString().slice(0, 10)}`,
+      data: dataToExport,
+      columns: [
+        { header: "Activity ID", accessor: (n: any) => n.id },
+        { header: "Type / Category", accessor: (n: any) => n.type || "Notification" },
+        { header: "Title", accessor: (n: any) => n.title },
+        { header: "Message / Description", accessor: (n: any) => n.message || n.body || "—" },
+        {
+          header: "Timestamp",
+          accessor: (n: any) =>
+            n.time
+              ? new Date(n.time).toLocaleString()
+              : n.createdAt?.seconds
+              ? new Date(n.createdAt.seconds * 1000).toLocaleString()
+              : n.timestamp || "—",
+        },
+        { header: "Read Status", accessor: (n: any) => (n.read ? "Read" : "Unread") },
+      ],
+    });
+  };
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -188,6 +214,16 @@ function NotificationCenter() {
         description="Monitor real-time product orders, cattle bookings, new user registrations, and broadcast push announcements."
         actions={
           <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExportNotifications}
+              disabled={liveActivity.length === 0 && notifications.length === 0}
+              className="rounded-xl text-xs gap-1.5"
+              title="Export notifications and live events to CSV"
+            >
+              <Download className="h-3.5 w-3.5" /> Export CSV
+            </Button>
             {unreadCount > 0 && (
               <Button variant="outline" size="sm" onClick={markAllAsRead} className="rounded-xl text-xs gap-1.5">
                 <CheckCheck className="h-3.5 w-3.5" /> Mark All as Read ({unreadCount})

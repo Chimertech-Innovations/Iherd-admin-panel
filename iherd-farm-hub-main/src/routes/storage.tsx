@@ -15,6 +15,8 @@ import {
   ExternalLink,
   HardDrive,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { exportToCsv } from "@/lib/csvExport";
 
 export const Route = createFileRoute("/storage")({
   head: () => ({ meta: [{ title: "Storage — iHerd Admin" }] }),
@@ -138,15 +140,49 @@ function StoragePage() {
     { label: "Marketplace Media", value: totals.marketplace, icon: ShoppingBag, tint: "bg-warning/10 text-warning-foreground" },
   ];
 
+  const allStorageFiles: StorageFile[] = [
+    ...(data?.userImages ?? []),
+    ...(data?.invoices ?? []),
+    ...(data?.cattleMarketplace ?? []),
+    ...(data?.marketplace ?? []),
+  ];
+
+  const handleExportStorage = () => {
+    exportToCsv({
+      filename: `iherd_storage_files_${new Date().toISOString().slice(0, 10)}`,
+      data: allStorageFiles,
+      columns: [
+        { header: "File Name", accessor: (f: StorageFile) => fileLabel(f.name) },
+        { header: "Storage Path", accessor: "name" },
+        { header: "Content Type", accessor: "contentType" },
+        { header: "File Size", accessor: (f: StorageFile) => formatBytes(f.size) },
+        { header: "Last Updated", accessor: (f: StorageFile) => f.updated ? new Date(f.updated).toLocaleString() : "—" },
+        { header: "Download URL", accessor: "url" },
+      ],
+    });
+  };
+
   return (
     <div>
       <PageHeader
         title="Storage"
         description="All files stored in Firebase Storage across UserImages, invoices, cattle-marketplace and marketplace paths."
         actions={
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <HardDrive className="h-4 w-4" />
-            {isLoading ? "Loading…" : `${totals.total} total files`}
+          <div className="flex items-center gap-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExportStorage}
+              disabled={isLoading || allStorageFiles.length === 0}
+              className="gap-1.5"
+              title={`Export ${allStorageFiles.length} storage file references to CSV`}
+            >
+              <Download className="h-4 w-4" /> Export CSV
+            </Button>
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <HardDrive className="h-4 w-4" />
+              {isLoading ? "Loading…" : `${totals.total} total files`}
+            </div>
           </div>
         }
       />

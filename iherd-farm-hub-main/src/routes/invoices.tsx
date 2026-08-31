@@ -9,6 +9,7 @@ import { FileText, Download, Eye, RefreshCw } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogClose } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import { exportToCsv } from "@/lib/csvExport";
 
 export const Route = createFileRoute("/invoices")({
   head: () => ({ meta: [{ title: "Invoices — iHerd Admin" }] }),
@@ -121,15 +122,42 @@ function InvoicesPage() {
     inv.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const handleExportInvoices = () => {
+    const dataToExport = filteredInvoices.length > 0 ? filteredInvoices : invoices;
+    exportToCsv({
+      filename: `iherd_invoices_${new Date().toISOString().slice(0, 10)}`,
+      data: dataToExport,
+      columns: [
+        { header: "Invoice File Name", accessor: "name" },
+        { header: "Storage Path", accessor: "path" },
+        { header: "File Size", accessor: "size" },
+        { header: "Uploaded / Updated Date", accessor: (inv: any) => new Date(inv.updated).toLocaleString() },
+        { header: "Download URL", accessor: "url" },
+      ],
+    });
+  };
+
   return (
     <div>
       <PageHeader
         title="Order Invoices"
-        description="Generated PDF invoices"
+        description="Generated PDF invoices stored in Firebase Storage"
         actions={
-          <Button variant="outline" size="sm" onClick={fetchInvoices} className="gap-1.5" disabled={loading}>
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Refresh
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExportInvoices}
+              disabled={loading || invoices.length === 0}
+              className="gap-1.5"
+              title={`Export ${filteredInvoices.length} invoices to CSV`}
+            >
+              <Download className="h-4 w-4" /> Export CSV
+            </Button>
+            <Button variant="outline" size="sm" onClick={fetchInvoices} className="gap-1.5" disabled={loading}>
+              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Refresh
+            </Button>
+          </div>
         }
       />
 

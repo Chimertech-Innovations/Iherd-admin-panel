@@ -62,6 +62,7 @@ import { PageHeader } from "@/components/admin/PageHeader";
 import { StatusBadge } from "@/components/admin/StatusBadge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import { exportToCsv } from "@/lib/csvExport";
 
 export const Route = createFileRoute("/users/$userId")({
   head: () => ({ meta: [{ title: "User Details — iHerd Admin" }] }),
@@ -580,6 +581,67 @@ function UserDetail() {
     );
   }
 
+  const handleExportUserData = () => {
+    if (allUserCattle.length > 0) {
+      exportToCsv({
+        filename: `user_${(userName !== "—" ? userName : userId).toLowerCase().replace(/[^a-z0-9]/g, "_")}_cattle_records`,
+        data: allUserCattle,
+        columns: [
+          { header: "Tag No / RFID", accessor: (c: any) => c.tagNo || c.rfid || c.id },
+          { header: "Cattle Name / Title", accessor: (c: any) => getLocalizedText(c.title || c.cattleName || c.name) },
+          { header: "Breed", accessor: (c: any) => getLocalizedText(c.breed) },
+          { header: "Species", accessor: (c: any) => getLocalizedText(c.species) },
+          { header: "Gender", accessor: (c: any) => getLocalizedText(c.gender) },
+          { header: "Age", accessor: (c: any) => getLocalizedText(c.age) },
+          { header: "Milk Yield", accessor: (c: any) => getLocalizedText(c.milkYield || c.dailyYield) },
+          { header: "Price (INR)", accessor: (c: any) => c.price || c.value || "—" },
+          { header: "Status", accessor: (c: any) => getLocalizedText(c.status) },
+          { header: "Owner Name", accessor: () => userName },
+          { header: "Owner UID", accessor: () => userId },
+          { header: "Owner Phone", accessor: () => displayPhone },
+          { header: "Farm Name", accessor: () => farmName },
+          { header: "Location", accessor: () => farmLocation !== "—" ? farmLocation : (farmerDoc?.state || "—") },
+        ],
+      });
+    } else {
+      exportToCsv({
+        filename: `user_profile_${(userName !== "—" ? userName : userId).toLowerCase().replace(/[^a-z0-9]/g, "_")}`,
+        data: [
+          {
+            userName,
+            userId,
+            displayPhone,
+            displayEmail,
+            roles: activeRolesList.join(", "),
+            status: mergedUserDoc?.status || authUser?.status || "Active",
+            joinedDate,
+            farmName: farmName !== "—" ? farmName : "None",
+            farmTechnique: farmTechnique !== "—" ? farmTechnique : "None",
+            farmLocation: farmLocation !== "—" ? farmLocation : "None",
+            cattleCount: allUserCattle.length,
+            sellerShop: sellerDoc?.shopName || sellerDoc?.name || "None",
+            vetClinic: vetDoc?.clinic || vetDoc?.hospital || "None",
+          },
+        ],
+        columns: [
+          { header: "User Name", accessor: "userName" },
+          { header: "User UID", accessor: "userId" },
+          { header: "Phone Number", accessor: "displayPhone" },
+          { header: "Email", accessor: "displayEmail" },
+          { header: "Roles", accessor: "roles" },
+          { header: "Account Status", accessor: "status" },
+          { header: "Joined Date", accessor: "joinedDate" },
+          { header: "Farm Name", accessor: "farmName" },
+          { header: "Farm Technique", accessor: "farmTechnique" },
+          { header: "Farm Location", accessor: "farmLocation" },
+          { header: "Registered Cattle Count", accessor: "cattleCount" },
+          { header: "Seller Shop", accessor: "sellerShop" },
+          { header: "Vet Clinic", accessor: "vetClinic" },
+        ],
+      });
+    }
+  };
+
   return (
     <div className="space-y-6 pb-12">
       {/* Top back button & Actions */}
@@ -590,6 +652,15 @@ function UserDetail() {
           </Link>
         </Button>
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5 text-xs"
+            onClick={handleExportUserData}
+            title="Export full user profile & cattle records to CSV"
+          >
+            <Download className="h-3.5 w-3.5" /> Export Data (CSV)
+          </Button>
           <Button
             variant="outline"
             size="sm"

@@ -21,6 +21,7 @@ import {
   Tag,
   Eye,
   AlertTriangle,
+  Download,
 } from "lucide-react";
 import {
   Dialog,
@@ -50,6 +51,7 @@ import {
 import { useAdminBanners, useAdminProducts } from "@/hooks/useFirebaseData";
 import { formatImageUrl } from "@/lib/utils";
 import { toast } from "sonner";
+import { exportToCsv } from "@/lib/csvExport";
 
 export const Route = createFileRoute("/banners")({
   head: () => ({ meta: [{ title: "Promotional Banners — iHerd Admin" }] }),
@@ -167,15 +169,42 @@ function BannersPage() {
     }
   };
 
+  const handleExportBanners = () => {
+    exportToCsv({
+      filename: `iherd_banners_${new Date().toISOString().slice(0, 10)}`,
+      data: banners,
+      columns: [
+        { header: "Banner Document ID", accessor: "id" },
+        { header: "Image URL", accessor: "imageUrl" },
+        { header: "Action Type", accessor: "actionType" },
+        { header: "Action Value / Target ID", accessor: "actionValue" },
+        { header: "Display Priority", accessor: "priority" },
+        { header: "Active Status", accessor: (b: any) => b.isActive ? "Active (Live in App)" : "Paused" },
+      ],
+    });
+  };
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Banners & Advertisements"
         description="Manage promotional mobile app carousel banners, priorities, and action deep-links."
         actions={
-          <Button onClick={handleOpenAdd} className="gap-2 bg-gradient-to-br from-primary to-primary-glow shadow-md">
-            <Plus className="h-4 w-4" /> Add New Banner
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExportBanners}
+              disabled={isLoading || banners.length === 0}
+              className="gap-1.5"
+              title={`Export ${banners.length} banners to CSV`}
+            >
+              <Download className="h-4 w-4" /> Export CSV
+            </Button>
+            <Button onClick={handleOpenAdd} className="gap-2 bg-gradient-to-br from-primary to-primary-glow shadow-md">
+              <Plus className="h-4 w-4" /> Add New Banner
+            </Button>
+          </div>
         }
       />
 

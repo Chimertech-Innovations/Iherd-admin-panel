@@ -430,6 +430,19 @@ function FarmersPage() {
       <DataPage
         title="Farmers Directory"
         description="All registered farmers, contact info, locations, and linked farm and livestock records."
+        exportFilename="iherd_farmers_directory"
+        customExportColumns={[
+          { header: "Farmer Name", accessor: "name" },
+          { header: "Farmer UID", accessor: "uid" },
+          { header: "Phone Number", accessor: "phone" },
+          { header: "Village", accessor: "village" },
+          { header: "District", accessor: "district" },
+          { header: "State", accessor: "state" },
+          { header: "Registered Farm Name", accessor: (r) => r.registeredFarmName || "None" },
+          { header: "Tracked Cattle Count", accessor: "cattleCount" },
+          { header: "Registration Date", accessor: "joined" },
+          { header: "Status", accessor: "status" },
+        ]}
         stats={[
           {
             label: "Total Registered Farmers",

@@ -24,6 +24,7 @@ import {
   LogIn,
   Building2,
   RotateCcw,
+  Download,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -43,6 +44,7 @@ import { PageHeader } from "@/components/admin/PageHeader";
 import { ProfileHero } from "@/components/admin/ProfileHero";
 import { toast } from "sonner";
 import { useFirebaseCollection } from "../hooks/useFirebaseData";
+import { exportToCsv } from "@/lib/csvExport";
 
 const DOCUMENTS = [
   { name: "GST Certificate", type: "Tax", uploaded: "Jan 12, 2024", status: "Approved" },
@@ -134,6 +136,52 @@ function SellerDetail() {
 
   const initials = seller.name.split(" ").map((n: string) => n[0]).slice(0, 2).join("");
 
+  const handleExportSeller = () => {
+    exportToCsv({
+      filename: `seller_${(seller.name || seller.id).toLowerCase().replace(/[^a-z0-9]/g, "_")}`,
+      data: [
+        {
+          id: seller.id,
+          name: seller.name,
+          category: seller.category,
+          owner: seller.owner,
+          phone: seller.phone,
+          email: seller.email,
+          city: seller.city,
+          state: seller.state,
+          address: seller.address,
+          gstin: seller.gstin,
+          status,
+          verified: verified ? "Yes" : "No",
+          productsCount: seller.products,
+          totalGMV: seller.gmv,
+          rating: seller.rating,
+          joined: seller.joined,
+          lastLogin: seller.lastLogin,
+        },
+      ],
+      columns: [
+        { header: "Seller ID", accessor: "id" },
+        { header: "Shop / Business Name", accessor: "name" },
+        { header: "Category", accessor: "category" },
+        { header: "Owner Name", accessor: "owner" },
+        { header: "Phone Number", accessor: "phone" },
+        { header: "Email Address", accessor: "email" },
+        { header: "City", accessor: "city" },
+        { header: "State", accessor: "state" },
+        { header: "Address", accessor: "address" },
+        { header: "GSTIN", accessor: "gstin" },
+        { header: "Status", accessor: "status" },
+        { header: "Verified", accessor: "verified" },
+        { header: "Total Products", accessor: "productsCount" },
+        { header: "Gross GMV", accessor: "totalGMV" },
+        { header: "Seller Rating", accessor: "rating" },
+        { header: "Registration Date", accessor: "joined" },
+        { header: "Last Login", accessor: "lastLogin" },
+      ],
+    });
+  };
+
   return (
     <div>
       <div className="mb-4">
@@ -149,6 +197,15 @@ function SellerDetail() {
         description={`Manage and verify ${seller.name}'s account`}
         actions={
           <>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={handleExportSeller}
+              title="Export seller profile & performance to CSV"
+            >
+              <Download className="h-4 w-4" /> Export CSV
+            </Button>
             <Button
               variant="outline"
               size="sm"

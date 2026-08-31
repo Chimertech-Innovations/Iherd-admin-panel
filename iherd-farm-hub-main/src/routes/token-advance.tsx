@@ -23,10 +23,12 @@ import {
   Info,
   ShieldCheck,
   CreditCard,
+  Download,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useTokenAdvance, useFirebaseCollection } from "@/hooks/useFirebaseData";
 import { getLocalizedText } from "@/lib/utils";
+import { exportToCsv } from "@/lib/csvExport";
 
 export const Route = createFileRoute("/token-advance")({
   head: () => ({ meta: [{ title: "Token Advance — iHerd Admin" }] }),
@@ -74,20 +76,51 @@ function TokenAdvancePage() {
     (o) => o.tokenAdvance || o.advancePaid || o.tokenPaid || o.tokenAmount
   );
 
+  const handleExportAdvance = () => {
+    const dataToExport = advanceBookings.length > 0 ? advanceBookings : cattleOrders;
+    exportToCsv({
+      filename: `iherd_token_advance_bookings_${new Date().toISOString().slice(0, 10)}`,
+      data: dataToExport,
+      columns: [
+        { header: "Order ID", accessor: (o: any) => o.orderId || o.id },
+        { header: "Cattle Tag / ID", accessor: (o: any) => o.cattleTag || o.tagNo || o.cattleId || "—" },
+        { header: "Cattle Breed", accessor: (o: any) => getLocalizedText(o.breed || o.cattleBreed) },
+        { header: "Buyer Name", accessor: (o: any) => o.buyerName || o.customerName || "—" },
+        { header: "Buyer Phone", accessor: (o: any) => o.buyerPhone || o.customerPhone || "—" },
+        { header: "Token Advance Paid (INR)", accessor: (o: any) => o.tokenAdvance || o.advancePaid || o.tokenPaid || o.tokenAmount || 0 },
+        { header: "Total Price (INR)", accessor: (o: any) => o.totalAmount || o.price || 0 },
+        { header: "Booking Date", accessor: (o: any) => o.createdAt ? new Date(o.createdAt).toLocaleString() : "—" },
+        { header: "Status", accessor: (o: any) => getLocalizedText(o.status, "Reserved") },
+      ],
+    });
+  };
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Token advance configuration"
         description="Manage the non-refundable advance booking deposit required to lock cattle in the marketplace."
         actions={
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => refetch()}
-            className="gap-1.5"
-          >
-            <RefreshCw className="h-4 w-4" /> Refresh
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleExportAdvance}
+              disabled={ordersLoading || advanceBookings.length === 0}
+              className="gap-1.5"
+              title={`Export ${advanceBookings.length} token advance bookings to CSV`}
+            >
+              <Download className="h-4 w-4" /> Export CSV
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => refetch()}
+              className="gap-1.5"
+            >
+              <RefreshCw className="h-4 w-4" /> Refresh
+            </Button>
+          </div>
         }
       />
 

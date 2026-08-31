@@ -48,10 +48,12 @@ import {
   CheckSquare,
   Square,
   ShoppingBag,
+  Download,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useCoupons, useAdminProducts, type Coupon } from "@/hooks/useFirebaseData";
 import { getLocalizedText, formatImageUrl } from "@/lib/utils";
+import { exportToCsv } from "@/lib/csvExport";
 
 export const Route = createFileRoute("/marketplace/coupons")({
   head: () => ({ meta: [{ title: "Coupon Codes — iHerd Admin" }] }),
@@ -253,9 +255,26 @@ function CouponsPage() {
       typeFilter === "all"
         ? true
         : (c.type || "PERCENT").toUpperCase() === typeFilter.toUpperCase();
-
     return codeMatch && matchStatus && matchType;
   });
+
+  const handleExportCoupons = () => {
+    const dataToExport = filteredCoupons.length > 0 ? filteredCoupons : coupons;
+    exportToCsv({
+      filename: `iherd_coupons_${new Date().toISOString().slice(0, 10)}`,
+      data: dataToExport,
+      columns: [
+        { header: "Coupon Code", accessor: (c: any) => c.code },
+        { header: "Discount Type", accessor: (c: any) => c.type || "PERCENT" },
+        { header: "Discount Value", accessor: (c: any) => `${c.value}${c.type === "FIXED" ? " INR" : "%"}` },
+        { header: "Min Order Amount (INR)", accessor: (c: any) => c.minOrder || 0 },
+        { header: "Max Discount (INR)", accessor: (c: any) => c.maxDiscount || "No limit" },
+        { header: "Expiry Date", accessor: (c: any) => c.expiryDate || "No expiry" },
+        { header: "Single Use Per User", accessor: (c: any) => c.trackUserIds ? "Yes" : "No" },
+        { header: "Status", accessor: (c: any) => c.active !== false ? "Active" : "Inactive" },
+      ],
+    });
+  };
 
   return (
     <div className="space-y-6">
@@ -263,13 +282,25 @@ function CouponsPage() {
         title="Coupon codes & discounts"
         description="Manage marketplace promotional coupons, discount rules, included/excluded product restrictions, and customer usage limits."
         actions={
-          <Button
-            size="sm"
-            onClick={openCreateDialog}
-            className="gap-1.5 bg-gradient-to-br from-primary to-primary-glow font-medium shadow-sm"
-          >
-            <Plus className="h-4 w-4" /> Create coupon
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExportCoupons}
+              disabled={isLoading || coupons.length === 0}
+              className="gap-1.5"
+              title={`Export ${filteredCoupons.length} coupons to CSV`}
+            >
+              <Download className="h-4 w-4" /> Export CSV
+            </Button>
+            <Button
+              size="sm"
+              onClick={openCreateDialog}
+              className="gap-1.5 bg-gradient-to-br from-primary to-primary-glow font-medium shadow-sm"
+            >
+              <Plus className="h-4 w-4" /> Create coupon
+            </Button>
+          </div>
         }
       />
 

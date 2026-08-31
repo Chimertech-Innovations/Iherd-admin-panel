@@ -24,11 +24,14 @@ import { StatusBadge } from "./StatusBadge";
 
 import { getLocalizedText } from "@/lib/utils";
 
+import { exportToCsv, type CsvColumn } from "@/lib/csvExport";
+
 export type Column<T> = {
   key: keyof T | string;
   label: string;
   render?: (row: T) => ReactNode;
   className?: string;
+  exportValue?: (row: T) => any;
 };
 
 export type KPI = {
@@ -55,6 +58,9 @@ export function DataPage<T extends Record<string, any>>({
   onPrimaryAction,
   rowHref,
   isLoading = false,
+  exportFilename,
+  onExport,
+  customExportColumns,
 }: {
   title: string;
   description?: string;
@@ -71,6 +77,9 @@ export function DataPage<T extends Record<string, any>>({
   onPrimaryAction?: () => void;
   rowHref?: (row: T) => string | undefined;
   isLoading?: boolean;
+  exportFilename?: string;
+  onExport?: (exportData: T[]) => void;
+  customExportColumns?: CsvColumn<T>[];
 }) {
   const navigate = useNavigate();
   const [q, setQ] = useState("");
@@ -94,6 +103,31 @@ export function DataPage<T extends Record<string, any>>({
     });
   }, [data, q, filter, statusKey, searchKeys]);
 
+  const handleExport = () => {
+    if (onExport) {
+      onExport(filtered.length > 0 ? filtered : data);
+      return;
+    }
+
+    const filename = exportFilename || title.toLowerCase().replace(/[^a-z0-9]/g, "_");
+    const exportCols: CsvColumn<T>[] = customExportColumns || columns
+      .filter((c) => c.key !== "actions" && c.label !== "Actions")
+      .map((c) => ({
+        header: c.label,
+        key: String(c.key),
+        accessor: c.exportValue || ((row: T) => {
+          if (c.key in row) return row[c.key as keyof T];
+          return "";
+        }),
+      }));
+
+    exportToCsv({
+      filename: `${filename}_${new Date().toISOString().slice(0, 10)}`,
+      data: filtered.length > 0 ? filtered : data,
+      columns: exportCols,
+    });
+  };
+
   return (
     <div>
       <PageHeader
@@ -101,8 +135,15 @@ export function DataPage<T extends Record<string, any>>({
         description={description}
         actions={
           <>
-            <Button variant="outline" size="sm" className="gap-1.5">
-              <Download className="h-4 w-4" /> Export
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={handleExport}
+              disabled={isLoading || data.length === 0}
+              title={`Export ${filtered.length} rows as CSV`}
+            >
+              <Download className="h-4 w-4" /> Export CSV
             </Button>
             {typeof primaryAction === "string" ? (
               <Button size="sm" onClick={onPrimaryAction} className="gap-1.5 bg-gradient-to-br from-primary to-primary-glow">

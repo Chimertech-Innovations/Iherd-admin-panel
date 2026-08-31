@@ -40,10 +40,12 @@ import {
   Check,
   Power,
   Eye,
+  Download,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useFirebaseCollection, useBestSellers } from "@/hooks/useFirebaseData";
 import { getLocalizedText } from "@/lib/utils";
+import { exportToCsv } from "@/lib/csvExport";
 
 export const Route = createFileRoute("/marketplace/best-sellers")({
   head: () => ({ meta: [{ title: "Best Sellers — iHerd Admin" }] }),
@@ -108,22 +110,51 @@ function BestSellersPage() {
     return name.includes(addSearch.toLowerCase()) || p.id?.toLowerCase().includes(addSearch.toLowerCase());
   });
 
+  const handleExportBestSellers = () => {
+    const dataToExport = filteredBestSellers.length > 0 ? filteredBestSellers : bestSellerProducts;
+    exportToCsv({
+      filename: `iherd_best_sellers_${new Date().toISOString().slice(0, 10)}`,
+      data: dataToExport,
+      columns: [
+        { header: "Product ID / SKU", accessor: (p: any) => p.id },
+        { header: "Product Name", accessor: (p: any) => getLocalizedText(p.name || p.title) },
+        { header: "Category", accessor: (p: any) => categoryMap.get(p.categoryId) || getLocalizedText(p.category || p.categoryId) },
+        { header: "Price (INR)", accessor: (p: any) => p.price || 0 },
+        { header: "Stock Quantity", accessor: (p: any) => p.quantity ?? p.stock ?? 0 },
+        { header: "Best Seller Status", accessor: () => "Featured Best Seller" },
+        { header: "Status", accessor: (p: any) => getLocalizedText(p.status, "Approved") },
+      ],
+    });
+  };
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Best seller products"
         description="Featured top-performing products displayed in mobile app best-seller highlights and marketplace feeds."
         actions={
-          <Button
-            size="sm"
-            onClick={() => {
-              setAddSearch("");
-              setAddModalOpen(true);
-            }}
-            className="gap-1.5 bg-gradient-to-br from-amber-500 to-orange-600 font-medium text-white shadow-sm hover:from-amber-600 hover:to-orange-700"
-          >
-            <Plus className="h-4 w-4" /> Feature product
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExportBestSellers}
+              disabled={productsLoading || bestSellerProducts.length === 0}
+              className="gap-1.5"
+              title={`Export ${filteredBestSellers.length} best sellers to CSV`}
+            >
+              <Download className="h-4 w-4" /> Export CSV
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => {
+                setAddSearch("");
+                setAddModalOpen(true);
+              }}
+              className="gap-1.5 bg-gradient-to-br from-amber-500 to-orange-600 font-medium text-white shadow-sm hover:from-amber-600 hover:to-orange-700"
+            >
+              <Plus className="h-4 w-4" /> Feature product
+            </Button>
+          </div>
         }
       />
 

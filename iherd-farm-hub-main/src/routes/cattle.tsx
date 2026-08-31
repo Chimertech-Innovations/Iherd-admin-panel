@@ -295,6 +295,33 @@ function CattleDetailsPage() {
       <DataPage
         title="Cattle Details Directory"
         description="Comprehensive animal specifications, RFID ear tags, verified camera proofs, daily milk yield, and owner information."
+        exportFilename="iherd_cattle_details"
+        customExportColumns={[
+          { header: "Tag No / RFID", accessor: (r) => r.tagNo || r.rfid || r.id },
+          { header: "Cattle ID", accessor: (r) => r.cattleId || r.id },
+          { header: "Cattle Name / Title", accessor: "title" },
+          { header: "Breed", accessor: "breed" },
+          { header: "Species", accessor: "species" },
+          { header: "Gender", accessor: "gender" },
+          { header: "Age (Years)", accessor: "age" },
+          { header: "Color", accessor: "color" },
+          { header: "Weight (kg)", accessor: "weight" },
+          { header: "Height", accessor: "height" },
+          { header: "Daily Milk Yield (L/day)", accessor: "milkYield" },
+          { header: "Parity / Lactation", accessor: "parity" },
+          { header: "Market Value (INR)", accessor: (r) => r.price || r.value || 0 },
+          { header: "Father Tag No", accessor: "fatherTagNo" },
+          { header: "Mother Tag No", accessor: "motherTagNo" },
+          { header: "Insured", accessor: (r) => r.insurance ? "Yes" : "No" },
+          { header: "Owner Name", accessor: "ownerName" },
+          { header: "Owner Phone", accessor: "ownerPhone" },
+          { header: "Owner UID", accessor: "ownerUid" },
+          { header: "Farm Name", accessor: "farmName" },
+          { header: "Village", accessor: "village" },
+          { header: "State", accessor: "state" },
+          { header: "Registration Date", accessor: (r) => r.createdAt ? formatDate(r.createdAt) : "—" },
+          { header: "Status", accessor: "status" },
+        ]}
         stats={[
           {
             label: "Total Tracked Cattle",

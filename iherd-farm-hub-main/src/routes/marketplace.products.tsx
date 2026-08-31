@@ -63,10 +63,12 @@ import {
   Tag,
   Check,
   HelpCircle,
+  Download,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAdminProducts, useFirebaseCollection, useBestSellers } from "@/hooks/useFirebaseData";
 import { getLocalizedText, formatImageUrl } from "@/lib/utils";
+import { exportToCsv } from "@/lib/csvExport";
 
 export const Route = createFileRoute("/marketplace/products")({
   head: () => ({ meta: [{ title: "Product Marketplace — iHerd Admin" }] }),
@@ -698,6 +700,32 @@ function ProductsMarketplacePage() {
   const bestSellerCount = products.filter((p: any) => p.bestSeller || p.isBestSeller).length;
   const lowStockCount = products.filter((p: any) => Number(p.quantity ?? p.stock ?? 0) <= 10).length;
 
+  const handleExportProducts = () => {
+    const dataToExport = filteredProducts.length > 0 ? filteredProducts : products;
+    exportToCsv({
+      filename: `iherd_marketplace_products_${new Date().toISOString().slice(0, 10)}`,
+      data: dataToExport,
+      columns: [
+        { header: "Product ID / SKU", accessor: (p: any) => p.id },
+        { header: "Product Name", accessor: (p: any) => getLocalizedText(p.name || p.title) },
+        { header: "Category", accessor: (p: any) => getLocalizedText(p.category || p.categoryName || p.categoryId) },
+        { header: "Subcategory", accessor: (p: any) => getLocalizedText(p.subCategory || p.subCategoryName || p.subCategoryId) },
+        { header: "Regular Price (INR)", accessor: (p: any) => p.originalPrice ?? p.price ?? 0 },
+        { header: "Discounted Price (INR)", accessor: (p: any) => p.price ?? 0 },
+        { header: "Stock Quantity", accessor: (p: any) => p.quantity ?? p.stock ?? 0 },
+        { header: "Weight", accessor: (p: any) => `${p.weight ?? 0} ${getLocalizedText(p.weightUnit, "g")}` },
+        { header: "Best Seller", accessor: (p: any) => (p.bestSeller || p.isBestSeller) ? "Yes" : "No" },
+        { header: "Seller Name", accessor: (p: any) => getLocalizedText(p.sellerName, "Chimertech") },
+        { header: "Seller Type", accessor: (p: any) => p.sellerType || "seller" },
+        { header: "GST (%)", accessor: (p: any) => p.gst ?? 18 },
+        { header: "Free Delivery", accessor: (p: any) => p.deliveryConfig?.isFreeDelivery ? "Yes" : "No" },
+        { header: "Delivery Charge", accessor: (p: any) => p.deliveryConfig?.deliveryCharge ?? 0 },
+        { header: "Estimated Delivery (Days)", accessor: (p: any) => p.deliveryConfig?.estimatedDays ?? 3 },
+        { header: "Status", accessor: (p: any) => getLocalizedText(p.status, "Approved") },
+      ],
+    });
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -706,9 +734,21 @@ function ProductsMarketplacePage() {
           title="Product Marketplace"
           description="Manage veterinary equipment, pharmaceuticals, cattle feeds, supplements, and digital products."
         />
-        <Button onClick={openAddModal} className="bg-gradient-to-br from-primary to-primary-glow shadow-md gap-1.5 self-start sm:self-auto rounded-2xl font-bold">
-          <Plus className="h-4 w-4" /> Add New Product
-        </Button>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleExportProducts}
+            disabled={isLoading || products.length === 0}
+            className="rounded-2xl gap-1.5"
+            title={`Export ${filteredProducts.length} products to CSV`}
+          >
+            <Download className="h-4 w-4" /> Export CSV
+          </Button>
+          <Button onClick={openAddModal} className="bg-gradient-to-br from-primary to-primary-glow shadow-md gap-1.5 rounded-2xl font-bold">
+            <Plus className="h-4 w-4" /> Add New Product
+          </Button>
+        </div>
       </div>
 
       {/* KPI Cards */}
