@@ -159,7 +159,7 @@ function TokenAdvancePage() {
               <div className="p-4 rounded-2xl border bg-muted/20 space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="font-semibold text-sm flex items-center gap-2">
-                    <Beef className="h-4 w-4 text-primary" /> Cow (गाय)
+                    <Beef className="h-4 w-4 text-primary" /> Cow
                   </span>
                   <span className="text-xs font-mono text-muted-foreground">cow</span>
                 </div>
@@ -180,7 +180,7 @@ function TokenAdvancePage() {
               <div className="p-4 rounded-2xl border bg-muted/20 space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="font-semibold text-sm flex items-center gap-2">
-                    <Beef className="h-4 w-4 text-indigo-600" /> Buffalo (भैंस)
+                    <Beef className="h-4 w-4 text-indigo-600" /> Buffalo
                   </span>
                   <span className="text-xs font-mono text-muted-foreground">buffalo</span>
                 </div>
@@ -201,7 +201,7 @@ function TokenAdvancePage() {
               <div className="p-4 rounded-2xl border bg-muted/20 space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="font-semibold text-sm flex items-center gap-2">
-                    <Coins className="h-4 w-4 text-emerald-600" /> Goat (बकरी)
+                    <Coins className="h-4 w-4 text-emerald-600" /> Goat 
                   </span>
                   <span className="text-xs font-mono text-muted-foreground">goat</span>
                 </div>
@@ -222,7 +222,7 @@ function TokenAdvancePage() {
               <div className="p-4 rounded-2xl border bg-muted/20 space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="font-semibold text-sm flex items-center gap-2">
-                    <Coins className="h-4 w-4 text-amber-600" /> Sheep (भेड़)
+                    <Coins className="h-4 w-4 text-amber-600" /> Sheep
                   </span>
                   <span className="text-xs font-mono text-muted-foreground">sheep</span>
                 </div>

@@ -2,9 +2,9 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { collection, collectionGroup, getDocs, doc, getDoc, setDoc, updateDoc, deleteDoc } from "firebase/firestore";
 import { db } from "../lib/firebase";
 
-const API_BASE =
+export const API_BASE =
   (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ||
-  "https://iherdadminpanel.onrender.com";
+  "http://localhost:5000";
 
 export function useFirebaseCollectionGroup<T>(collectionId: string) {
   const isMockKey = !import.meta.env.VITE_FIREBASE_API_KEY || 
@@ -14,27 +14,43 @@ export function useFirebaseCollectionGroup<T>(collectionId: string) {
   return useQuery({
     queryKey: ["collectionGroup", collectionId],
     queryFn: async () => {
-      if (isMockKey) {
-        return [];
-      }
-      try {
-        const colRef = collectionGroup(db, collectionId);
-        const snapshot = await getDocs(colRef);
-        if (snapshot.empty) {
-          return [];
+      if (!isMockKey) {
+        try {
+          const colRef = collectionGroup(db, collectionId);
+          const snapshot = await getDocs(colRef);
+          if (!snapshot.empty) {
+            const results: any[] = [];
+            snapshot.forEach((doc) => {
+              results.push({ id: doc.id, _path: doc.ref.path, ...doc.data() });
+            });
+            if (results.length > 0) return results as T[];
+          }
+        } catch (error) {
+          console.warn(`Client Firebase error for collectionGroup ${collectionId}, attempting backend fallback:`, error);
         }
-        const results: any[] = [];
-        snapshot.forEach((doc) => {
-          results.push({ id: doc.id, _path: doc.ref.path, ...doc.data() });
-        });
-        return results as T[];
-      } catch (error) {
-        console.warn(`Error fetching collectionGroup ${collectionId} from Firebase:`, error);
-        return [];
       }
+
+      // Backend Admin SDK Fallback (handles security rules and indexes with Admin privileges)
+      try {
+        const res = await fetch(`${API_BASE}/api/admin/collection-group/${collectionId}`).catch(() =>
+          fetch(`http://localhost:5000/api/admin/collection-group/${collectionId}`).catch(() =>
+            fetch(`/api/admin/collection-group/${collectionId}`)
+          )
+        );
+        if (res && res.ok) {
+          const json = await res.json();
+          if (Array.isArray(json.data) && json.data.length > 0) {
+            return json.data as T[];
+          }
+        }
+      } catch (e) {}
+
+      return [] as T[];
     },
-    placeholderData: [],
-    staleTime: 10_000,
+    placeholderData: (previousData) => previousData || [],
+    staleTime: 90_000,
+    gcTime: 600_000,
+    refetchOnWindowFocus: false,
   });
 }
 
@@ -66,8 +82,10 @@ export function useFirebaseCollection<T>(collectionPath: string) {
         return [];
       }
     },
-    placeholderData: [],
-    staleTime: 10_000,
+    placeholderData: (previousData) => previousData || [],
+    staleTime: 90_000,
+    gcTime: 600_000,
+    refetchOnWindowFocus: false,
   });
 }
 

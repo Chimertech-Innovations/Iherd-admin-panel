@@ -757,7 +757,11 @@ function ProductsMarketplacePage() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs text-muted-foreground font-medium">Total Products</p>
-              <h3 className="text-2xl font-bold mt-1 text-foreground">{totalCount}</h3>
+              {isLoading ? (
+                <div className="h-8 w-20 bg-muted/70 rounded-lg animate-pulse mt-1" />
+              ) : (
+                <h3 className="text-2xl font-bold mt-1 text-foreground">{totalCount}</h3>
+              )}
             </div>
             <div className="h-10 w-10 rounded-2xl bg-primary/10 text-primary flex items-center justify-center font-bold">
               <ShoppingBag className="h-5 w-5" />
@@ -772,7 +776,11 @@ function ProductsMarketplacePage() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs text-muted-foreground font-medium">Approved / Active</p>
-              <h3 className="text-2xl font-bold mt-1 text-emerald-600">{approvedCount}</h3>
+              {isLoading ? (
+                <div className="h-8 w-20 bg-muted/70 rounded-lg animate-pulse mt-1" />
+              ) : (
+                <h3 className="text-2xl font-bold mt-1 text-emerald-600">{approvedCount}</h3>
+              )}
             </div>
             <div className="h-10 w-10 rounded-2xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center font-bold">
               <CheckCircle2 className="h-5 w-5" />
@@ -785,7 +793,11 @@ function ProductsMarketplacePage() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs text-muted-foreground font-medium">Featured Best Sellers</p>
-              <h3 className="text-2xl font-bold mt-1 text-amber-500">{bestSellerCount}</h3>
+              {isLoading ? (
+                <div className="h-8 w-20 bg-muted/70 rounded-lg animate-pulse mt-1" />
+              ) : (
+                <h3 className="text-2xl font-bold mt-1 text-amber-500">{bestSellerCount}</h3>
+              )}
             </div>
             <div className="h-10 w-10 rounded-2xl bg-amber-500/10 text-amber-600 flex items-center justify-center font-bold">
               <Flame className="h-5 w-5" />
@@ -798,7 +810,11 @@ function ProductsMarketplacePage() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs text-muted-foreground font-medium">Low / Out of Stock</p>
-              <h3 className="text-2xl font-bold mt-1 text-rose-500">{lowStockCount}</h3>
+              {isLoading ? (
+                <div className="h-8 w-20 bg-muted/70 rounded-lg animate-pulse mt-1" />
+              ) : (
+                <h3 className="text-2xl font-bold mt-1 text-rose-500">{lowStockCount}</h3>
+              )}
             </div>
             <div className="h-10 w-10 rounded-2xl bg-rose-500/10 text-rose-600 flex items-center justify-center font-bold">
               <AlertCircle className="h-5 w-5" />
@@ -874,7 +890,15 @@ function ProductsMarketplacePage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredProducts.length === 0 ? (
+              {isLoading ? (
+                Array.from({ length: 5 }).map((_, i) => (
+                  <TableRow key={i}>
+                    <TableCell colSpan={7}>
+                      <div className="h-10 w-full bg-muted/60 rounded-xl animate-pulse" />
+                    </TableCell>
+                  </TableRow>
+                ))
+              ) : filteredProducts.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={7} className="h-36 text-center text-xs text-muted-foreground">
                     No products found matching the criteria.

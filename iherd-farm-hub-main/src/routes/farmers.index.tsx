@@ -82,8 +82,6 @@ function FarmersPage() {
     return () => { isMounted = false; };
   }, []);
 
-  const isLoading = authLoading || fsLoading || directLoading;
-
   // Build cattle count map by owner UID
   const cattleCountMap = useMemo(() => {
     const map = new Map<string, number>();
@@ -420,6 +418,8 @@ function FarmersPage() {
     (a, b) => (b.rawTimestamp || 0) - (a.rawTimestamp || 0)
   );
 
+  const isLoading = (authLoading || fsLoading || directLoading) && allFarmers.length === 0;
+
   const totalFarmers = allFarmers.length;
   const activeFarmers = allFarmers.filter((f) => f.status.toLowerCase() === "active" || !f.status).length;
   const farmersWithFarms = allFarmers.filter((f) => f.hasFarm).length;
@@ -431,6 +431,7 @@ function FarmersPage() {
         title="Farmers Directory"
         description="All registered farmers, contact info, locations, and linked farm and livestock records."
         exportFilename="iherd_farmers_directory"
+        isLoading={isLoading}
         customExportColumns={[
           { header: "Farmer Name", accessor: "name" },
           { header: "Farmer UID", accessor: "uid" },
@@ -446,25 +447,25 @@ function FarmersPage() {
         stats={[
           {
             label: "Total Registered Farmers",
-            value: String(totalFarmers),
+            value: isLoading ? "…" : String(totalFarmers),
             change: `${activeFarmers} active farmers`,
             up: true,
           },
           {
             label: "Farmers with Registered Farms",
-            value: String(farmersWithFarms),
+            value: isLoading ? "…" : String(farmersWithFarms),
             change: "Have active farms",
             up: true,
           },
           {
             label: "Farmers with Cattle",
-            value: String(farmersWithCattle),
+            value: isLoading ? "…" : String(farmersWithCattle),
             change: "Have livestock tracked",
             up: true,
           },
           {
             label: "Active Verification Rate",
-            value: totalFarmers > 0 ? `${Math.round((activeFarmers / totalFarmers) * 100)}%` : "0%",
+            value: isLoading ? "…" : (totalFarmers > 0 ? `${Math.round((activeFarmers / totalFarmers) * 100)}%` : "0%"),
             change: "Verified accounts",
             up: true,
           },

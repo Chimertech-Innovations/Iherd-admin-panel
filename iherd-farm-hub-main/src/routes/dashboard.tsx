@@ -299,7 +299,11 @@ function Kpi({
             )}
           </div>
           <div className="mt-2 text-3xl font-bold tracking-tight text-foreground">
-            {value}
+            {value === "…" || value === "loading" ? (
+              <span className="inline-block h-8 w-24 bg-muted/70 rounded-xl animate-pulse mt-0.5" />
+            ) : (
+              value
+            )}
           </div>
           {delta && (
             <div
@@ -349,8 +353,8 @@ function Dashboard() {
   const { profile } = useAuth();
   const displayName = profile?.name ? profile.name.split(" ")[0] : "Admin";
 
-  const { data: allUsers = [] } = useAdminUsers();
-  const { data: firestoreUsers = [] } = useFirebaseCollection<any>("users");
+  const { data: allUsers = [], isLoading: usersLoading } = useAdminUsers();
+  const { data: firestoreUsers = [], isLoading: fsLoading } = useFirebaseCollection<any>("users");
   const { data: directFarmers = [] } = useFirebaseCollection<any>("farmers");
   const { data: directSellers = [] } = useFirebaseCollection<any>("sellers");
   const { data: cattle = [] } = useFirebaseCollection("cattle-marketplace");
@@ -363,6 +367,8 @@ function Dashboard() {
   const { data: coupons = [] } = useCoupons();
   const { data: tokenAdvData } = useTokenAdvance();
   const { data: bestSellers = [] } = useBestSellers();
+
+  const isInitialLoading = (usersLoading || fsLoading) && allUsers.length === 0 && firestoreUsers.length === 0;
 
   // Enriched product orders from API
   const { data: apiProductOrders = [] } = useQuery({
@@ -1478,7 +1484,7 @@ function Dashboard() {
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Kpi
           label="Total Farmers"
-          value={farmersCount.toLocaleString()}
+          value={isInitialLoading ? "…" : farmersCount.toLocaleString()}
           delta={`${verifiedFarmersCount} Active`}
           up
           icon={Users}
@@ -1490,7 +1496,7 @@ function Dashboard() {
         />
         <Kpi
           label="Registered Farms"
-          value={farmsCount.toLocaleString()}
+          value={isInitialLoading ? "…" : farmsCount.toLocaleString()}
           delta="Active farm locations"
           up
           icon={Landmark}
@@ -1502,7 +1508,7 @@ function Dashboard() {
         />
         <Kpi
           label="Total Sellers"
-          value={sellersCount.toLocaleString()}
+          value={isInitialLoading ? "…" : sellersCount.toLocaleString()}
           delta={`${filteredProductOrders.length} orders`}
           up
           icon={Store}
@@ -1514,7 +1520,7 @@ function Dashboard() {
         />
         <Kpi
           label="Cattle Registered"
-          value={cattleCount.toLocaleString()}
+          value={isInitialLoading ? "…" : cattleCount.toLocaleString()}
           delta={`${filteredCattleOrders.length} booked`}
           up
           icon={Beef}
@@ -1526,7 +1532,7 @@ function Dashboard() {
         />
         <Kpi
           label="Total Products"
-          value={productsCount.toLocaleString()}
+          value={isInitialLoading ? "…" : productsCount.toLocaleString()}
           delta={`${periodProductsCount} in period`}
           up
           icon={ShoppingBag}
@@ -1538,7 +1544,7 @@ function Dashboard() {
         />
         <Kpi
           label="Product Orders"
-          value={filteredProductOrders.length.toLocaleString()}
+          value={isInitialLoading ? "…" : filteredProductOrders.length.toLocaleString()}
           delta="Marketplace orders"
           up
           icon={PackageCheck}
@@ -1550,7 +1556,7 @@ function Dashboard() {
         />
         <Kpi
           label="Active Coupons"
-          value={activeCouponsCount.toLocaleString()}
+          value={isInitialLoading ? "…" : activeCouponsCount.toLocaleString()}
           delta="Live marketplace"
           up
           icon={Ticket}
@@ -1562,7 +1568,7 @@ function Dashboard() {
         />
         <Kpi
           label="App Logins in Period"
-          value={activeLogins.length.toLocaleString()}
+          value={isInitialLoading ? "…" : activeLogins.length.toLocaleString()}
           delta="Active users"
           up
           icon={LogIn}

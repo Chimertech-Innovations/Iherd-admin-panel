@@ -41,10 +41,11 @@ import {
   Power,
   Eye,
   Download,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useFirebaseCollection, useBestSellers } from "@/hooks/useFirebaseData";
-import { getLocalizedText } from "@/lib/utils";
+import { useAdminProducts, useFirebaseCollection, useBestSellers } from "@/hooks/useFirebaseData";
+import { getLocalizedText, formatImageUrl } from "@/lib/utils";
 import { exportToCsv } from "@/lib/csvExport";
 
 export const Route = createFileRoute("/marketplace/best-sellers")({
@@ -52,9 +53,80 @@ export const Route = createFileRoute("/marketplace/best-sellers")({
   component: BestSellersPage,
 });
 
+// Resilient image component with Google Drive CDN fallback and referrer policy
+function ProductImage({
+  src,
+  alt,
+  className = "",
+  fallbackIcon: FallbackIcon = Package,
+}: {
+  src: string;
+  alt: string;
+  className?: string;
+  fallbackIcon?: any;
+}) {
+  const [errorLevel, setErrorLevel] = useState(0);
+
+  if (!src || errorLevel >= 3) {
+    return (
+      <div className={`grid place-items-center bg-primary/10 text-primary ${className}`}>
+        <FallbackIcon className="h-1/2 w-1/2" />
+      </div>
+    );
+  }
+
+  let finalUrl = formatImageUrl(src);
+
+  // Fallback 1: if lh3 fails, try drive.google.com/thumbnail
+  if (errorLevel === 1) {
+    const driveMatch = src.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || src.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+    if (driveMatch && driveMatch[1]) {
+      finalUrl = `https://drive.google.com/thumbnail?id=${driveMatch[1]}&sz=w800`;
+    }
+  }
+
+  // Fallback 2: if thumbnail fails, try direct uc export view
+  if (errorLevel === 2) {
+    const driveMatch = src.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || src.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+    if (driveMatch && driveMatch[1]) {
+      finalUrl = `https://drive.google.com/uc?export=view&id=${driveMatch[1]}`;
+    }
+  }
+
+  return (
+    <img
+      src={finalUrl}
+      alt={alt}
+      className={className}
+      referrerPolicy="no-referrer"
+      crossOrigin="anonymous"
+      onError={() => setErrorLevel((prev) => prev + 1)}
+    />
+  );
+}
+
+function getProductThumbnail(p: any): string {
+  if (!p) return "";
+  if (typeof p.thumbnailUrl === "string" && p.thumbnailUrl.trim()) return p.thumbnailUrl.trim();
+  if (typeof p.thumbnail === "string" && p.thumbnail.trim()) return p.thumbnail.trim();
+  if (Array.isArray(p.imageUrls) && p.imageUrls.length > 0) {
+    const first = p.imageUrls.find((u: any) => typeof u === "string" && u.trim());
+    if (first) return first.trim();
+  }
+  if (typeof p.imageUrls === "string" && p.imageUrls.trim()) return p.imageUrls.trim();
+  if (Array.isArray(p.images) && p.images.length > 0) {
+    const first = p.images.find((u: any) => typeof u === "string" && u.trim());
+    if (first) return first.trim();
+  }
+  if (typeof p.images === "string" && p.images.trim()) return p.images.trim();
+  if (typeof p.imageUrl === "string" && p.imageUrl.trim()) return p.imageUrl.trim();
+  if (typeof p.image === "string" && p.image.trim()) return p.image.trim();
+  if (typeof p.photoUrl === "string" && p.photoUrl.trim()) return p.photoUrl.trim();
+  return "";
+}
+
 function BestSellersPage() {
-  const { data: allProducts = [], isLoading: productsLoading } =
-    useFirebaseCollection<any>("product_marketplace/main/products");
+  const { data: allProducts = [], isLoading: productsLoading } = useAdminProducts();
   const { data: categories = [] } =
     useFirebaseCollection<any>("product_marketplace/main/categories");
   const { toggleBestSeller } = useBestSellers();
@@ -65,6 +137,7 @@ function BestSellersPage() {
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [addSearch, setAddSearch] = useState("");
+  const [selectedPreviewImage, setSelectedPreviewImage] = useState<{ url: string; title: string } | null>(null);
 
   const bestSellerProducts = allProducts.filter((p) => p.bestSeller || p.isBestSeller);
 
@@ -272,18 +345,24 @@ function BestSellersPage() {
                 </TableRow>
               ) : (
                 filteredBestSellers.map((p) => {
-                  const img = p.thumbnailUrl || p.imageUrls?.[0] || p.images?.[0] || p.imageUrl;
+                  const img = getProductThumbnail(p);
                   const catName = categoryMap.get(p.categoryId) || p.category || "General";
                   const prodName = getLocalizedText(p.name || p.title, p.id);
 
                   return (
                     <TableRow key={p.id} className="hover:bg-muted/30 transition-colors">
                       <TableCell>
-                        <div className="h-10 w-10 rounded-xl bg-muted overflow-hidden flex items-center justify-center border shrink-0">
-                          {img ? (
-                            <img src={img} alt="" className="h-full w-full object-cover" />
-                          ) : (
-                            <Package className="h-5 w-5 text-muted-foreground" />
+                        <div
+                          className="h-12 w-12 rounded-xl bg-muted overflow-hidden flex items-center justify-center border shrink-0 cursor-pointer hover:opacity-90 transition-opacity relative group"
+                          onClick={() => {
+                            if (img) setSelectedPreviewImage({ url: img, title: prodName });
+                          }}
+                        >
+                          <ProductImage src={img} alt={prodName} className="h-full w-full object-cover" />
+                          {img && (
+                            <div className="absolute inset-0 bg-black/20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                              <Eye className="h-3.5 w-3.5 text-white" />
+                            </div>
                           )}
                         </div>
                       </TableCell>
@@ -374,15 +453,22 @@ function BestSellersPage() {
           {selectedProduct && (
             <div className="space-y-4 pt-2 text-sm">
               <div className="flex gap-4 items-start">
-                <div className="h-20 w-20 rounded-2xl bg-muted overflow-hidden flex items-center justify-center border shrink-0">
-                  {selectedProduct.thumbnailUrl || selectedProduct.imageUrls?.[0] ? (
-                    <img
-                      src={selectedProduct.thumbnailUrl || selectedProduct.imageUrls?.[0]}
-                      alt=""
-                      className="h-full w-full object-cover"
-                    />
-                  ) : (
-                    <Package className="h-8 w-8 text-muted-foreground" />
+                <div
+                  className="h-20 w-20 rounded-2xl bg-muted overflow-hidden flex items-center justify-center border shrink-0 cursor-pointer hover:opacity-90 transition-opacity relative group"
+                  onClick={() => {
+                    const img = getProductThumbnail(selectedProduct);
+                    if (img) setSelectedPreviewImage({ url: img, title: getLocalizedText(selectedProduct.name || selectedProduct.title) });
+                  }}
+                >
+                  <ProductImage
+                    src={getProductThumbnail(selectedProduct)}
+                    alt={getLocalizedText(selectedProduct.name || selectedProduct.title)}
+                    className="h-full w-full object-cover"
+                  />
+                  {getProductThumbnail(selectedProduct) && (
+                    <div className="absolute inset-0 bg-black/20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Eye className="h-4 w-4 text-white" />
+                    </div>
                   )}
                 </div>
                 <div className="space-y-1">
@@ -481,18 +567,14 @@ function BestSellersPage() {
                 </div>
               ) : (
                 candidateProducts.slice(0, 20).map((p) => {
-                  const img = p.thumbnailUrl || p.imageUrls?.[0] || p.images?.[0];
+                  const img = getProductThumbnail(p);
                   const prodName = getLocalizedText(p.name || p.title, p.id);
 
                   return (
                     <div key={p.id} className="p-3 flex items-center justify-between hover:bg-muted/30 transition-colors">
                       <div className="flex items-center gap-3 min-w-0">
-                        <div className="h-10 w-10 rounded-lg bg-muted overflow-hidden shrink-0 border">
-                          {img ? (
-                            <img src={img} alt="" className="h-full w-full object-cover" />
-                          ) : (
-                            <Package className="h-4 w-4 m-3 text-muted-foreground" />
-                          )}
+                        <div className="h-10 w-10 rounded-lg bg-muted overflow-hidden shrink-0 border flex items-center justify-center">
+                          <ProductImage src={img} alt={prodName} className="h-full w-full object-cover" />
                         </div>
                         <div className="min-w-0">
                           <div className="font-medium text-xs text-foreground truncate">{prodName}</div>
@@ -517,6 +599,30 @@ function BestSellersPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Full Preview Image Dialog */}
+      {selectedPreviewImage && (
+        <Dialog open={!!selectedPreviewImage} onOpenChange={() => setSelectedPreviewImage(null)}>
+          <DialogContent className="max-w-md p-0 overflow-hidden rounded-3xl border-0 bg-transparent shadow-2xl">
+            <div className="relative bg-black/95 p-6 text-center">
+              <button
+                onClick={() => setSelectedPreviewImage(null)}
+                className="absolute top-4 right-4 z-10 p-2 rounded-full bg-white/10 text-white hover:bg-white/20 transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+              <div className="max-h-[60vh] overflow-hidden rounded-2xl flex items-center justify-center">
+                <ProductImage
+                  src={selectedPreviewImage.url}
+                  alt={selectedPreviewImage.title}
+                  className="max-h-[60vh] w-auto max-w-full object-contain mx-auto rounded-xl"
+                />
+              </div>
+              <p className="text-white text-sm font-semibold mt-4">{selectedPreviewImage.title}</p>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }

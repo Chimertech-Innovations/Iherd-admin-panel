@@ -25,17 +25,25 @@ function UsersPage() {
   // 2. Fetch users collection from Firestore to merge live roles & profiles
   const { data: firestoreUsers = [], isLoading: firestoreLoading } = useFirebaseCollection<any>("users");
 
-  const isLoading = authLoading && authUsers.length === 0;
-
-  // Merge Auth users and Firestore user documents
+  // Merge Auth users and Firestore user documents with instant O(1) matching
   const mergedUsers = useMemo(() => {
     const userMap = new Map<string, any>();
+
+    // Build O(1) lookup map of Firestore profiles by id, uid, and clean phone
+    const fsMap = new Map<string, any>();
+    firestoreUsers.forEach((fu: any) => {
+      if (fu.id) fsMap.set(fu.id, fu);
+      if (fu.uid) fsMap.set(fu.uid, fu);
+      const cleanPhone = (fu.phoneNumber || fu.phone || "").replace(/\D/g, "").slice(-10);
+      if (cleanPhone) fsMap.set(cleanPhone, fu);
+    });
 
     // 1. Index all Auth users
     authUsers.forEach((authUser: any) => {
       const uid = authUser.uid || authUser.id;
       if (!uid) return;
-      const fsUser = firestoreUsers.find((fu: any) => isSimilarUid(fu.id, uid) || isSimilarUid(fu.uid, uid));
+      const cleanAuthPhone = (authUser.phoneNumber || authUser.phone || "").replace(/\D/g, "").slice(-10);
+      const fsUser = fsMap.get(uid) || (cleanAuthPhone ? fsMap.get(cleanAuthPhone) : null) || {};
 
       // Accurate role resolution from backend and Firestore
       const rawRoles = authUser.roles || fsUser?.roles || (fsUser?.role ? [fsUser.role] : ["User"]);
@@ -148,6 +156,8 @@ function UsersPage() {
     });
   }, [authUsers, firestoreUsers]);
 
+  const isLoading = (authLoading || firestoreLoading) && mergedUsers.length === 0;
+
   const totalUsers = mergedUsers.length;
   const farmerUsers = mergedUsers.filter((u) => u.role === "Farmer" || (Array.isArray(u.roles) && u.roles.includes("Farmer"))).length;
   const sellerUsers = mergedUsers.filter((u) => u.role === "Seller" || (Array.isArray(u.roles) && u.roles.includes("Seller"))).length;
@@ -183,10 +193,10 @@ function UsersPage() {
           { header: "Last Activity / Login", accessor: (r) => r.lastLoginAt ? new Date(r.lastLoginAt).toLocaleString() : "—" },
         ]}
         kpis={[
-          { label: "Total Accounts", value: totalUsers.toLocaleString(), change: "All registered users", up: true },
-          { label: "Farmers", value: farmerUsers.toLocaleString(), change: "With farm & cattle data", up: true },
-          { label: "Sellers", value: sellerUsers.toLocaleString(), change: "Marketplace vendors", up: true },
-          { label: "Veterinarians", value: vetUsers.toLocaleString(), change: "Verified doctors", up: true },
+          { label: "Total Accounts", value: isLoading ? "…" : totalUsers.toLocaleString(), change: "All registered users", up: true },
+          { label: "Farmers", value: isLoading ? "…" : farmerUsers.toLocaleString(), change: "With farm & cattle data", up: true },
+          { label: "Sellers", value: isLoading ? "…" : sellerUsers.toLocaleString(), change: "Marketplace vendors", up: true },
+          { label: "Veterinarians", value: isLoading ? "…" : vetUsers.toLocaleString(), change: "Verified doctors", up: true },
         ]}
         data={mergedUsers}
         columns={[

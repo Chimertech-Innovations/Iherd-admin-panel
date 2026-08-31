@@ -3,7 +3,7 @@ import { useState, useMemo, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { doc, getDoc, collection, getDocs } from "firebase/firestore";
 import { db } from "../lib/firebase";
-import { useFirebaseCollection } from "../hooks/useFirebaseData";
+import { useFirebaseCollection, useFirebaseCollectionGroup } from "../hooks/useFirebaseData";
 import { useAdminUsers } from "../hooks/useAdminUsers";
 import { getLocalizedText } from "@/lib/utils";
 import {
@@ -152,6 +152,7 @@ function UserDetail() {
   const { data: allVets = [] } = useFirebaseCollection<any>("vets");
   const { data: allCattleDetails = [] } = useFirebaseCollection<any>("cattle_details");
   const { data: allCattleMarketplace = [] } = useFirebaseCollection<any>("cattle-marketplace");
+  const { data: allGroupCattles = [] } = useFirebaseCollectionGroup<any>("cattles");
 
   // Find primary user in Firestore users list (fuzzy similarity)
   const firestoreUser = useMemo(() => {
@@ -359,6 +360,10 @@ function UserDetail() {
 
     const isOwner = (c: any) => {
       if (!c) return false;
+      const docPath = c._path || c.path || "";
+      if (docPath && (docPath.includes(`users/${userId}`) || (resolvedDocId && docPath.includes(`users/${resolvedDocId}`)))) {
+        return true;
+      }
       const owner = c.ownerUid || c.sellerId || c.farmerId || c.userId || c.uid || c.postedBy || "";
       if (isSimilarUid(owner, userId) || isSimilarUid(owner, resolvedDocId)) return true;
       return false;
@@ -376,8 +381,14 @@ function UserDetail() {
       else map.set(key, { ...c, source: "cattle-marketplace" });
     });
 
+    allGroupCattles.filter(isOwner).forEach((c: any) => {
+      const key = c.cattleId || c.rfid || c.id;
+      if (map.has(key)) map.set(key, { ...map.get(key), ...c, source: "farm_cattles" });
+      else map.set(key, { ...c, source: "farm_cattles" });
+    });
+
     return Array.from(map.values());
-  }, [backendFullData, allCattleDetails, allCattleMarketplace, userId, resolvedDocId]);
+  }, [backendFullData, allCattleDetails, allCattleMarketplace, allGroupCattles, userId, resolvedDocId]);
 
   // Consolidate ONLY Valid Images for This User
   const allMediaImages = useMemo(() => {
@@ -529,6 +540,17 @@ function UserDetail() {
   };
 
   const farmDisplayName = getLocalizedText(farmDoc.name || (farmerDoc.name ? `${farmerDoc.name}'s Dairy Farm` : "Registered Dairy Farm"));
+  const farmName = farmDisplayName;
+  const farmTechnique = getLocalizedText(farmDoc?.farmTechnique || "Modern Dairy Management");
+  const farmLocation =
+    [
+      farmDoc?.village || farmerDoc?.village,
+      farmDoc?.district || farmerDoc?.district,
+      farmDoc?.state || farmerDoc?.state,
+    ]
+      .filter(Boolean)
+      .map((v) => getLocalizedText(v))
+      .join(", ") || "—";
 
   if (backendLoading && !backendFullData) {
     return (

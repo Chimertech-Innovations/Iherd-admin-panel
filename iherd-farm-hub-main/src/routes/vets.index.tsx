@@ -396,10 +396,10 @@ function VetsPage() {
         searchPlaceholder="Search doctors by name, clinic, phone, or location..."
         searchKeys={["name", "clinic", "phone", "qualification", "city", "state"]}
         kpis={[
-          { label: "Total Doctors", value: totalVets.toLocaleString(), change: "Registered practitioners", up: true },
-          { label: "Active Doctors", value: activeVets.toLocaleString(), change: "Available for consultation", up: true },
-          { label: "Verified License", value: verifiedVets.toLocaleString(), change: "Certificate approved", up: true },
-          { label: "Avg Experience", value: "6.5 Yrs", change: "Qualified experts", up: true },
+          { label: "Total Doctors", value: isLoading ? "…" : totalVets.toLocaleString(), change: "Registered practitioners", up: true },
+          { label: "Active Doctors", value: isLoading ? "…" : activeVets.toLocaleString(), change: "Available for consultation", up: true },
+          { label: "Verified License", value: isLoading ? "…" : verifiedVets.toLocaleString(), change: "Certificate approved", up: true },
+          { label: "Avg Experience", value: isLoading ? "…" : "6.5 Yrs", change: "Qualified experts", up: true },
         ]}
         data={vets}
         rowHref={(row) => `/users/${row.id}`}

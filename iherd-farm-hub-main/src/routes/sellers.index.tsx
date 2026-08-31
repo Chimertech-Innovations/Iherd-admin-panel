@@ -395,10 +395,10 @@ function SellersPage() {
         searchPlaceholder="Search sellers by store name, owner, phone, or category..."
         searchKeys={["name", "ownerName", "phone", "category", "city", "state"]}
         kpis={[
-          { label: "Total Sellers", value: totalSellers.toLocaleString(), change: "Registered vendors", up: true },
-          { label: "Verified & Active", value: verifiedSellers.toLocaleString(), change: "Active in marketplace", up: true },
-          { label: "GMV (30d)", value: "₹0", change: "Marketplace revenue", up: true },
-          { label: "Avg Payout", value: "₹0", change: "Vendor payouts", up: true },
+          { label: "Total Sellers", value: isLoading ? "…" : totalSellers.toLocaleString(), change: "Registered vendors", up: true },
+          { label: "Verified & Active", value: isLoading ? "…" : verifiedSellers.toLocaleString(), change: "Active in marketplace", up: true },
+          { label: "GMV (30d)", value: isLoading ? "…" : "₹0", change: "Marketplace revenue", up: true },
+          { label: "Avg Payout", value: isLoading ? "…" : "₹0", change: "Vendor payouts", up: true },
         ]}
         data={sellers}
         rowHref={(row) => `/users/${row.id}`}

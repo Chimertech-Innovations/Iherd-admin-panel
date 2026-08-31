@@ -1,4 +1,4 @@
-import { cn } from "@/lib/utils";
+import { cn, getLocalizedText } from "@/lib/utils";
 
 const styles: Record<string, string> = {
   active: "bg-success/15 text-success border-success/20",
@@ -6,6 +6,8 @@ const styles: Record<string, string> = {
   paid: "bg-success/15 text-success border-success/20",
   completed: "bg-success/15 text-success border-success/20",
   online: "bg-success/15 text-success border-success/20",
+  available: "bg-success/15 text-success border-success/20",
+  onsale: "bg-primary/15 text-primary border-primary/20",
   pending: "bg-warning/15 text-warning-foreground border-warning/30",
   inreview: "bg-warning/15 text-warning-foreground border-warning/30",
   processing: "bg-info/15 text-info border-info/20",
@@ -13,6 +15,7 @@ const styles: Record<string, string> = {
   shipped: "bg-info/15 text-info border-info/20",
   ongoing: "bg-info/15 text-info border-info/20",
   open: "bg-info/15 text-info border-info/20",
+  sold: "bg-slate-500/15 text-slate-500 border-slate-500/20",
   rejected: "bg-destructive/15 text-destructive border-destructive/20",
   cancelled: "bg-destructive/15 text-destructive border-destructive/20",
   failed: "bg-destructive/15 text-destructive border-destructive/20",
@@ -23,7 +26,7 @@ const styles: Record<string, string> = {
 };
 
 export function StatusBadge({ status }: { status?: any }) {
-  const label = typeof status === "string" ? status : status ? String(status) : "Active";
+  const label = getLocalizedText(status, "Active");
   const key = label.toLowerCase().replace(/[\s_-]+/g, "");
   return (
     <span
