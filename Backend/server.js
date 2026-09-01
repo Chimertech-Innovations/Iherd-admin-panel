@@ -1234,6 +1234,63 @@ async function fetchAndProcessAdminUsers(force = false) {
       farmMeta?.phone || cattleMeta?.phone ||
       "—";
 
+    const resolvedVillage =
+      farmMeta?.village ||
+      cattleMeta?.village ||
+      farmerRecord?.village ||
+      sellerRecord?.village ||
+      sellerRecord?.city ||
+      sellerRecord?.town ||
+      vetRecord?.village ||
+      vetRecord?.city ||
+      vetRecord?.town ||
+      fsUser.village ||
+      fsUser.city ||
+      fsUser.town ||
+      "—";
+
+    const resolvedDistrict =
+      farmMeta?.district ||
+      cattleMeta?.district ||
+      farmerRecord?.district ||
+      sellerRecord?.district ||
+      sellerRecord?.districtName ||
+      sellerRecord?.city ||
+      vetRecord?.district ||
+      vetRecord?.districtName ||
+      vetRecord?.city ||
+      fsUser.district ||
+      fsUser.districtName ||
+      "—";
+
+    const resolvedState =
+      farmMeta?.state ||
+      cattleMeta?.state ||
+      farmerRecord?.state ||
+      sellerRecord?.state ||
+      sellerRecord?.stateName ||
+      sellerRecord?.stateCode ||
+      vetRecord?.state ||
+      vetRecord?.stateName ||
+      vetRecord?.stateCode ||
+      fsUser.state ||
+      fsUser.stateName ||
+      fsUser.stateCode ||
+      "—";
+
+    const resolvedAddress =
+      farmerRecord?.address ||
+      sellerRecord?.address ||
+      sellerRecord?.fullAddress ||
+      vetRecord?.address ||
+      vetRecord?.clinicAddress ||
+      fsUser.address ||
+      fsUser.fullAddress ||
+      "—";
+
+    const locParts = [resolvedVillage, resolvedDistrict, resolvedState].filter((v) => v && v !== "—");
+    const resolvedLocation = locParts.length > 0 ? locParts.join(", ") : (resolvedAddress !== "—" ? resolvedAddress : "—");
+
     userMap.set(uid, {
       uid,
       email: userRecord.email || fsUser.email || null,
@@ -1242,6 +1299,11 @@ async function fetchAndProcessAdminUsers(force = false) {
       name: resolvedName,
       roles: roles,
       role: roles[0],
+      village: resolvedVillage,
+      district: resolvedDistrict,
+      state: resolvedState,
+      address: resolvedAddress,
+      location: resolvedLocation,
       createdAt: userRecord.metadata?.creationTime || (fsUser.createdAt?.seconds ? fsUser.createdAt.seconds * 1000 : fsUser.createdAt) || null,
       lastLoginAt: userRecord.metadata?.lastSignInTime || (fsUser.updatedAt?.seconds ? fsUser.updatedAt.seconds * 1000 : fsUser.updatedAt) || null,
       farms: fsUser.farms || (farmMeta ? { name: farmMeta.farmName, id: farmMeta.farmId } : null),
@@ -1249,15 +1311,31 @@ async function fetchAndProcessAdminUsers(force = false) {
         ...(farmerRecord || {}),
         name: resolvedName,
         farmerPhoneNumber: resolvedPhone,
-        village: farmMeta?.village || cattleMeta?.village || farmerRecord?.village || fsUser.village || "—",
-        district: farmMeta?.district || cattleMeta?.district || farmerRecord?.district || fsUser.district || "—",
-        state: farmMeta?.state || cattleMeta?.state || farmerRecord?.state || fsUser.state || "—",
+        village: resolvedVillage,
+        district: resolvedDistrict,
+        state: resolvedState,
         farmName: farmMeta?.farmName || farmerRecord?.farmName || null,
       } : null,
       isFarmer,
       status: fsUser.status || "Active",
-      seller: isSeller ? (sellerRecord || { name: resolvedName, phone: resolvedPhone }) : null,
-      veterinarian: isVet ? (vetRecord || { name: resolvedName, phone: resolvedPhone }) : null,
+      seller: isSeller ? {
+        ...(sellerRecord || {}),
+        name: sellerRecord?.name || sellerRecord?.shopName || resolvedName,
+        phone: sellerRecord?.phone || resolvedPhone,
+        state: sellerRecord?.state || resolvedState,
+        district: sellerRecord?.district || resolvedDistrict,
+        village: sellerRecord?.village || sellerRecord?.city || resolvedVillage,
+        location: resolvedLocation,
+      } : null,
+      veterinarian: isVet ? {
+        ...(vetRecord || {}),
+        name: vetRecord?.name || vetRecord?.doctorName || resolvedName,
+        phone: vetRecord?.phone || resolvedPhone,
+        state: vetRecord?.state || resolvedState,
+        district: vetRecord?.district || resolvedDistrict,
+        village: vetRecord?.village || vetRecord?.city || resolvedVillage,
+        location: resolvedLocation,
+      } : null,
       isAuthUser: true,
     });
   });
@@ -1307,6 +1385,63 @@ async function fetchAndProcessAdminUsers(force = false) {
 
     const resolvedPhone = fsUser.phoneNumber || fsUser.phone || farmerRecord?.phone || sellerRecord?.phone || vetRecord?.phone || "—";
 
+    const resolvedVillage =
+      farmMeta?.village ||
+      cattleMeta?.village ||
+      farmerRecord?.village ||
+      sellerRecord?.village ||
+      sellerRecord?.city ||
+      sellerRecord?.town ||
+      vetRecord?.village ||
+      vetRecord?.city ||
+      vetRecord?.town ||
+      fsUser.village ||
+      fsUser.city ||
+      fsUser.town ||
+      "—";
+
+    const resolvedDistrict =
+      farmMeta?.district ||
+      cattleMeta?.district ||
+      farmerRecord?.district ||
+      sellerRecord?.district ||
+      sellerRecord?.districtName ||
+      sellerRecord?.city ||
+      vetRecord?.district ||
+      vetRecord?.districtName ||
+      vetRecord?.city ||
+      fsUser.district ||
+      fsUser.districtName ||
+      "—";
+
+    const resolvedState =
+      farmMeta?.state ||
+      cattleMeta?.state ||
+      farmerRecord?.state ||
+      sellerRecord?.state ||
+      sellerRecord?.stateName ||
+      sellerRecord?.stateCode ||
+      vetRecord?.state ||
+      vetRecord?.stateName ||
+      vetRecord?.stateCode ||
+      fsUser.state ||
+      fsUser.stateName ||
+      fsUser.stateCode ||
+      "—";
+
+    const resolvedAddress =
+      farmerRecord?.address ||
+      sellerRecord?.address ||
+      sellerRecord?.fullAddress ||
+      vetRecord?.address ||
+      vetRecord?.clinicAddress ||
+      fsUser.address ||
+      fsUser.fullAddress ||
+      "—";
+
+    const locParts = [resolvedVillage, resolvedDistrict, resolvedState].filter((v) => v && v !== "—");
+    const resolvedLocation = locParts.length > 0 ? locParts.join(", ") : (resolvedAddress !== "—" ? resolvedAddress : "—");
+
     userMap.set(uid, {
       uid,
       email: fsUser.email || null,
@@ -1315,6 +1450,11 @@ async function fetchAndProcessAdminUsers(force = false) {
       name: resolvedName,
       roles: roles,
       role: roles[0],
+      village: resolvedVillage,
+      district: resolvedDistrict,
+      state: resolvedState,
+      address: resolvedAddress,
+      location: resolvedLocation,
       createdAt: fsUser.createdAt ? (fsUser.createdAt.seconds ? fsUser.createdAt.seconds * 1000 : fsUser.createdAt) : null,
       lastLoginAt: fsUser.updatedAt ? (fsUser.updatedAt.seconds ? fsUser.updatedAt.seconds * 1000 : fsUser.updatedAt) : null,
       farms: fsUser.farms || (farmMeta ? { name: farmMeta.farmName, id: farmMeta.farmId } : null),
@@ -1322,15 +1462,31 @@ async function fetchAndProcessAdminUsers(force = false) {
         ...(farmerRecord || {}),
         name: resolvedName,
         farmerPhoneNumber: resolvedPhone,
-        village: farmMeta?.village || cattleMeta?.village || farmerRecord?.village || fsUser.village || "—",
-        district: farmMeta?.district || cattleMeta?.district || farmerRecord?.district || fsUser.district || "—",
-        state: farmMeta?.state || cattleMeta?.state || farmerRecord?.state || fsUser.state || "—",
+        village: resolvedVillage,
+        district: resolvedDistrict,
+        state: resolvedState,
         farmName: farmMeta?.farmName || farmerRecord?.farmName || null,
       } : null,
       isFarmer,
       status: fsUser.status || "Active",
-      seller: isSeller ? (sellerRecord || { name: resolvedName, phone: resolvedPhone }) : null,
-      veterinarian: isVet ? (vetRecord || { name: resolvedName, phone: resolvedPhone }) : null,
+      seller: isSeller ? {
+        ...(sellerRecord || {}),
+        name: sellerRecord?.name || sellerRecord?.shopName || resolvedName,
+        phone: sellerRecord?.phone || resolvedPhone,
+        state: sellerRecord?.state || resolvedState,
+        district: sellerRecord?.district || resolvedDistrict,
+        village: sellerRecord?.village || sellerRecord?.city || resolvedVillage,
+        location: resolvedLocation,
+      } : null,
+      veterinarian: isVet ? {
+        ...(vetRecord || {}),
+        name: vetRecord?.name || vetRecord?.doctorName || resolvedName,
+        phone: vetRecord?.phone || resolvedPhone,
+        state: vetRecord?.state || resolvedState,
+        district: vetRecord?.district || resolvedDistrict,
+        village: vetRecord?.village || vetRecord?.city || resolvedVillage,
+        location: resolvedLocation,
+      } : null,
       isAuthUser: false,
     });
   });
@@ -1344,20 +1500,36 @@ async function fetchAndProcessAdminUsers(force = false) {
   return result;
 }
 
-// REST API to list all Firebase Authentication users
+// REST API to list all Firebase Authentication users with progressive pagination support
 app.get(["/api/admin/users", "/get/api/admin/users"], async (req, res) => {
   try {
-    const cachedUsers = getCached("admin_users", 180000);
-    if (cachedUsers && Array.isArray(cachedUsers) && cachedUsers.length > 0) {
-      if (!isCacheFresh("admin_users", 180000)) {
-        // Trigger background revalidation asynchronously
-        fetchAndProcessAdminUsers(true).catch(() => {});
-      }
-      return res.json({ users: cachedUsers, cached: true });
+    const limit = req.query.limit ? Math.max(1, parseInt(req.query.limit, 10)) : null;
+    const offset = req.query.offset ? Math.max(0, parseInt(req.query.offset, 10)) : 0;
+
+    let allUsers = getCached("admin_users", 180000);
+    let cached = true;
+
+    if (!allUsers || !Array.isArray(allUsers) || allUsers.length === 0) {
+      allUsers = await fetchAndProcessAdminUsers(true);
+      cached = false;
+    } else if (!isCacheFresh("admin_users", 180000)) {
+      // Trigger background revalidation asynchronously
+      fetchAndProcessAdminUsers(true).catch(() => {});
     }
 
-    const users = await fetchAndProcessAdminUsers(true);
-    res.json({ users });
+    if (limit) {
+      const sliced = allUsers.slice(offset, offset + limit);
+      return res.json({
+        users: sliced,
+        total: allUsers.length,
+        offset,
+        limit,
+        hasMore: offset + limit < allUsers.length,
+        cached,
+      });
+    }
+
+    res.json({ users: allUsers, total: allUsers.length, cached });
   } catch (error) {
     console.error("Error in /api/admin/users:", error);
     res.status(500).json({ error: error.message });
@@ -1382,16 +1554,29 @@ app.get("/api/admin/sellers", async (req, res) => {
 
     const sellersMap = new Map();
 
+    function extractLoc(d = {}, u = {}) {
+      const address = d.address || d.fullAddress || d.storeAddress || d.shopAddress || d.clinicAddress || u.address || u.fullAddress || "—";
+      const village = d.village || d.city || d.town || u.village || u.city || u.town || "—";
+      const district = d.district || d.districtName || u.district || u.districtName || "—";
+      const state = d.state || d.stateName || d.stateCode || u.state || u.stateName || u.stateCode || "—";
+      const pincode = d.pincode || d.pinCode || u.pincode || u.pinCode || "—";
+      const locParts = [village, district, state].filter((x) => x && x !== "—");
+      const location = locParts.length > 0 ? locParts.join(", ") : (address !== "—" ? address : "—");
+      return { address, village, city: village, district, state, pincode, location };
+    }
+
     // 1. Direct sellers collection
     sSnap.docs.forEach((doc) => {
       const d = doc.data();
       const id = doc.id;
       const phone = d.phone || d.phoneNumber || d.sellerPhone || "—";
       const name = d.shopName || d.storeName || d.name || d.sellerName || d.fullName || (phone !== "—" ? `Seller (${phone})` : `Seller #${id.slice(-6).toUpperCase()}`);
+      const loc = extractLoc(d);
       sellersMap.set(id, {
         id,
         uid: d.uid || d.userId || id,
         ...d,
+        ...loc,
         name,
         shopName: d.shopName || d.storeName || name,
         phone,
@@ -2592,6 +2777,39 @@ app.get("/api/admin/farms", async (req, res) => {
   }
 });
 
+// Generic REST API endpoint for Firestore collectionGroup querying
+app.get("/api/admin/collection-group/:collectionId", async (req, res) => {
+  try {
+    const { collectionId } = req.params;
+    const db = getFirestore();
+
+    if (collectionId === "farms") {
+      const snap = await db.collectionGroup("farms").get().catch(() => ({ docs: [] }));
+      const data = snap.docs.map((d) => ({ id: d.id, _path: d.ref.path, ...d.data() }));
+      return res.json({ success: true, count: data.length, data, farms: data });
+    }
+
+    if (collectionId === "cattle" || collectionId === "cattles") {
+      const [snap1, snap2] = await Promise.all([
+        db.collectionGroup("cattles").get().catch(() => ({ docs: [] })),
+        db.collectionGroup("cattle").get().catch(() => ({ docs: [] })),
+      ]);
+      const map = new Map();
+      snap1.docs.forEach((d) => map.set(d.id, { id: d.id, _path: d.ref.path, ...d.data() }));
+      snap2.docs.forEach((d) => map.set(d.id, { id: d.id, _path: d.ref.path, ...d.data() }));
+      const data = Array.from(map.values());
+      return res.json({ success: true, count: data.length, data, cattle: data });
+    }
+
+    const snap = await db.collectionGroup(collectionId).get().catch(() => ({ docs: [] }));
+    const data = snap.docs.map((d) => ({ id: d.id, _path: d.ref.path, ...d.data() }));
+    res.json({ success: true, count: data.length, data });
+  } catch (error) {
+    console.error(`Error in /api/admin/collection-group/${req.params.collectionId}:`, error);
+    res.status(500).json({ error: error.message, data: [] });
+  }
+});
+
 // REST API to list all Payments, Transactions & Commissions aggregated across orders
 app.get("/api/admin/payments", async (req, res) => {
   try {
@@ -3467,8 +3685,8 @@ app.post("/api/admin/upload-banner-image", async (req, res) => {
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`Backend server running on http://localhost:${PORT}`);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Backend server running on http://127.0.0.1:${PORT}`);
   
   // Pre-warm the cache immediately so requests are served instantly
   fetchAndProcessAdminUsers(true)

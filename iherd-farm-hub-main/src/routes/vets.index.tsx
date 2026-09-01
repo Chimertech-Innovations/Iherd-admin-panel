@@ -370,8 +370,9 @@ function VetsPage() {
         rawTimestamp,
         status: fsUser.status || vetDetails.status || "Active",
         verified: Boolean(vetDetails.verified || fsUser.verified),
-        city: fsUser.district || "—",
-        state: fsUser.state || "—",
+        city: vetDetails.city || fsUser.district || "—",
+        state: vetDetails.state || fsUser.state || "—",
+        location: [vetDetails.city || fsUser.district, vetDetails.state || fsUser.state].filter(x => x && x !== "—").join(", ") || "—",
       });
     }
   });

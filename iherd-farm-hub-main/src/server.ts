@@ -32,10 +32,17 @@ async function normalizeCatastrophicSsrResponse(response: Response): Promise<Res
 
   const capturedErr = consumeLastCapturedError();
   const errMsg = (capturedErr as any)?.message || (typeof capturedErr === "string" ? capturedErr : "");
-  const errCode = (capturedErr as any)?.code || "";
+  const errCode = (capturedErr as any)?.code || (capturedErr as any)?.cause?.code || "";
+  const errCauseMsg = (capturedErr as any)?.cause?.message || "";
 
   // Ignore benign client aborts / disconnections during browser reloads or HMR
-  if (errMsg === "aborted" || errMsg.includes("aborted") || errCode === "ECONNRESET") {
+  if (
+    errMsg === "aborted" ||
+    errMsg.includes("aborted") ||
+    errCauseMsg.includes("aborted") ||
+    errCode === "ECONNRESET" ||
+    !capturedErr
+  ) {
     return response;
   }
 

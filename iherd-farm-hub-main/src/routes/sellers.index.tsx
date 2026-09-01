@@ -370,8 +370,9 @@ function SellersPage() {
         rawTimestamp,
         status: fsUser.status || sellerProfile.status || "Active",
         verified: Boolean(sellerProfile.verified || fsUser.verified),
-        city: fsUser.district || "—",
-        state: fsUser.state || "—",
+        city: sellerProfile.city || fsUser.district || "—",
+        state: sellerProfile.state || fsUser.state || "—",
+        location: [sellerProfile.city || fsUser.district, sellerProfile.state || fsUser.state].filter(x => x && x !== "—").join(", ") || "—",
       });
     }
   });
@@ -445,6 +446,24 @@ function SellersPage() {
               <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400 text-xs font-semibold">
                 {row.category}
               </span>
+            ),
+          },
+          {
+            key: "location",
+            label: "Location",
+            render: (row) => (
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <MapPin className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                <span>
+                  {row.location && row.location !== "—"
+                    ? row.location
+                    : row.city && row.city !== "—"
+                    ? `${row.city}${row.state && row.state !== "—" ? `, ${row.state}` : ""}`
+                    : row.state && row.state !== "—"
+                    ? row.state
+                    : "—"}
+                </span>
+              </div>
             ),
           },
           {

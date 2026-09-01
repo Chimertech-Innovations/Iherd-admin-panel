@@ -19,8 +19,8 @@ function isSimilarUid(a?: string, b?: string) {
 }
 
 function UsersPage() {
-  // 1. Fetch authenticated users from backend server
-  const { data: authUsers = [], isLoading: authLoading } = useAdminUsers();
+  // 1. Fetch authenticated users from backend server with progressive loading
+  const { data: authUsers = [], isLoading: authLoading, isFetchingBalance } = useAdminUsers();
 
   // 2. Fetch users collection from Firestore to merge live roles & profiles
   const { data: firestoreUsers = [], isLoading: firestoreLoading } = useFirebaseCollection<any>("users");
@@ -89,6 +89,66 @@ function UsersPage() {
           ? farmerProfile.farmerPhoneNumber
           : "—";
 
+      const village =
+        farmProfile?.village ||
+        farmerProfile?.village ||
+        sellerProfile?.village ||
+        sellerProfile?.city ||
+        sellerProfile?.town ||
+        vetProfile?.village ||
+        vetProfile?.city ||
+        vetProfile?.town ||
+        fsUser?.village ||
+        fsUser?.city ||
+        authUser?.village ||
+        authUser?.city ||
+        "—";
+
+      const district =
+        farmProfile?.district ||
+        farmerProfile?.district ||
+        sellerProfile?.district ||
+        sellerProfile?.districtName ||
+        sellerProfile?.city ||
+        vetProfile?.district ||
+        vetProfile?.districtName ||
+        vetProfile?.city ||
+        fsUser?.district ||
+        fsUser?.districtName ||
+        authUser?.district ||
+        "—";
+
+      const state =
+        farmProfile?.state ||
+        farmerProfile?.state ||
+        sellerProfile?.state ||
+        sellerProfile?.stateName ||
+        sellerProfile?.stateCode ||
+        vetProfile?.state ||
+        vetProfile?.stateName ||
+        vetProfile?.stateCode ||
+        fsUser?.state ||
+        fsUser?.stateName ||
+        fsUser?.stateCode ||
+        authUser?.state ||
+        authUser?.stateName ||
+        "—";
+
+      const address =
+        farmProfile?.address ||
+        farmerProfile?.address ||
+        sellerProfile?.address ||
+        sellerProfile?.fullAddress ||
+        vetProfile?.address ||
+        vetProfile?.clinicAddress ||
+        fsUser?.address ||
+        fsUser?.fullAddress ||
+        authUser?.address ||
+        "—";
+
+      const locParts = [village, district, state].filter((v) => v && v !== "—");
+      const location = locParts.length > 0 ? locParts.join(", ") : (address !== "—" ? address : "—");
+
       userMap.set(uid, {
         ...authUser,
         id: uid,
@@ -103,9 +163,11 @@ function UsersPage() {
         farms: farmProfile,
         seller: sellerProfile,
         veterinarian: vetProfile,
-        village: farmProfile?.village || farmerProfile?.village || fsUser?.village || "—",
-        district: farmProfile?.district || farmerProfile?.district || fsUser?.district || "—",
-        state: farmProfile?.state || farmerProfile?.state || fsUser?.state || "—",
+        village,
+        district,
+        state,
+        address,
+        location,
         createdAt: authUser.createdAt || fsUser?.createdAt || null,
         lastLoginAt: authUser.lastLoginAt || fsUser?.updatedAt || null,
       });
@@ -127,6 +189,65 @@ function UsersPage() {
         primaryRole = "Veterinarian";
       }
 
+      const farmerProfile = fu.farmer || null;
+      const farmProfile = fu.farms || null;
+      const sellerProfile = fu.seller || null;
+      const vetProfile = fu.veterinarian || fu.vet || null;
+
+      const village =
+        farmProfile?.village ||
+        farmerProfile?.village ||
+        sellerProfile?.village ||
+        sellerProfile?.city ||
+        sellerProfile?.town ||
+        vetProfile?.village ||
+        vetProfile?.city ||
+        vetProfile?.town ||
+        fu.village ||
+        fu.city ||
+        "—";
+
+      const district =
+        farmProfile?.district ||
+        farmerProfile?.district ||
+        sellerProfile?.district ||
+        sellerProfile?.districtName ||
+        sellerProfile?.city ||
+        vetProfile?.district ||
+        vetProfile?.districtName ||
+        vetProfile?.city ||
+        fu.district ||
+        fu.districtName ||
+        "—";
+
+      const state =
+        farmProfile?.state ||
+        farmerProfile?.state ||
+        sellerProfile?.state ||
+        sellerProfile?.stateName ||
+        sellerProfile?.stateCode ||
+        vetProfile?.state ||
+        vetProfile?.stateName ||
+        vetProfile?.stateCode ||
+        fu.state ||
+        fu.stateName ||
+        fu.stateCode ||
+        "—";
+
+      const address =
+        farmProfile?.address ||
+        farmerProfile?.address ||
+        sellerProfile?.address ||
+        sellerProfile?.fullAddress ||
+        vetProfile?.address ||
+        vetProfile?.clinicAddress ||
+        fu.address ||
+        fu.fullAddress ||
+        "—";
+
+      const locParts = [village, district, state].filter((v) => v && v !== "—");
+      const location = locParts.length > 0 ? locParts.join(", ") : (address !== "—" ? address : "—");
+
       userMap.set(uid, {
         id: uid,
         uid,
@@ -136,13 +257,15 @@ function UsersPage() {
         email: fu.email || null,
         roles,
         role: primaryRole,
-        farmer: fu.farmer || null,
-        farms: fu.farms || null,
-        seller: fu.seller || null,
-        veterinarian: fu.veterinarian || fu.vet || null,
-        village: fu.village || "—",
-        district: fu.district || "—",
-        state: fu.state || "—",
+        farmer: farmerProfile,
+        farms: farmProfile,
+        seller: sellerProfile,
+        veterinarian: vetProfile,
+        village,
+        district,
+        state,
+        address,
+        location,
         createdAt: fu.createdAt ? (fu.createdAt.seconds ? fu.createdAt.seconds * 1000 : fu.createdAt) : null,
         lastLoginAt: fu.updatedAt ? (fu.updatedAt.seconds ? fu.updatedAt.seconds * 1000 : fu.updatedAt) : null,
       });
@@ -170,10 +293,11 @@ function UsersPage() {
         description="All registered Firebase Authentication users, verified farmer roles, store profiles, and contact details."
         primaryAction="Add User"
         isLoading={isLoading}
+        isFetchingBalance={isFetchingBalance}
         filters={["Farmer", "Seller", "Veterinarian", "User"]}
         statusKey="role"
         searchPlaceholder="Search by name, phone, UID, email, location..."
-        searchKeys={["name", "displayName", "uid", "phoneNumber", "email", "village", "district", "state"]}
+        searchKeys={["name", "displayName", "uid", "phoneNumber", "email", "village", "district", "state", "location", "address"]}
         rowHref={(r) => `/users/${r.uid}`}
         exportFilename="iherd_user_accounts"
         customExportColumns={[
@@ -186,9 +310,10 @@ function UsersPage() {
           { header: "Connected Farm Name", accessor: (r) => r.farms?.name || r.farmer?.farmName || "—" },
           { header: "Connected Store Name", accessor: (r) => r.seller?.name || r.seller?.shopName || "—" },
           { header: "Connected Clinic / Vet", accessor: (r) => r.veterinarian?.clinic || r.veterinarian?.hospital || "—" },
-          { header: "Village", accessor: (r) => r.village || "—" },
+          { header: "Village / City", accessor: (r) => r.village || "—" },
           { header: "District", accessor: (r) => r.district || "—" },
           { header: "State", accessor: (r) => r.state || "—" },
+          { header: "Full Location", accessor: (r) => r.location || "—" },
           { header: "Registration Date", accessor: (r) => r.createdAt ? new Date(r.createdAt).toLocaleString() : "—" },
           { header: "Last Activity / Login", accessor: (r) => r.lastLoginAt ? new Date(r.lastLoginAt).toLocaleString() : "—" },
         ]}
@@ -264,58 +389,36 @@ function UsersPage() {
             key: "profileDetails",
             label: "Connected Details & Location",
             render: (r) => {
-              if (r.role === "Farmer") {
-                const farmName = r.farms?.name || r.farmer?.farmName || "Dairy Farm";
-                const location = [r.village, r.district, r.state].filter((v) => v && v !== "—").join(", ");
-                return (
-                  <div className="text-xs space-y-0.5">
+              const locStr = r.location && r.location !== "—"
+                ? r.location
+                : [r.village, r.district, r.state].filter((v) => v && v !== "—").join(", ");
+
+              return (
+                <div className="text-xs space-y-1">
+                  {r.role === "Farmer" && (
                     <div className="font-medium text-emerald-600 flex items-center gap-1">
                       <Building className="h-3.5 w-3.5 shrink-0" />
-                      <span>{farmName}</span>
+                      <span>{r.farms?.name || r.farmer?.farmName || "Dairy Farm"}</span>
                     </div>
-                    {location && (
-                      <div className="text-muted-foreground flex items-center gap-1">
-                        <MapPin className="h-3 w-3 shrink-0" />
-                        <span>{location}</span>
-                      </div>
-                    )}
-                  </div>
-                );
-              }
-              if (r.role === "Seller" && r.seller) {
-                return (
-                  <div className="text-xs space-y-0.5">
+                  )}
+                  {r.role === "Seller" && (
                     <div className="font-medium text-amber-600 flex items-center gap-1">
                       <Store className="h-3.5 w-3.5 shrink-0" />
-                      <span>{r.seller.name || r.seller.shopName || "Marketplace Store"}</span>
+                      <span>{r.seller?.name || r.seller?.shopName || "Marketplace Store"}</span>
                     </div>
-                    {r.seller.category && (
-                      <div className="text-muted-foreground">{r.seller.category}</div>
-                    )}
-                  </div>
-                );
-              }
-              if (r.role === "Veterinarian" && r.veterinarian) {
-                return (
-                  <div className="text-xs space-y-0.5">
+                  )}
+                  {r.role === "Veterinarian" && (
                     <div className="font-medium text-purple-600 flex items-center gap-1">
                       <Stethoscope className="h-3.5 w-3.5 shrink-0" />
-                      <span>{r.veterinarian.clinic || r.veterinarian.hospital || "Veterinary Clinic"}</span>
+                      <span>{r.veterinarian?.clinic || r.veterinarian?.hospital || "Veterinary Clinic"}</span>
                     </div>
-                    {r.veterinarian.qualification && (
-                      <div className="text-muted-foreground">{r.veterinarian.qualification}</div>
-                    )}
+                  )}
+
+                  <div className="flex items-center gap-1.5 font-medium text-foreground">
+                    <MapPin className="h-3.5 w-3.5 text-primary shrink-0" />
+                    <span>{locStr && locStr !== "—" ? locStr : "Location Not Mentioned"}</span>
                   </div>
-                );
-              }
-              const loc = [r.village, r.state].filter((v) => v && v !== "—").join(", ");
-              return loc ? (
-                <div className="text-xs text-muted-foreground flex items-center gap-1">
-                  <MapPin className="h-3 w-3 shrink-0" />
-                  <span>{loc}</span>
                 </div>
-              ) : (
-                <span className="text-muted-foreground text-xs">—</span>
               );
             },
           },

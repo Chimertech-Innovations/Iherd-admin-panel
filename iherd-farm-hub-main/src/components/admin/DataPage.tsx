@@ -1,6 +1,6 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState, useEffect, type ReactNode } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { Search, Filter, Plus, Download } from "lucide-react";
+import { Search, Filter, Plus, Download, Calendar, MapPin, ArrowUpDown, Layers, RotateCcw, CalendarDays } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -42,6 +42,57 @@ export type KPI = {
   up?: boolean;
 };
 
+function extractTime(val: any): number {
+  if (!val) return 0;
+  if (typeof val === "number") return val;
+  if (val instanceof Date) return val.getTime();
+  if (typeof val === "object" && (val._seconds || val.seconds)) {
+    return (val._seconds || val.seconds) * 1000;
+  }
+  const d = new Date(val).getTime();
+  return isNaN(d) ? 0 : d;
+}
+
+function getRowTimestamp(row: any): number {
+  if (row.rawTimestamp) return extractTime(row.rawTimestamp);
+  if (row.createdAt) return extractTime(row.createdAt);
+  if (row.created_at) return extractTime(row.created_at);
+  if (row.timestamp) return extractTime(row.timestamp);
+  if (row.joined) return extractTime(row.joined);
+  if (row.date) return extractTime(row.date);
+  return 0;
+}
+
+function getRowLocation(row: any): string {
+  if (row.location && typeof row.location === "string" && row.location !== "—") return row.location;
+  
+  const parts: string[] = [];
+  if (row.village && row.village !== "—") parts.push(getLocalizedText(row.village));
+  if (row.district && row.district !== "—") parts.push(getLocalizedText(row.district));
+  if (row.city && row.city !== "—" && !parts.includes(getLocalizedText(row.city))) parts.push(getLocalizedText(row.city));
+  if (row.state && row.state !== "—" && !parts.includes(getLocalizedText(row.state))) parts.push(getLocalizedText(row.state));
+  if (row.clinicState && row.clinicState !== "—") parts.push(getLocalizedText(row.clinicState));
+  if (row.address && typeof row.address === "string" && row.address !== "—") parts.push(getLocalizedText(row.address));
+
+  return parts.length > 0 ? parts.join(", ") : "—";
+}
+
+const MONTHS = [
+  { value: "all", label: "All Months" },
+  { value: "1", label: "January" },
+  { value: "2", label: "February" },
+  { value: "3", label: "March" },
+  { value: "4", label: "April" },
+  { value: "5", label: "May" },
+  { value: "6", label: "June" },
+  { value: "7", label: "July" },
+  { value: "8", label: "August" },
+  { value: "9", label: "September" },
+  { value: "10", label: "October" },
+  { value: "11", label: "November" },
+  { value: "12", label: "December" },
+];
+
 export function DataPage<T extends Record<string, any>>({
   title,
   description,
@@ -58,9 +109,11 @@ export function DataPage<T extends Record<string, any>>({
   onPrimaryAction,
   rowHref,
   isLoading = false,
+  isFetchingBalance = false,
   exportFilename,
   onExport,
   customExportColumns,
+  locationOptions,
 }: {
   title: string;
   description?: string;
@@ -77,35 +130,365 @@ export function DataPage<T extends Record<string, any>>({
   onPrimaryAction?: () => void;
   rowHref?: (row: T) => string | undefined;
   isLoading?: boolean;
+  isFetchingBalance?: boolean;
   exportFilename?: string;
   onExport?: (exportData: T[]) => void;
   customExportColumns?: CsvColumn<T>[];
+  locationOptions?: string[];
 }) {
   const navigate = useNavigate();
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState("all");
+  const [selectedYear, setSelectedYear] = useState<string>("all");
+  const [selectedMonth, setSelectedMonth] = useState<string>("all");
+  const [selectedExactDate, setSelectedExactDate] = useState<string>("");
+  const [selectedState, setSelectedState] = useState("all");
+  const [stateSearch, setStateSearch] = useState("");
+  const [locationSearch, setLocationSearch] = useState("");
+  const [locationFilter, setLocationFilter] = useState("all");
+  const [sortBy, setSortBy] = useState<"newest" | "oldest" | "state-asc" | "state-desc" | "loc-asc" | "loc-desc" | "name-asc" | "name-desc">("newest");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number>(100);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [q, filter, selectedYear, selectedMonth, selectedExactDate, selectedState, locationFilter, sortBy]);
 
   const effectiveKpis = kpis || stats;
   const effectiveFilters = (statusOptions && statusOptions.length > 0) ? statusOptions : filters;
 
-  const filtered = useMemo(() => {
-    return data.filter((row) => {
-      const matchQ = q
-        ? (searchKeys && searchKeys.length > 0
-            ? searchKeys.some((k) => getLocalizedText(row[k]).toLowerCase().includes(q.toLowerCase()))
-            : Object.values(row).some((v) =>
-                getLocalizedText(v).toLowerCase().includes(q.toLowerCase())
-              ))
-        : true;
+  const MONTHS = [
+    { value: "all", label: "All Months" },
+    { value: "1", label: "January" },
+    { value: "2", label: "February" },
+    { value: "3", label: "March" },
+    { value: "4", label: "April" },
+    { value: "5", label: "May" },
+    { value: "6", label: "June" },
+    { value: "7", label: "July" },
+    { value: "8", label: "August" },
+    { value: "9", label: "September" },
+    { value: "10", label: "October" },
+    { value: "11", label: "November" },
+    { value: "12", label: "December" },
+  ];
+
+  // Dynamic Year options
+  const detectedYears = useMemo(() => {
+    const set = new Set<string>();
+    const currentYear = new Date().getFullYear();
+    for (let y = currentYear; y >= currentYear - 3; y--) {
+      set.add(String(y));
+    }
+    data.forEach((row) => {
+      const ts = getRowTimestamp(row);
+      if (ts > 0) {
+        const y = new Date(ts).getFullYear();
+        if (!isNaN(y)) set.add(String(y));
+      }
+    });
+    return Array.from(set).sort((a, b) => Number(b) - Number(a));
+  }, [data]);
+
+  // Compute min & max bounds for Date Picker based on selected Year & Month
+  const dateMinMax = useMemo(() => {
+    let min: string | undefined = undefined;
+    let max: string | undefined = undefined;
+
+    const yr = selectedYear !== "all" ? Number(selectedYear) : new Date().getFullYear();
+
+    if (selectedYear !== "all" && selectedMonth !== "all") {
+      const mo = Number(selectedMonth);
+      const mStr = mo < 10 ? `0${mo}` : `${mo}`;
+      const lastDay = new Date(yr, mo, 0).getDate();
+      const lStr = lastDay < 10 ? `0${lastDay}` : `${lastDay}`;
+      min = `${yr}-${mStr}-01`;
+      max = `${yr}-${mStr}-${lStr}`;
+    } else if (selectedYear !== "all") {
+      min = `${yr}-01-01`;
+      max = `${yr}-12-31`;
+    } else if (selectedMonth !== "all") {
+      const mo = Number(selectedMonth);
+      const mStr = mo < 10 ? `0${mo}` : `${mo}`;
+      const lastDay = new Date(yr, mo, 0).getDate();
+      const lStr = lastDay < 10 ? `0${lastDay}` : `${lastDay}`;
+      min = `${yr}-${mStr}-01`;
+      max = `${yr}-${mStr}-${lStr}`;
+    }
+
+    return { min, max };
+  }, [selectedYear, selectedMonth]);
+
+  // Reset exact date if it lies outside the newly selected Year/Month range
+  useEffect(() => {
+    if (selectedExactDate && (dateMinMax.min || dateMinMax.max)) {
+      if (dateMinMax.min && selectedExactDate < dateMinMax.min) {
+        setSelectedExactDate("");
+      } else if (dateMinMax.max && selectedExactDate > dateMinMax.max) {
+        setSelectedExactDate("");
+      }
+    }
+  }, [selectedYear, selectedMonth, dateMinMax, selectedExactDate]);
+
+  // Sync Year & Month when user picks a date directly in Date Picker
+  const handleDateInputChange = (val: string) => {
+    setSelectedExactDate(val);
+    if (val) {
+      const parts = val.split("-");
+      if (parts.length === 3) {
+        const y = parts[0];
+        const m = String(Number(parts[1]));
+        setSelectedYear(y);
+        setSelectedMonth(m);
+      }
+    }
+  };
+
+  const ALL_INDIAN_STATES = [
+    "Andhra Pradesh",
+    "Arunachal Pradesh",
+    "Assam",
+    "Bihar",
+    "Chhattisgarh",
+    "Delhi",
+    "Goa",
+    "Gujarat",
+    "Haryana",
+    "Himachal Pradesh",
+    "Jharkhand",
+    "Karnataka",
+    "Kerala",
+    "Madhya Pradesh",
+    "Maharashtra",
+    "Manipur",
+    "Meghalaya",
+    "Mizoram",
+    "Nagaland",
+    "Odisha",
+    "Punjab",
+    "Rajasthan",
+    "Sikkim",
+    "Tamil Nadu",
+    "Telangana",
+    "Tripura",
+    "Uttar Pradesh",
+    "Uttarakhand",
+    "West Bengal",
+  ];
+
+  // Dedicated States list (Indian States + any states in data)
+  const detectedStates = useMemo(() => {
+    const set = new Set<string>();
+    data.forEach((row) => {
+      if (row.state && row.state !== "—") set.add(getLocalizedText(row.state));
+      if (row.clinicState && row.clinicState !== "—") set.add(getLocalizedText(row.clinicState));
+    });
+    ALL_INDIAN_STATES.forEach((st) => set.add(st));
+    return Array.from(set).sort();
+  }, [data]);
+
+  // Search filtered states for State Select Dropdown
+  const filteredStateOptions = useMemo(() => {
+    if (!stateSearch.trim()) return detectedStates;
+    const clean = stateSearch.toLowerCase().trim();
+    return detectedStates.filter((st) => st.toLowerCase().includes(clean));
+  }, [detectedStates, stateSearch]);
+
+  // Extract unique city/district locations from data
+  const detectedLocations = useMemo(() => {
+    if (locationOptions && locationOptions.length > 0) return locationOptions;
+    const set = new Set<string>();
+    
+    data.forEach((row) => {
+      if (row.district && row.district !== "—") set.add(getLocalizedText(row.district));
+      if (row.city && row.city !== "—") set.add(getLocalizedText(row.city));
+      if (row.village && row.village !== "—") set.add(getLocalizedText(row.village));
+      const loc = getRowLocation(row);
+      if (loc && loc !== "—") set.add(loc);
+    });
+
+    return Array.from(set).sort();
+  }, [data, locationOptions]);
+
+  // Filter city options based on locationSearch input
+  const filteredLocationOptions = useMemo(() => {
+    if (!locationSearch.trim()) return detectedLocations;
+    const clean = locationSearch.toLowerCase().trim();
+    return detectedLocations.filter((loc) =>
+      loc.toLowerCase().includes(clean)
+    );
+  }, [detectedLocations, locationSearch]);
+
+  const filteredAndSorted = useMemo(() => {
+    let res = data.filter((row) => {
+      // 1. Text Search across Email, Phone Number, UID, Auth details, Name, Location
+      let matchQ = true;
+      if (q) {
+        const queryClean = q.toLowerCase().trim();
+        const queryDigits = q.replace(/[^0-9]/g, "");
+
+        const searchFields = [
+          "email", "userEmail", "authEmail", "farmerEmail", "sellerEmail", "vetEmail",
+          "phone", "phoneNumber", "userPhone", "authPhone", "farmerPhone", "sellerPhone", "vetPhone",
+          "uid", "id", "userId", "farmerId", "sellerId", "vetId",
+          "name", "fullName", "ownerName", "doctorName", "shopName", "storeName", "displayName",
+          "role", "roles", "status", "category",
+          "village", "district", "city", "state", "location", "address"
+        ];
+
+        matchQ = searchFields.some((field) => {
+          const val = row[field];
+          if (val === undefined || val === null) return false;
+          const strVal = getLocalizedText(val).toLowerCase();
+          if (strVal.includes(queryClean)) return true;
+
+          // Digit matching for phone numbers (e.g. searching 9787 matching +919787000187)
+          if (queryDigits.length >= 3) {
+            const valDigits = strVal.replace(/[^0-9]/g, "");
+            if (valDigits.includes(queryDigits)) return true;
+          }
+          return false;
+        });
+
+        // Also check explicit searchKeys if provided
+        if (!matchQ && searchKeys && searchKeys.length > 0) {
+          matchQ = searchKeys.some((k) => {
+            const val = row[k];
+            if (!val) return false;
+            const strVal = getLocalizedText(val).toLowerCase();
+            if (strVal.includes(queryClean)) return true;
+            if (queryDigits.length >= 3) {
+              const valDigits = strVal.replace(/[^0-9]/g, "");
+              if (valDigits.includes(queryDigits)) return true;
+            }
+            return false;
+          });
+        }
+      }
+
+      // 2. Status Filter
       const rowStatus = getLocalizedText(row[statusKey]).toLowerCase();
       const matchF = filter === "all" ? true : rowStatus === filter.toLowerCase();
-      return matchQ && matchF;
+
+      // 3. Cascading Date Filter (Year -> Month -> Date)
+      const ts = getRowTimestamp(row);
+      let matchDate = true;
+
+      if (ts > 0) {
+        const d = new Date(ts);
+        const y = String(d.getFullYear());
+        const m = String(d.getMonth() + 1);
+        const mTwoDigit = d.getMonth() + 1 < 10 ? `0${d.getMonth() + 1}` : `${d.getMonth() + 1}`;
+        const dTwoDigit = d.getDate() < 10 ? `0${d.getDate()}` : `${d.getDate()}`;
+        const dateStr = `${y}-${mTwoDigit}-${dTwoDigit}`;
+
+        if (selectedYear !== "all" && y !== selectedYear) {
+          matchDate = false;
+        }
+        if (selectedMonth !== "all" && m !== selectedMonth) {
+          matchDate = false;
+        }
+        if (selectedExactDate && dateStr !== selectedExactDate) {
+          matchDate = false;
+        }
+      } else {
+        if (selectedYear !== "all" || selectedMonth !== "all" || selectedExactDate !== "") {
+          matchDate = false;
+        }
+      }
+
+      // 4. Dedicated State Filter
+      const rowState = getLocalizedText(row.state || row.clinicState || row.farmerState || "").toLowerCase();
+      const rowLoc = getRowLocation(row).toLowerCase();
+      const matchState = selectedState === "all"
+        ? true
+        : (rowState.includes(selectedState.toLowerCase()) || rowLoc.includes(selectedState.toLowerCase()));
+
+      // 5. City / District Location Filter
+      const matchLoc = locationFilter === "all"
+        ? true
+        : rowLoc.includes(locationFilter.toLowerCase());
+
+      return matchQ && matchF && matchDate && matchState && matchLoc;
     });
-  }, [data, q, filter, statusKey, searchKeys]);
+
+    // Apply Sorting
+    return res.sort((a, b) => {
+      if (sortBy === "newest") {
+        return getRowTimestamp(b) - getRowTimestamp(a);
+      }
+      if (sortBy === "oldest") {
+        return getRowTimestamp(a) - getRowTimestamp(b);
+      }
+      if (sortBy === "state-asc") {
+        const stateA = getLocalizedText(a.state || a.clinicState || getRowLocation(a) || "");
+        const stateB = getLocalizedText(b.state || b.clinicState || getRowLocation(b) || "");
+        return stateA.localeCompare(stateB);
+      }
+      if (sortBy === "state-desc") {
+        const stateA = getLocalizedText(a.state || a.clinicState || getRowLocation(a) || "");
+        const stateB = getLocalizedText(b.state || b.clinicState || getRowLocation(b) || "");
+        return stateB.localeCompare(stateA);
+      }
+      if (sortBy === "loc-asc") {
+        return getRowLocation(a).localeCompare(getRowLocation(b));
+      }
+      if (sortBy === "loc-desc") {
+        return getRowLocation(b).localeCompare(getRowLocation(a));
+      }
+      if (sortBy === "name-asc") {
+        const nameA = getLocalizedText(a.name || a.title || a.shopName || a.doctorName || "");
+        const nameB = getLocalizedText(b.name || b.title || b.shopName || b.doctorName || "");
+        return nameA.localeCompare(nameB);
+      }
+      if (sortBy === "name-desc") {
+        const nameA = getLocalizedText(a.name || a.title || a.shopName || a.doctorName || "");
+        const nameB = getLocalizedText(b.name || b.title || b.shopName || b.doctorName || "");
+        return nameB.localeCompare(nameA);
+      }
+      return 0;
+    });
+  }, [data, q, filter, selectedYear, selectedMonth, selectedExactDate, selectedState, locationFilter, sortBy, statusKey, searchKeys]);
+
+  const filtered = filteredAndSorted;
+  const totalRecords = filtered.length;
+  const totalPages = pageSize === -1 ? 1 : Math.max(1, Math.ceil(totalRecords / (pageSize || 1)));
+  const validCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
+
+  const displayedRows = useMemo(() => {
+    if (pageSize === -1) return filtered;
+    const start = (validCurrentPage - 1) * pageSize;
+    return filtered.slice(start, start + pageSize);
+  }, [filtered, validCurrentPage, pageSize]);
+
+  const isAnyFilterActive =
+    q !== "" ||
+    filter !== "all" ||
+    selectedYear !== "all" ||
+    selectedMonth !== "all" ||
+    selectedExactDate !== "" ||
+    selectedState !== "all" ||
+    locationFilter !== "all";
+
+  const handleResetFilters = () => {
+    setQ("");
+    setFilter("all");
+    setSelectedYear("all");
+    setSelectedMonth("all");
+    setSelectedExactDate("");
+    setSelectedState("all");
+    setStateSearch("");
+    setLocationFilter("all");
+    setLocationSearch("");
+    setSortBy("newest");
+    setCurrentPage(1);
+  };
 
   const handleExport = () => {
+    const exportData = filtered; // Strictly export filtered dataset
+
     if (onExport) {
-      onExport(filtered.length > 0 ? filtered : data);
+      onExport(exportData);
       return;
     }
 
@@ -122,8 +505,8 @@ export function DataPage<T extends Record<string, any>>({
       }));
 
     exportToCsv({
-      filename: `${filename}_${new Date().toISOString().slice(0, 10)}`,
-      data: filtered.length > 0 ? filtered : data,
+      filename: `${filename}_filtered_${new Date().toISOString().slice(0, 10)}`,
+      data: exportData,
       columns: exportCols,
     });
   };
@@ -138,12 +521,12 @@ export function DataPage<T extends Record<string, any>>({
             <Button
               variant="outline"
               size="sm"
-              className="gap-1.5"
+              className="gap-1.5 font-semibold text-xs bg-card hover:bg-muted"
               onClick={handleExport}
               disabled={isLoading || data.length === 0}
-              title={`Export ${filtered.length} rows as CSV`}
+              title={`Download CSV containing ${filtered.length} filtered rows`}
             >
-              <Download className="h-4 w-4" /> Export CSV
+              <Download className="h-4 w-4 text-emerald-600" /> Export CSV ({filtered.length})
             </Button>
             {typeof primaryAction === "string" ? (
               <Button size="sm" onClick={onPrimaryAction} className="gap-1.5 bg-gradient-to-br from-primary to-primary-glow">
@@ -178,7 +561,7 @@ export function DataPage<T extends Record<string, any>>({
         </div>
       )}
 
-      <Card className="rounded-2xl overflow-hidden relative">
+      <Card className="rounded-2xl overflow-hidden relative shadow-sm">
         {/* Animated Loading Bar Indicator */}
         {isLoading && (
           <div className="absolute top-0 left-0 right-0 h-1 bg-primary/20 overflow-hidden z-20">
@@ -186,26 +569,183 @@ export function DataPage<T extends Record<string, any>>({
           </div>
         )}
 
-        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 p-4 border-b sm:flex sm:flex-wrap">
-          <div className="relative min-w-0 sm:w-80">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder={searchPlaceholder}
-              className="pl-9"
-              disabled={isLoading}
-            />
+        <div className="flex flex-col gap-3 p-4 border-b space-y-2 md:space-y-0">
+          {/* Top Row: Search input + Live Filtered Count Badge + Clear Filters */}
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="relative min-w-0 md:w-80">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder={searchPlaceholder}
+                className="pl-9 text-xs"
+                disabled={isLoading}
+              />
+            </div>
+
+            {/* Live Filter Count Indicator Badge */}
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary/10 text-primary font-semibold text-xs border border-primary/20 shadow-xs">
+                <Layers className="h-3.5 w-3.5" />
+                <span>Showing <b>{filtered.length}</b> of {data.length} records</span>
+              </span>
+
+              {isFetchingBalance && (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 font-medium text-[11px] border border-amber-500/20 animate-pulse">
+                  <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-ping" />
+                  Fetching remaining balance...
+                </span>
+              )}
+
+              {isAnyFilterActive && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleResetFilters}
+                  className="h-8 text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/30 gap-1 rounded-xl"
+                  title="Clear all active filters"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" /> Clear Filters
+                </Button>
+              )}
+            </div>
           </div>
-          <div className="flex items-center gap-2 shrink-0 sm:ml-auto">
+
+          {/* Bottom Row: Filter Dropdowns (Date Presets, Year, Month, Specific Date, Location, Status, Sort) */}
+          <div className="flex flex-wrap items-center gap-2 pt-1">
+            {/* 1. Year Selector */}
+            <Select value={selectedYear} onValueChange={setSelectedYear} disabled={isLoading}>
+              <SelectTrigger className="w-28 text-xs h-9">
+                <CalendarDays className="h-3.5 w-3.5 mr-1 text-primary shrink-0" />
+                <SelectValue placeholder="Year" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Years</SelectItem>
+                {detectedYears.map((yr) => (
+                  <SelectItem key={yr} value={yr}>
+                    {yr}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {/* 2. Month Selector */}
+            <Select value={selectedMonth} onValueChange={setSelectedMonth} disabled={isLoading}>
+              <SelectTrigger className="w-32 text-xs h-9">
+                <Calendar className="h-3.5 w-3.5 mr-1 text-indigo-500 shrink-0" />
+                <SelectValue placeholder="Month" />
+              </SelectTrigger>
+              <SelectContent>
+                {MONTHS.map((m) => (
+                  <SelectItem key={m.value} value={m.value}>
+                    {m.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {/* 3. Bounded Date Picker Selector */}
+            <div className="relative flex items-center">
+              <Input
+                type="date"
+                min={dateMinMax.min}
+                max={dateMinMax.max}
+                value={selectedExactDate}
+                onChange={(e) => handleDateInputChange(e.target.value)}
+                className="w-36 text-xs h-9 pr-2 font-medium"
+                title={dateMinMax.min && dateMinMax.max ? `Select date between ${dateMinMax.min} and ${dateMinMax.max}` : "Select date"}
+                disabled={isLoading}
+              />
+              {selectedExactDate && (
+                <button
+                  onClick={() => setSelectedExactDate("")}
+                  className="absolute right-2 text-muted-foreground hover:text-foreground text-xs font-bold"
+                  title="Clear exact date"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
+            {/* 4. Dedicated Searchable State Filter Dropdown */}
+            <Select value={selectedState} onValueChange={setSelectedState} disabled={isLoading}>
+              <SelectTrigger className="w-36 text-xs h-9 font-medium">
+                <MapPin className="h-3.5 w-3.5 mr-1 text-emerald-500 shrink-0" />
+                <SelectValue placeholder="State" />
+              </SelectTrigger>
+              <SelectContent className="max-h-64 overflow-y-auto min-w-[220px]">
+                <div className="p-2 border-b sticky top-0 bg-popover z-10">
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                    <Input
+                      placeholder="Search state..."
+                      value={stateSearch}
+                      onChange={(e) => setStateSearch(e.target.value)}
+                      className="h-8 text-xs pl-8 pr-2"
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => e.stopPropagation()}
+                    />
+                  </div>
+                </div>
+                <SelectItem value="all">All States</SelectItem>
+                {filteredStateOptions.map((st) => (
+                  <SelectItem key={st} value={st}>
+                    {st}
+                  </SelectItem>
+                ))}
+                {filteredStateOptions.length === 0 && (
+                  <div className="p-3 text-xs text-muted-foreground text-center">
+                    No matching state found
+                  </div>
+                )}
+              </SelectContent>
+            </Select>
+
+            {/* 5. Searchable District / City Location Filter Dropdown */}
+            {detectedLocations.length > 0 && (
+              <Select value={locationFilter} onValueChange={setLocationFilter} disabled={isLoading}>
+                <SelectTrigger className="w-40 text-xs h-9 font-medium">
+                  <MapPin className="h-3.5 w-3.5 mr-1 text-teal-500 shrink-0" />
+                  <SelectValue placeholder="City / District" />
+                </SelectTrigger>
+                <SelectContent className="max-h-64 overflow-y-auto min-w-[220px]">
+                  <div className="p-2 border-b sticky top-0 bg-popover z-10">
+                    <div className="relative">
+                      <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                      <Input
+                        placeholder="Search city/district..."
+                        value={locationSearch}
+                        onChange={(e) => setLocationSearch(e.target.value)}
+                        className="h-8 text-xs pl-8 pr-2"
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => e.stopPropagation()}
+                      />
+                    </div>
+                  </div>
+                  <SelectItem value="all">All Cities & Districts</SelectItem>
+                  {filteredLocationOptions.map((loc) => (
+                    <SelectItem key={loc} value={loc}>
+                      {loc}
+                    </SelectItem>
+                  ))}
+                  {filteredLocationOptions.length === 0 && (
+                    <div className="p-3 text-xs text-muted-foreground text-center">
+                      No matching city or district found
+                    </div>
+                  )}
+                </SelectContent>
+              </Select>
+            )}
+
+            {/* 6. Status Filter */}
             {effectiveFilters.length > 0 && (
               <Select value={filter} onValueChange={setFilter} disabled={isLoading}>
-                <SelectTrigger className="w-40">
-                  <Filter className="h-4 w-4 mr-1.5" />
+                <SelectTrigger className="w-32 text-xs h-9">
+                  <Filter className="h-3.5 w-3.5 mr-1 text-amber-500 shrink-0" />
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All status</SelectItem>
+                  <SelectItem value="all">All Status</SelectItem>
                   {effectiveFilters.map((f) => (
                     <SelectItem key={f} value={f.toLowerCase()}>
                       {f}
@@ -214,6 +754,24 @@ export function DataPage<T extends Record<string, any>>({
                 </SelectContent>
               </Select>
             )}
+
+            {/* 7. Sort By Dropdown */}
+            <Select value={sortBy} onValueChange={(val: any) => setSortBy(val)} disabled={isLoading}>
+              <SelectTrigger className="w-40 text-xs h-9 font-medium ml-auto">
+                <ArrowUpDown className="h-3.5 w-3.5 mr-1 text-sky-500 shrink-0" />
+                <SelectValue placeholder="Sort By" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="newest">Sort: Newest First</SelectItem>
+                <SelectItem value="oldest">Sort: Oldest First</SelectItem>
+                <SelectItem value="state-asc">Sort: State (A to Z)</SelectItem>
+                <SelectItem value="state-desc">Sort: State (Z to A)</SelectItem>
+                <SelectItem value="loc-asc">Sort: City / District (A-Z)</SelectItem>
+                <SelectItem value="loc-desc">Sort: City / District (Z-A)</SelectItem>
+                <SelectItem value="name-asc">Sort: Name (A-Z)</SelectItem>
+                <SelectItem value="name-desc">Sort: Name (Z-A)</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
@@ -245,8 +803,8 @@ export function DataPage<T extends Record<string, any>>({
                     ))}
                   </TableRow>
                 ))
-              ) : filtered.length > 0 ? (
-                filtered.map((row, i) => {
+              ) : displayedRows.length > 0 ? (
+                displayedRows.map((row, i) => {
                   const href = rowHref?.(row);
                   return (
                     <TableRow
@@ -291,27 +849,101 @@ export function DataPage<T extends Record<string, any>>({
           </Table>
         </div>
 
-        <div className="flex items-center justify-between border-t p-4 text-sm text-muted-foreground">
-          <span>
+        {/* High Performance Batching & Pagination Footer Bar */}
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 border-t p-3.5 bg-muted/20 text-xs text-muted-foreground">
+          <div className="flex items-center gap-3">
             {isLoading ? (
               <span className="inline-flex items-center gap-2 text-xs font-medium text-primary">
-                <span className="h-2 w-2 rounded-full bg-primary animate-ping" /> Loading live data...
+                <span className="h-2 w-2 rounded-full bg-primary animate-ping" /> Loading records...
               </span>
             ) : (
-              <>
-                Showing <b className="text-foreground">{filtered.length}</b> of{" "}
-                <b className="text-foreground">{data.length}</b>
-              </>
+              <span>
+                Showing{" "}
+                <b className="text-foreground font-semibold">
+                  {displayedRows.length === 0 ? 0 : pageSize === -1 ? 1 : (validCurrentPage - 1) * pageSize + 1}
+                </b>{" "}
+                to{" "}
+                <b className="text-foreground font-semibold">
+                  {pageSize === -1 ? totalRecords : Math.min(validCurrentPage * pageSize, totalRecords)}
+                </b>{" "}
+                of <b className="text-foreground font-semibold">{totalRecords.toLocaleString()}</b> filtered ({data.length.toLocaleString()} total)
+              </span>
             )}
-          </span>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" disabled={isLoading || filtered.length === 0}>
-              Previous
-            </Button>
-            <Button variant="outline" size="sm" disabled={isLoading || filtered.length === 0}>
-              Next
-            </Button>
+
+            <div className="flex items-center gap-1.5 ml-2">
+              <span className="text-muted-foreground font-medium hidden md:inline">Rows per page:</span>
+              <Select
+                value={String(pageSize)}
+                onValueChange={(val) => {
+                  setPageSize(Number(val));
+                  setCurrentPage(1);
+                }}
+                disabled={isLoading}
+              >
+                <SelectTrigger className="h-7 w-20 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="25">25</SelectItem>
+                  <SelectItem value="50">50</SelectItem>
+                  <SelectItem value="100">100</SelectItem>
+                  <SelectItem value="250">250</SelectItem>
+                  <SelectItem value="500">500</SelectItem>
+                  <SelectItem value="1000">1000</SelectItem>
+                  <SelectItem value="-1">All ({totalRecords})</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
+
+          {/* Page Navigation Controls */}
+          {pageSize !== -1 && totalPages > 1 && (
+            <div className="flex items-center gap-1.5">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={() => setCurrentPage(1)}
+                disabled={isLoading || validCurrentPage === 1}
+                title="First Page"
+              >
+                «
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2.5 text-xs font-medium"
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={isLoading || validCurrentPage === 1}
+              >
+                Previous
+              </Button>
+
+              <span className="px-2 font-medium text-foreground text-xs">
+                Page {validCurrentPage} of {totalPages}
+              </span>
+
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2.5 text-xs font-medium"
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                disabled={isLoading || validCurrentPage >= totalPages}
+              >
+                Next
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={() => setCurrentPage(totalPages)}
+                disabled={isLoading || validCurrentPage >= totalPages}
+                title="Last Page"
+              >
+                »
+              </Button>
+            </div>
+          )}
         </div>
       </Card>
     </div>

@@ -1237,27 +1237,35 @@ function UserDetail() {
                   <div className="space-y-1 divide-y divide-border/40">
                     <InfoRow icon={Store} label="Store / Business Name" value={getLocalizedText(sellerDoc.name || sellerDoc.shopName || "—")} />
                     <InfoRow icon={Phone} label="Seller Phone Number" value={sellerDoc.sellerPhoneNumber || sellerDoc.phone || displayPhone} />
-                    <InfoRow icon={Building} label="Village / City" value={getLocalizedText(sellerDoc.village || "—")} />
-                    <InfoRow icon={Building} label="Taluk" value={getLocalizedText(sellerDoc.taluk || "—")} />
+                    <InfoRow icon={Building} label="Village / City / Town" value={getLocalizedText(sellerDoc.village || sellerDoc.city || sellerDoc.town || "—")} />
+                    <InfoRow icon={Building} label="Taluk / Tehsil" value={getLocalizedText(sellerDoc.taluk || sellerDoc.tehsil || "—")} />
                   </div>
                   <div className="space-y-1 divide-y divide-border/40">
-                    <InfoRow icon={MapPin} label="District" value={getLocalizedText(sellerDoc.district || "—")} />
-                    <InfoRow icon={MapPin} label="State" value={getLocalizedText(sellerDoc.state || sellerDoc.stateCode || "—")} />
-                    <InfoRow icon={MapPin} label="Pincode" value={sellerDoc.pincode || "—"} />
+                    <InfoRow icon={MapPin} label="District" value={getLocalizedText(sellerDoc.district || sellerDoc.districtName || "—")} />
+                    <InfoRow icon={MapPin} label="State" value={getLocalizedText(sellerDoc.state || sellerDoc.stateName || sellerDoc.stateCode || "—")} />
+                    <InfoRow icon={MapPin} label="Pincode" value={sellerDoc.pincode || sellerDoc.pinCode || "—"} />
                     <InfoRow icon={MapPin} label="Country" value={sellerDoc.country || "🇮🇳 India"} />
                   </div>
                 </div>
 
-                {sellerDoc.address && (
-                  <div>
-                    <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-                      Shop Address
-                    </h4>
-                    <p className="text-sm text-foreground bg-muted/40 p-4 rounded-2xl font-medium border border-border/40">
-                      {getLocalizedText(sellerDoc.address)}
-                    </p>
+                <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 space-y-1">
+                  <div className="flex items-center gap-2 text-xs font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider">
+                    <MapPin className="h-4 w-4 shrink-0" /> Full Seller Store Location
                   </div>
-                )}
+                  <p className="text-sm font-semibold text-foreground">
+                    {sellerDoc.address
+                      ? getLocalizedText(sellerDoc.address)
+                      : [
+                          getLocalizedText(sellerDoc.village || sellerDoc.city || sellerDoc.town),
+                          getLocalizedText(sellerDoc.taluk || sellerDoc.tehsil),
+                          getLocalizedText(sellerDoc.district || sellerDoc.districtName),
+                          getLocalizedText(sellerDoc.state || sellerDoc.stateName),
+                          sellerDoc.pincode || sellerDoc.pinCode,
+                        ]
+                          .filter(Boolean)
+                          .join(", ") || "Location details not specified"}
+                  </p>
+                </div>
               </Card>
 
               {/* Seller Listed Products */}
@@ -1343,11 +1351,31 @@ function UserDetail() {
                     <InfoRow icon={Building} label="Institution / Clinic" value={getLocalizedText(vetDoc.addInstitution || vetDoc.clinic || "—")} />
                   </div>
                   <div className="space-y-1 divide-y divide-border/40">
-                    <InfoRow icon={Building} label="Clinic Location" value={getLocalizedText(vetDoc.village || vetDoc.city || "—")} />
-                    <InfoRow icon={MapPin} label="District" value={getLocalizedText(vetDoc.district || "—")} />
-                    <InfoRow icon={MapPin} label="State" value={getLocalizedText(vetDoc.state || vetDoc.stateCode || "—")} />
-                    <InfoRow icon={MapPin} label="Pincode" value={vetDoc.pincode || "—"} />
+                    <InfoRow icon={Building} label="Clinic / Practice Location" value={getLocalizedText(vetDoc.village || vetDoc.city || vetDoc.town || "—")} />
+                    <InfoRow icon={MapPin} label="District" value={getLocalizedText(vetDoc.district || vetDoc.districtName || "—")} />
+                    <InfoRow icon={MapPin} label="State" value={getLocalizedText(vetDoc.state || vetDoc.stateName || vetDoc.stateCode || "—")} />
+                    <InfoRow icon={MapPin} label="Pincode" value={vetDoc.pincode || vetDoc.pinCode || "—"} />
                   </div>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-blue-500/10 border border-blue-500/20 space-y-1">
+                  <div className="flex items-center gap-2 text-xs font-bold text-blue-700 dark:text-blue-400 uppercase tracking-wider">
+                    <MapPin className="h-4 w-4 shrink-0" /> Full Clinic & Practice Location
+                  </div>
+                  <p className="text-sm font-semibold text-foreground">
+                    {vetDoc.address || vetDoc.clinicAddress
+                      ? getLocalizedText(vetDoc.address || vetDoc.clinicAddress)
+                      : [
+                          getLocalizedText(vetDoc.clinic || vetDoc.hospital || vetDoc.addInstitution),
+                          getLocalizedText(vetDoc.village || vetDoc.city || vetDoc.town),
+                          getLocalizedText(vetDoc.taluk || vetDoc.tehsil),
+                          getLocalizedText(vetDoc.district || vetDoc.districtName),
+                          getLocalizedText(vetDoc.state || vetDoc.stateName),
+                          vetDoc.pincode || vetDoc.pinCode,
+                        ]
+                          .filter(Boolean)
+                          .join(", ") || "Clinic location details not specified"}
+                  </p>
                 </div>
 
                 {/* Specializations & Services */}

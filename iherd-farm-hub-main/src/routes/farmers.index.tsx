@@ -44,7 +44,7 @@ function formatDate(ms: number): string {
 }
 
 function FarmersPage() {
-  const { data: authUsers = [], isLoading: authLoading } = useAdminUsers();
+  const { data: authUsers = [], isLoading: authLoading, isFetchingBalance } = useAdminUsers();
   const { data: firestoreUsers = [], isLoading: fsLoading } = useFirebaseCollection<any>("users");
   const { data: directFarmers = [], isLoading: directLoading } = useFirebaseCollection<any>("farmers");
   const { data: cattleList = [] } = useFirebaseCollection<any>("cattle_details");
@@ -432,6 +432,7 @@ function FarmersPage() {
         description="All registered farmers, contact info, locations, and linked farm and livestock records."
         exportFilename="iherd_farmers_directory"
         isLoading={isLoading}
+        isFetchingBalance={isFetchingBalance}
         customExportColumns={[
           { header: "Farmer Name", accessor: "name" },
           { header: "Farmer UID", accessor: "uid" },
