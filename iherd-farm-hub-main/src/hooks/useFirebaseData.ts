@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { collection, collectionGroup, getDocs, doc, getDoc, setDoc, updateDoc, deleteDoc } from "firebase/firestore";
+import { collection, collectionGroup, getDocs, doc, getDoc, setDoc, updateDoc, deleteDoc, deleteField } from "firebase/firestore";
 import { db } from "../lib/firebase";
 
 export const API_BASE =
@@ -464,7 +464,11 @@ export function useAdminProducts() {
 
       const docId = prodId || `PRD-${Date.now()}`;
       const docRef = doc(db, "product_marketplace", "main", "products", docId);
-      await setDoc(docRef, { ...product, id: docId, updatedAt: new Date().toISOString() }, { merge: true });
+      const payloadToSave: any = { ...product, id: docId, updatedAt: new Date().toISOString() };
+      if (payloadToSave.deliveryConfig === null) {
+        payloadToSave.deliveryConfig = deleteField();
+      }
+      await setDoc(docRef, payloadToSave, { merge: true });
       return { success: true, id: docId, product };
     },
     onSuccess: () => {

@@ -53,7 +53,7 @@ try {
   console.error("Error initializing Firebase Admin SDK:", error);
 }
 
-const { getFirestore } = require("firebase-admin/firestore");
+const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getStorage } = require("firebase-admin/storage");
 
 // Helper: list all files under a storage prefix with download tokens
@@ -3147,6 +3147,10 @@ app.post("/api/admin/products", async (req, res) => {
       updatedAt: new Date().toISOString(),
     };
 
+    if (body.deliveryConfig === null) {
+      delete productData.deliveryConfig;
+    }
+
     await db.collection("product_marketplace").doc("main").collection("products").doc(prodId).set(productData, { merge: true });
 
     if (productData.bestSeller) {
@@ -3189,6 +3193,10 @@ app.put("/api/admin/products/:id", async (req, res) => {
       updateData.bestSeller = Boolean(body.bestSeller);
     }
     if (body.thumbnailUrl === "") updateData.thumbnailUrl = null;
+
+    if (body.deliveryConfig === null) {
+      updateData.deliveryConfig = FieldValue.delete();
+    }
 
     const prodRef = db.collection("product_marketplace").doc("main").collection("products").doc(id);
     await prodRef.set(updateData, { merge: true });

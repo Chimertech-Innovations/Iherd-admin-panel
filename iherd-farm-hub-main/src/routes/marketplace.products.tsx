@@ -64,10 +64,51 @@ import {
   Check,
   HelpCircle,
   Download,
+  X,
+  MapPin,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAdminProducts, useFirebaseCollection, useBestSellers } from "@/hooks/useFirebaseData";
 import { getLocalizedText, formatImageUrl } from "@/lib/utils";
+
+const INDIAN_STATES = [
+  { name: "Andhra Pradesh", code: "AP" },
+  { name: "Arunachal Pradesh", code: "AR" },
+  { name: "Assam", code: "AS" },
+  { name: "Bihar", code: "BR" },
+  { name: "Chhattisgarh", code: "CG" },
+  { name: "Goa", code: "GA" },
+  { name: "Gujarat", code: "GJ" },
+  { name: "Haryana", code: "HR" },
+  { name: "Himachal Pradesh", code: "HP" },
+  { name: "Jharkhand", code: "JH" },
+  { name: "Karnataka", code: "KA" },
+  { name: "Kerala", code: "KL" },
+  { name: "Madhya Pradesh", code: "MP" },
+  { name: "Maharashtra", code: "MH" },
+  { name: "Manipur", code: "MN" },
+  { name: "Meghalaya", code: "ML" },
+  { name: "Mizoram", code: "MZ" },
+  { name: "Nagaland", code: "NL" },
+  { name: "Odisha", code: "OD" },
+  { name: "Punjab", code: "PB" },
+  { name: "Rajasthan", code: "RJ" },
+  { name: "Sikkim", code: "SK" },
+  { name: "Tamil Nadu", code: "TN" },
+  { name: "Telangana", code: "TS" },
+  { name: "Tripura", code: "TR" },
+  { name: "Uttar Pradesh", code: "UP" },
+  { name: "Uttarakhand", code: "UK" },
+  { name: "West Bengal", code: "WB" },
+  { name: "Andaman and Nicobar Islands", code: "AN" },
+  { name: "Chandigarh", code: "CH" },
+  { name: "Dadra and Nagar Haveli and Daman and Diu", code: "DD" },
+  { name: "Delhi", code: "DL" },
+  { name: "Jammu and Kashmir", code: "JK" },
+  { name: "Ladakh", code: "LA" },
+  { name: "Lakshadweep", code: "LD" },
+  { name: "Puducherry", code: "PY" },
+];
 import { exportToCsv } from "@/lib/csvExport";
 
 export const Route = createFileRoute("/marketplace/products")({
@@ -219,9 +260,9 @@ function ProductsMarketplacePage() {
   const [bestBeforePa, setBestBeforePa] = useState("ਲਾਗੂ ਨਹੀਂ");
 
   // 10. Delivery Config
-  const [isFreeDelivery, setIsFreeDelivery] = useState(true);
-  const [deliveryCharge, setDeliveryCharge] = useState("0");
-  const [estimatedDays, setEstimatedDays] = useState("3");
+  const [deliveryType, setDeliveryType] = useState<string>("all");
+  const [deliveryStates, setDeliveryStates] = useState<string[]>([]);
+  const [stateSearchQuery, setStateSearchQuery] = useState("");
 
   const [status, setStatus] = useState("Approved");
 
@@ -300,9 +341,9 @@ function ProductsMarketplacePage() {
     setBestBeforeHi("लागू नहीं");
     setBestBeforePa("ਲਾਗੂ ਨਹੀਂ");
 
-    setIsFreeDelivery(true);
-    setDeliveryCharge("0");
-    setEstimatedDays("3");
+    setDeliveryType("all");
+    setDeliveryStates([]);
+    setStateSearchQuery("");
 
     setStatus("Approved");
     setModalTab("general");
@@ -458,10 +499,15 @@ function ProductsMarketplacePage() {
     }
 
     // Delivery Config
-    const dc = p.deliveryConfig || {};
-    setIsFreeDelivery(dc.isFreeDelivery !== undefined ? Boolean(dc.isFreeDelivery) : (Number(dc.deliveryCharge || 0) === 0));
-    setDeliveryCharge(String(dc.deliveryCharge || 0));
-    setEstimatedDays(String(dc.estimatedDays || 3));
+    const dc = p.deliveryConfig;
+    if (!dc || !dc.type || dc.type === "all") {
+      setDeliveryType("all");
+      setDeliveryStates([]);
+    } else {
+      setDeliveryType(dc.type || "exclude");
+      setDeliveryStates(Array.isArray(dc.states) ? dc.states : []);
+    }
+    setStateSearchQuery("");
 
     setStatus(getLocalizedText(p.status, "Approved"));
     setModalTab("general");
@@ -630,11 +676,10 @@ function ProductsMarketplacePage() {
       // bool bestSeller
       bestSeller: Boolean(bestSeller),
 
-      // DeliveryConfig? deliveryConfig
-      deliveryConfig: {
-        isFreeDelivery: Boolean(isFreeDelivery),
-        deliveryCharge: isFreeDelivery ? 0.0 : Number(deliveryCharge) || 0.0,
-        estimatedDays: Math.round(Number(estimatedDays) || 3),
+      // DeliveryConfig? deliveryConfig (null deletes mapping from Firestore, object creates/updates)
+      deliveryConfig: deliveryType === "all" ? null : {
+        type: deliveryType,
+        states: deliveryStates,
       },
     };
 
@@ -718,9 +763,8 @@ function ProductsMarketplacePage() {
         { header: "Seller Name", accessor: (p: any) => getLocalizedText(p.sellerName, "Chimertech") },
         { header: "Seller Type", accessor: (p: any) => p.sellerType || "seller" },
         { header: "GST (%)", accessor: (p: any) => p.gst ?? 18 },
-        { header: "Free Delivery", accessor: (p: any) => p.deliveryConfig?.isFreeDelivery ? "Yes" : "No" },
-        { header: "Delivery Charge", accessor: (p: any) => p.deliveryConfig?.deliveryCharge ?? 0 },
-        { header: "Estimated Delivery (Days)", accessor: (p: any) => p.deliveryConfig?.estimatedDays ?? 3 },
+        { header: "Delivery Type", accessor: (p: any) => p.deliveryConfig?.type || "all (Nationwide)" },
+        { header: "Delivery States", accessor: (p: any) => Array.isArray(p.deliveryConfig?.states) ? p.deliveryConfig.states.join(", ") : "All States" },
         { header: "Status", accessor: (p: any) => getLocalizedText(p.status, "Approved") },
       ],
     });
@@ -1838,49 +1882,175 @@ function ProductsMarketplacePage() {
                 </div>
 
                 {/* Delivery Config */}
-                <div className="p-4 rounded-2xl border bg-muted/20 space-y-3">
-                  <h4 className="font-semibold text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                    <Truck className="h-4 w-4 text-primary" /> Delivery Config (<code>DeliveryConfig? deliveryConfig</code>)
-                  </h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div className="space-y-1.5 flex flex-col justify-center">
-                      <Label className="cursor-pointer">Free Delivery</Label>
-                      <div className="flex items-center gap-2 mt-1">
-                        <input
-                          type="checkbox"
-                          id="prod-free-del"
-                          checked={isFreeDelivery}
-                          onChange={(e) => setIsFreeDelivery(e.target.checked)}
-                          className="h-4 w-4 rounded text-primary cursor-pointer"
-                        />
-                        <label htmlFor="prod-free-del" className="text-xs text-muted-foreground cursor-pointer">
-                          {isFreeDelivery ? "Free Delivery" : "Charge shipping"}
-                        </label>
-                      </div>
-                    </div>
-
-                    {!isFreeDelivery && (
-                      <div className="space-y-1.5">
-                        <Label htmlFor="prod-del-charge">Delivery Charge (₹)</Label>
-                        <Input
-                          id="prod-del-charge"
-                          type="number"
-                          value={deliveryCharge}
-                          onChange={(e) => setDeliveryCharge(e.target.value)}
-                        />
-                      </div>
+                <div className="p-4 rounded-2xl border bg-muted/20 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-semibold text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                      <Truck className="h-4 w-4 text-primary" /> Delivery Config (<code>DeliveryConfig? deliveryConfig</code>)
+                    </h4>
+                    {deliveryStates.length > 0 && deliveryType !== "all" && (
+                      <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
+                        {deliveryStates.length} State{deliveryStates.length > 1 ? "s" : ""} {deliveryType === "exclude" ? "Excluded" : "Included"}
+                      </span>
                     )}
-
-                    <div className="space-y-1.5">
-                      <Label htmlFor="prod-del-days">Estimated Delivery (Days)</Label>
-                      <Input
-                        id="prod-del-days"
-                        type="number"
-                        value={estimatedDays}
-                        onChange={(e) => setEstimatedDays(e.target.value)}
-                      />
-                    </div>
                   </div>
+
+                  <div className="space-y-1.5">
+                    <Label htmlFor="prod-del-type">Delivery Availability Type (<code>type</code>)</Label>
+                    <Select value={deliveryType} onValueChange={setDeliveryType}>
+                      <SelectTrigger id="prod-del-type" className="w-full rounded-xl border-input bg-background">
+                        <SelectValue placeholder="Select delivery type" />
+                      </SelectTrigger>
+                      <SelectContent className="rounded-xl">
+                        <SelectItem value="all">All States (Nationwide Delivery - Deletes restriction map)</SelectItem>
+                        <SelectItem value="exclude">Exclude Selected States (Not available in selected states)</SelectItem>
+                        <SelectItem value="include">Include Selected States (Available ONLY in selected states)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {deliveryType === "all" && (
+                    <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-400 text-xs flex items-center gap-2">
+                      <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+                      <span>Available nationwide across all states. Selecting "All States" will remove the <code>deliveryConfig</code> field mapping from Firestore.</span>
+                    </div>
+                  )}
+
+                  {/* State Selection Search & Select Table */}
+                  {deliveryType !== "all" && (
+                    <div className="space-y-3 pt-3 border-t border-border/50">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <Label className="text-xs font-semibold flex items-center gap-1.5">
+                          <MapPin className="h-3.5 w-3.5 text-primary" /> Select States / Union Territories (<code>states</code>)
+                        </Label>
+
+                        <div className="flex items-center gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setDeliveryStates(INDIAN_STATES.map((s) => s.code))}
+                            className="h-7 text-xs rounded-lg px-2.5"
+                          >
+                            Select All (36)
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setDeliveryStates([])}
+                            className="h-7 text-xs rounded-lg px-2.5 text-destructive hover:text-destructive"
+                          >
+                            Clear All
+                          </Button>
+                        </div>
+                      </div>
+
+                      {/* Search Input */}
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                        <Input
+                          placeholder="Search State / Union Territory or Code (e.g., Tamil Nadu or TN)..."
+                          value={stateSearchQuery}
+                          onChange={(e) => setStateSearchQuery(e.target.value)}
+                          className="pl-9 pr-8 text-xs rounded-xl bg-background"
+                        />
+                        {stateSearchQuery && (
+                          <button
+                            type="button"
+                            onClick={() => setStateSearchQuery("")}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Selected Badges */}
+                      {deliveryStates.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto p-2 bg-background/60 rounded-xl border">
+                          {deliveryStates.map((code) => {
+                            const st = INDIAN_STATES.find((s) => s.code === code);
+                            return (
+                              <span
+                                key={code}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-medium bg-primary/10 text-primary border border-primary/20 transition-all hover:bg-primary/20"
+                              >
+                                <span>{st ? st.name : code}</span>
+                                <span className="font-bold text-[10px] opacity-75">({code})</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setDeliveryStates((prev) => prev.filter((c) => c !== code))}
+                                  className="hover:bg-primary/30 rounded-full p-0.5 ml-0.5 text-primary"
+                                >
+                                  <X className="h-3 w-3" />
+                                </button>
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {/* Search and Select Table */}
+                      <div className="rounded-xl border bg-background overflow-hidden">
+                        <div className="max-h-56 overflow-y-auto">
+                          <Table className="text-xs">
+                            <TableHeader className="bg-muted/50 sticky top-0 z-10">
+                              <TableRow>
+                                <TableHead className="w-12 text-center">Select</TableHead>
+                                <TableHead className="font-semibold">State / Union Territory</TableHead>
+                                <TableHead className="w-24 font-semibold text-center">Code</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {INDIAN_STATES.filter(
+                                (s) =>
+                                  s.name.toLowerCase().includes(stateSearchQuery.toLowerCase()) ||
+                                  s.code.toLowerCase().includes(stateSearchQuery.toLowerCase())
+                              ).map((state) => {
+                                const isSelected = deliveryStates.includes(state.code);
+                                return (
+                                  <TableRow
+                                    key={state.code}
+                                    onClick={() => {
+                                      if (isSelected) {
+                                        setDeliveryStates((prev) => prev.filter((c) => c !== state.code));
+                                      } else {
+                                        setDeliveryStates((prev) => [...prev, state.code]);
+                                      }
+                                    }}
+                                    className={`cursor-pointer transition-colors ${
+                                      isSelected ? "bg-primary/10 hover:bg-primary/15" : "hover:bg-muted/40"
+                                    }`}
+                                  >
+                                    <TableCell className="text-center p-2" onClick={(e) => e.stopPropagation()}>
+                                      <input
+                                        type="checkbox"
+                                        checked={isSelected}
+                                        onChange={(e) => {
+                                          if (e.target.checked) {
+                                            setDeliveryStates((prev) => [...prev, state.code]);
+                                          } else {
+                                            setDeliveryStates((prev) => prev.filter((c) => c !== state.code));
+                                          }
+                                        }}
+                                        className="h-4 w-4 rounded border-primary text-primary cursor-pointer"
+                                      />
+                                    </TableCell>
+                                    <TableCell className="font-medium p-2">{state.name}</TableCell>
+                                    <TableCell className="text-center p-2">
+                                      <span className="font-mono font-semibold px-2 py-0.5 rounded bg-muted text-muted-foreground text-[11px]">
+                                        {state.code}
+                                      </span>
+                                    </TableCell>
+                                  </TableRow>
+                                );
+                              })}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </TabsContent>
             </Tabs>
