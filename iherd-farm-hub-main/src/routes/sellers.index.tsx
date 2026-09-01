@@ -392,7 +392,6 @@ function SellersPage() {
         description="All registered marketplace sellers — feed, equipment, medicines, and cattle trading."
         primaryAction={<AddSellerDialog onCreated={handleRefresh} />}
         isLoading={isLoading}
-        filters={["Active", "Pending", "Suspended"]}
         searchPlaceholder="Search sellers by store name, owner, phone, or category..."
         searchKeys={["name", "ownerName", "phone", "category", "city", "state"]}
         kpis={[

@@ -473,7 +473,6 @@ function FarmersPage() {
         ]}
         searchKeys={["name", "phone", "village", "district", "state", "registeredFarmName"]}
         searchPlaceholder="Search farmers by name, phone, village, or state..."
-        statusOptions={["Active", "Pending", "Verified"]}
         data={allFarmers}
         columns={[
           {

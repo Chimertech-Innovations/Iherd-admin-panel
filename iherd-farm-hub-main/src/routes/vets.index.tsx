@@ -393,7 +393,6 @@ function VetsPage() {
         description="Approve certifications, qualifications, and manage veterinary doctors across iHerd."
         primaryAction={<AddVetDialog onCreated={handleRefresh} />}
         isLoading={isLoading}
-        filters={["Active", "Pending", "Suspended"]}
         searchPlaceholder="Search doctors by name, clinic, phone, or location..."
         searchKeys={["name", "clinic", "phone", "qualification", "city", "state"]}
         kpis={[

@@ -417,7 +417,6 @@ function FarmsPage() {
         ]}
         searchKeys={["name", "ownerName", "village", "district", "state", "farmPhoneNumber", "animal"]}
         searchPlaceholder="Search farms by name, owner, location, or equipment..."
-        statusOptions={["Active", "Pending", "Verified"]}
         data={filteredFarms}
         columns={[
           {
