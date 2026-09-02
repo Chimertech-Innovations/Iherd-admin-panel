@@ -87,23 +87,23 @@ async function listFilesUnderPrefix(bucket, prefix) {
 // In-memory cache for high-frequency admin reads with SWR (Stale-While-Revalidate)
 const memoryCache = new Map();
 
-function getCached(key, ttlMs = 180000) {
+function getCached(key, ttlMs = 600000) {
   const item = memoryCache.get(key);
   if (!item) return null;
   const age = Date.now() - item.timestamp;
-  // If fresh, return data
+  // If fresh, return data immediately without touching database
   if (age <= ttlMs) {
     return item.data;
   }
-  // If stale but within grace window (up to 30 mins), return data for instant response
-  if (age <= 30 * 60 * 1000) {
+  // If stale but within grace window (up to 60 mins), return data for instant response
+  if (age <= 60 * 60 * 1000) {
     return item.data;
   }
   memoryCache.delete(key);
   return null;
 }
 
-function isCacheFresh(key, ttlMs = 180000) {
+function isCacheFresh(key, ttlMs = 600000) {
   const item = memoryCache.get(key);
   if (!item) return false;
   return (Date.now() - item.timestamp) <= ttlMs;
@@ -1014,7 +1014,7 @@ async function listAllAuthUsers(auth) {
 }
 
 async function fetchAndProcessAdminUsers(force = false) {
-  const cachedUsers = getCached("admin_users", 180000);
+  const cachedUsers = getCached("admin_users", 600000);
   if (!force && cachedUsers && Array.isArray(cachedUsers) && cachedUsers.length > 0) {
     return cachedUsers;
   }
@@ -1506,13 +1506,13 @@ app.get(["/api/admin/users", "/get/api/admin/users"], async (req, res) => {
     const limit = req.query.limit ? Math.max(1, parseInt(req.query.limit, 10)) : null;
     const offset = req.query.offset ? Math.max(0, parseInt(req.query.offset, 10)) : 0;
 
-    let allUsers = getCached("admin_users", 180000);
+    let allUsers = getCached("admin_users", 600000);
     let cached = true;
 
     if (!allUsers || !Array.isArray(allUsers) || allUsers.length === 0) {
       allUsers = await fetchAndProcessAdminUsers(true);
       cached = false;
-    } else if (!isCacheFresh("admin_users", 180000)) {
+    } else if (!isCacheFresh("admin_users", 600000)) {
       // Trigger background revalidation asynchronously
       fetchAndProcessAdminUsers(true).catch(() => {});
     }
@@ -1539,7 +1539,7 @@ app.get(["/api/admin/users", "/get/api/admin/users"], async (req, res) => {
 // REST API to list all Sellers across all known collections and role subcollections
 app.get("/api/admin/sellers", async (req, res) => {
   try {
-    const cached = getCached("admin_sellers", 45000);
+    const cached = getCached("admin_sellers", 600000);
     if (cached) return res.json(cached);
 
     const db = getFirestore();
@@ -1727,7 +1727,7 @@ app.get("/api/admin/sellers", async (req, res) => {
 // REST API to list all Veterinarians across all known collections and role subcollections
 app.get("/api/admin/vets", async (req, res) => {
   try {
-    const cached = getCached("admin_vets", 45000);
+    const cached = getCached("admin_vets", 600000);
     if (cached) return res.json(cached);
 
     const db = getFirestore();
@@ -1891,7 +1891,7 @@ app.get("/api/admin/vets", async (req, res) => {
 // REST API to list all Product Orders (bypasses client security rules)
 app.get("/api/admin/product-orders", async (req, res) => {
   try {
-    const cached = getCached("admin_product_orders", 45000);
+    const cached = getCached("admin_product_orders", 600000);
     if (cached) return res.json(cached);
 
     const db = getFirestore();
@@ -2119,7 +2119,7 @@ app.put(["/api/admin/product-orders/:id"], async (req, res) => {
 // REST API to list all Cattle Orders (bypasses client security rules)
 app.get("/api/admin/cattle-orders", async (req, res) => {
   try {
-    const cached = getCached("admin_cattle_orders", 45000);
+    const cached = getCached("admin_cattle_orders", 600000);
     if (cached) return res.json(cached);
 
     const db = getFirestore();
@@ -2323,6 +2323,9 @@ function extractPriceFromDoc(item) {
 // REST API to list all Cattle Register Details strictly from /users/{userId}/roles/farmer/farms/{farmId}/cattles/{cattleId}
 app.get("/api/admin/cattle", async (req, res) => {
   try {
+    const cached = getCached("admin_cattle", 600000);
+    if (cached) return res.json(cached);
+
     const db = getFirestore();
     const [groupCattlesSnap, groupCattleSingularSnap, groupFarmsSnap, usersSnap] = await Promise.all([
       db.collectionGroup("cattles").get().catch(() => ({ docs: [] })),
@@ -2521,7 +2524,9 @@ app.get("/api/admin/cattle", async (req, res) => {
     );
 
     console.log(`Fetched and enriched ${sortedCattle.length} cattle register records strictly from farm subcollections`);
-    res.json({ cattle: sortedCattle });
+    const payload = { cattle: sortedCattle };
+    setCache("admin_cattle", payload);
+    res.json(payload);
   } catch (error) {
     console.error("Error in /api/admin/cattle:", error);
     res.status(500).json({ error: error.message, cattle: [] });
@@ -2531,6 +2536,9 @@ app.get("/api/admin/cattle", async (req, res) => {
 // REST API to list all Cattle Marketplace listings directly from /cattle-marketplace
 app.get("/api/admin/cattle-marketplace", async (req, res) => {
   try {
+    const cached = getCached("admin_cattle_marketplace", 600000);
+    if (cached) return res.json(cached);
+
     const db = getFirestore();
     const [cmSnap, usersSnap] = await Promise.all([
       db.collection("cattle-marketplace").get().catch(() => ({ docs: [] })),
@@ -2644,7 +2652,9 @@ app.get("/api/admin/cattle-marketplace", async (req, res) => {
     }).sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
 
     console.log(`Fetched and enriched ${listings.length} listings from /cattle-marketplace`);
-    res.json({ success: true, count: listings.length, cattle: listings });
+    const payload = { success: true, count: listings.length, cattle: listings };
+    setCache("admin_cattle_marketplace", payload);
+    res.json(payload);
   } catch (error) {
     console.error("Error in /api/admin/cattle-marketplace:", error);
     res.status(500).json({ error: error.message, cattle: [] });
@@ -2654,6 +2664,9 @@ app.get("/api/admin/cattle-marketplace", async (req, res) => {
 // REST API to list all Registered Farms from /users/{uid}/roles/farmer/farms & all collections
 app.get("/api/admin/farms", async (req, res) => {
   try {
+    const cached = getCached("admin_farms", 600000);
+    if (cached) return res.json(cached);
+
     const db = getFirestore();
     const [groupFarmsSnap, usersSnap, cattleDetailsSnap, cattleMarketplaceSnap] = await Promise.all([
       db.collectionGroup("farms").get().catch(() => ({ docs: [] })),
@@ -2770,7 +2783,9 @@ app.get("/api/admin/farms", async (req, res) => {
     );
 
     console.log(`[Backend /api/admin/farms] Fetched and enriched ${sortedFarms.length} registered farms via collectionGroup`);
-    res.json({ farms: sortedFarms });
+    const payload = { farms: sortedFarms };
+    setCache("admin_farms", payload);
+    res.json(payload);
   } catch (error) {
     console.error("Error in /api/admin/farms:", error);
     res.status(500).json({ error: error.message, farms: [] });
@@ -2813,6 +2828,9 @@ app.get("/api/admin/collection-group/:collectionId", async (req, res) => {
 // REST API to list all Payments, Transactions & Commissions aggregated across orders
 app.get("/api/admin/payments", async (req, res) => {
   try {
+    const cached = getCached("admin_payments", 600000);
+    if (cached) return res.json(cached);
+
     const db = getFirestore();
     const defaultBucketName = process.env.VITE_FIREBASE_STORAGE_BUCKET || "auth-b404a.appspot.com";
     const bucket = getStorage().bucket(defaultBucketName);
@@ -3038,7 +3056,7 @@ app.get("/api/admin/payments", async (req, res) => {
     transactions.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
 
     console.log(`Fetched and enriched ${transactions.length} total payment transactions`);
-    res.json({
+    const payload = {
       payments: transactions,
       summary: {
         totalTransactions: transactions.length,
@@ -3047,7 +3065,9 @@ app.get("/api/admin/payments", async (req, res) => {
         pendingCount: transactions.filter((t) => t.status === "Pending").length,
         failedCount: transactions.filter((t) => t.status === "Failed").length,
       },
-    });
+    };
+    setCache("admin_payments", payload);
+    res.json(payload);
   } catch (error) {
     console.error("Error in /api/admin/payments:", error);
     res.status(500).json({ error: error.message, payments: [], summary: {} });
@@ -3057,6 +3077,9 @@ app.get("/api/admin/payments", async (req, res) => {
 // REST API to get and update Token Advance rates
 app.get("/api/admin/token-advance", async (req, res) => {
   try {
+    const cached = getCached("admin_token_advance", 600000);
+    if (cached) return res.json(cached);
+
     const db = getFirestore();
     const snap = await db.collection("token-advance").get();
     const docs = [];
@@ -3070,7 +3093,9 @@ app.get("/api/admin/token-advance", async (req, res) => {
       }
     });
 
-    res.json({ rates, items: docs });
+    const payload = { rates, items: docs };
+    setCache("admin_token_advance", payload);
+    res.json(payload);
   } catch (error) {
     console.error("Error in /api/admin/token-advance GET:", error);
     res.status(500).json({ error: error.message, rates: { cow: 200, buffalo: 250, goat: 100, sheep: 50 }, items: [] });
@@ -3093,6 +3118,7 @@ app.post("/api/admin/token-advance", async (req, res) => {
     };
 
     await db.collection("token-advance").doc(docId).set(updateData, { merge: true });
+    clearCache("admin_token_advance");
     console.log(`Updated token advance rates in doc ${docId}:`, updateData);
     res.json({ success: true, rates: updateData });
   } catch (error) {
@@ -3104,6 +3130,9 @@ app.post("/api/admin/token-advance", async (req, res) => {
 // REST API for Coupons
 app.get("/api/admin/coupons", async (req, res) => {
   try {
+    const cached = getCached("admin_coupons", 600000);
+    if (cached) return res.json(cached);
+
     const db = getFirestore();
     const snap = await db.collection("product_marketplace").doc("main").collection("coupons_code").get();
     const coupons = [];
@@ -3131,7 +3160,9 @@ app.get("/api/admin/coupons", async (req, res) => {
       });
     });
 
-    res.json({ coupons });
+    const payload = { coupons };
+    setCache("admin_coupons", payload);
+    res.json(payload);
   } catch (error) {
     console.error("Error in /api/admin/coupons GET:", error);
     res.status(500).json({ error: error.message, coupons: [] });
@@ -3186,6 +3217,7 @@ app.post("/api/admin/coupons", async (req, res) => {
     }
 
     await db.collection("product_marketplace").doc("main").collection("coupons_code").doc(docId).set(couponData, { merge: true });
+    clearCache("admin_coupons");
     console.log(`Created/Updated coupon: ${docId}`);
     res.json({ success: true, id: docId, coupon: couponData });
   } catch (error) {
@@ -3205,6 +3237,7 @@ app.put("/api/admin/coupons/:id", async (req, res) => {
     }
 
     await db.collection("product_marketplace").doc("main").collection("coupons_code").doc(id).set(updateData, { merge: true });
+    clearCache("admin_coupons");
     console.log(`Updated coupon: ${id}`);
     res.json({ success: true, id, updated: updateData });
   } catch (error) {
@@ -3218,6 +3251,7 @@ app.delete("/api/admin/coupons/:id", async (req, res) => {
     const db = getFirestore();
     const { id } = req.params;
     await db.collection("product_marketplace").doc("main").collection("coupons_code").doc(id).delete();
+    clearCache("admin_coupons");
     console.log(`Deleted coupon: ${id}`);
     res.json({ success: true, id });
   } catch (error) {
@@ -3229,6 +3263,9 @@ app.delete("/api/admin/coupons/:id", async (req, res) => {
 // REST API for Best Sellers & Product Marketplace
 app.get("/api/admin/best-sellers", async (req, res) => {
   try {
+    const cached = getCached("admin_best_sellers", 600000);
+    if (cached) return res.json(cached);
+
     const db = getFirestore();
     const [pSnap, bsSnap] = await Promise.all([
       db.collection("product_marketplace").doc("main").collection("products").get().catch(() => ({ docs: [] })),
@@ -3247,7 +3284,9 @@ app.get("/api/admin/best-sellers", async (req, res) => {
       }
     });
 
-    res.json({ bestSellers: products, totalCount: products.length });
+    const payload = { bestSellers: products, totalCount: products.length };
+    setCache("admin_best_sellers", payload);
+    res.json(payload);
   } catch (error) {
     console.error("Error in /api/admin/best-sellers GET:", error);
     res.status(500).json({ error: error.message, bestSellers: [] });
@@ -3305,13 +3344,18 @@ app.post("/api/admin/best-sellers/toggle", async (req, res) => {
 // REST API for Products CRUD
 app.get("/api/admin/products", async (req, res) => {
   try {
+    const cached = getCached("admin_products", 600000);
+    if (cached) return res.json(cached);
+
     const db = getFirestore();
     const snap = await db.collection("product_marketplace").doc("main").collection("products").get();
     const products = [];
     snap.forEach((doc) => {
       products.push({ id: doc.id, ...doc.data() });
     });
-    res.json({ products, total: products.length });
+    const payload = { products, total: products.length };
+    setCache("admin_products", payload);
+    res.json(payload);
   } catch (error) {
     console.error("Error in /api/admin/products GET:", error);
     res.status(500).json({ error: error.message, products: [] });
@@ -3480,6 +3524,10 @@ app.get("/api/admin/collection/*path", async (req, res) => {
 app.get("/api/admin/banners", async (req, res) => {
   try {
     const { type } = req.query; // 'offer_banners' | 'ads_banners' | undefined
+    const cacheKey = `admin_banners_${type || "all"}`;
+    const cached = getCached(cacheKey, 600000);
+    if (cached) return res.json(cached);
+
     const db = getFirestore();
 
     const fetchCollection = async (bannerType) => {
@@ -3506,13 +3554,17 @@ app.get("/api/admin/banners", async (req, res) => {
     if (type === "offer_banners") {
       const offers = await fetchCollection("offer_banners");
       offers.sort((a, b) => (a.priority || 999) - (b.priority || 999));
-      return res.json({ banners: offers, count: offers.length, type: "offer_banners" });
+      const payload = { banners: offers, count: offers.length, type: "offer_banners" };
+      setCache(cacheKey, payload);
+      return res.json(payload);
     }
 
     if (type === "ads_banners") {
       const ads = await fetchCollection("ads_banners");
       ads.sort((a, b) => (a.priority || 999) - (b.priority || 999));
-      return res.json({ banners: ads, count: ads.length, type: "ads_banners" });
+      const payload = { banners: ads, count: ads.length, type: "ads_banners" };
+      setCache(cacheKey, payload);
+      return res.json(payload);
     }
 
     const [offers, ads] = await Promise.all([
@@ -3521,12 +3573,14 @@ app.get("/api/admin/banners", async (req, res) => {
     ]);
 
     const combined = [...offers, ...ads].sort((a, b) => (a.priority || 999) - (b.priority || 999));
-    res.json({
+    const payload = {
       banners: combined,
       offerBanners: offers,
       adsBanners: ads,
       count: combined.length,
-    });
+    };
+    setCache(cacheKey, payload);
+    res.json(payload);
   } catch (err) {
     console.error("Error in GET /api/admin/banners:", err);
     res.status(500).json({ error: err.message, banners: [] });

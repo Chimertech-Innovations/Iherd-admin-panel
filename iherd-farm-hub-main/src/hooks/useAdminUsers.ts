@@ -163,9 +163,11 @@ export function useAdminUsers() {
       }),
     placeholderData: (previousData) =>
       previousData && previousData.length > 0 ? previousData : getLocalCachedUsers(),
-    staleTime: 120_000,
-    gcTime: 600_000,
+    staleTime: 600_000,
+    gcTime: 1800_000,
     refetchOnWindowFocus: false,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
   });
 
   return {

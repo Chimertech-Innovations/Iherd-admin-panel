@@ -47,9 +47,10 @@ export function useFirebaseCollectionGroup<T>(collectionId: string) {
       return [] as T[];
     },
     placeholderData: (previousData) => previousData || [],
-    staleTime: 90_000,
-    gcTime: 600_000,
+    staleTime: 600_000,
+    gcTime: 1800_000,
     refetchOnWindowFocus: false,
+    refetchOnMount: false,
   });
 }
 
@@ -82,9 +83,10 @@ export function useFirebaseCollection<T>(collectionPath: string) {
       }
     },
     placeholderData: (previousData) => previousData || [],
-    staleTime: 90_000,
-    gcTime: 600_000,
+    staleTime: 600_000,
+    gcTime: 1800_000,
     refetchOnWindowFocus: false,
+    refetchOnMount: false,
   });
 }
 
@@ -114,6 +116,10 @@ export function useFirebaseDoc<T>(collectionPath: string, docId: string) {
     },
     enabled: !!docId,
     initialData: null,
+    staleTime: 600_000,
+    gcTime: 1800_000,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
   });
 }
 
@@ -164,7 +170,10 @@ export function useTokenAdvance() {
         return { rates: { cow: 200, buffalo: 250, goat: 100, sheep: 50 }, items: [] };
       }
     },
-    staleTime: 10_000,
+    staleTime: 600_000,
+    gcTime: 1800_000,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
   });
 
   const updateRates = useMutation({
@@ -267,7 +276,10 @@ export function useCoupons() {
       }
     },
     placeholderData: [],
-    staleTime: 10_000,
+    staleTime: 600_000,
+    gcTime: 1800_000,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
   });
 
   const saveCoupon = useMutation({
@@ -379,7 +391,10 @@ export function useBestSellers() {
       }
     },
     placeholderData: [],
-    staleTime: 10_000,
+    staleTime: 600_000,
+    gcTime: 1800_000,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
   });
 
   const toggleBestSeller = useMutation({
@@ -441,7 +456,10 @@ export function useAdminProducts() {
         return [];
       }
     },
-    staleTime: 15_000,
+    staleTime: 600_000,
+    gcTime: 1800_000,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
   });
 
   const saveProduct = useMutation({
@@ -557,7 +575,10 @@ export function useAdminBanners() {
         return [];
       }
     },
-    staleTime: 10_000,
+    staleTime: 600_000,
+    gcTime: 1800_000,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
   });
 
   const saveBanner = useMutation({
