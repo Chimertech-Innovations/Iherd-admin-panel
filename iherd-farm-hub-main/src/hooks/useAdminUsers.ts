@@ -1,14 +1,24 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
+import { getApiBaseUrlSync, isLocalHostname } from "@/lib/apiClient";
 
 const LOCAL_STORAGE_KEY = "iherd_cached_admin_users";
 
-const ENDPOINTS = [
-  (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, ""),
-  "http://localhost:5000",
-  "http://127.0.0.1:5000",
-  "https://iherdadminpanel.onrender.com",
-].filter(Boolean) as string[];
+function getEndpoints(): string[] {
+  const primary = getApiBaseUrlSync();
+  const endpoints = [primary];
+
+  if (isLocalHostname()) {
+    if (!endpoints.includes("http://localhost:5000")) endpoints.push("http://localhost:5000");
+    if (!endpoints.includes("http://127.0.0.1:5000")) endpoints.push("http://127.0.0.1:5000");
+  }
+
+  if (!endpoints.includes("https://iherdadminpanel.onrender.com")) {
+    endpoints.push("https://iherdadminpanel.onrender.com");
+  }
+
+  return endpoints.filter(Boolean);
+}
 
 const KEEP_ALIVE_INTERVAL_MS = 10 * 60 * 1000;
 
@@ -37,7 +47,7 @@ function saveTopCachedUsers(users: any[]) {
 }
 
 async function pingBackend() {
-  for (const base of ENDPOINTS) {
+  for (const base of getEndpoints()) {
     try {
       await fetch(`${base}/ping`, { method: "GET" });
       break;
@@ -53,7 +63,8 @@ async function pingBackend() {
 async function fetchProgressiveUsers(
   onProgress?: (currentUsers: any[], totalServerCount: number, isComplete: boolean) => void
 ): Promise<any[]> {
-  for (const base of ENDPOINTS) {
+  for (const base of getEndpoints()) {
+
     try {
       // Step 1: Fetch first 1,000 users
       const initialController = new AbortController();

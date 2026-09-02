@@ -10,11 +10,14 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogClose } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { exportToCsv } from "@/lib/csvExport";
+import { getApiBaseUrlSync } from "@/lib/apiClient";
 
 export const Route = createFileRoute("/invoices")({
   head: () => ({ meta: [{ title: "Invoices — iHerd Admin" }] }),
   component: InvoicesPage,
 });
+
+
 
 interface InvoiceItem {
   name: string;
@@ -101,7 +104,27 @@ function InvoicesPage() {
       
       setInvoices(allItems.sort((a, b) => new Date(b.updated).getTime() - new Date(a.updated).getTime()));
     } catch (error: any) {
-      console.error("Error listing storage invoices:", error);
+      console.warn("Client Firebase Storage permission restricted, trying Admin Backend API fallback:", error);
+      try {
+        const apiBase = getApiBaseUrlSync();
+        const res = await fetch(`${apiBase}/api/admin/storage`);
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.invoices)) {
+            const formatted: InvoiceItem[] = data.invoices.map((inv: any) => ({
+              name: inv.name.split("/").pop() || inv.name,
+              url: inv.url,
+              size: formatBytes(inv.size),
+              updated: inv.updated || new Date().toISOString(),
+              path: inv.name,
+            }));
+            setInvoices(formatted.sort((a, b) => new Date(b.updated).getTime() - new Date(a.updated).getTime()));
+            return;
+          }
+        }
+      } catch (backendErr) {
+        console.error("Backend storage invoices fetch error:", backendErr);
+      }
       toast.error("Failed to retrieve storage invoices.");
       setInvoices([]);
     } finally {

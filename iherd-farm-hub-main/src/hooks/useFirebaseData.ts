@@ -1,10 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { collection, collectionGroup, getDocs, doc, getDoc, setDoc, updateDoc, deleteDoc, deleteField } from "firebase/firestore";
 import { db } from "../lib/firebase";
+import { getApiBaseUrlSync } from "../lib/apiClient";
 
-export const API_BASE =
-  (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ||
-  "http://localhost:5000";
+export const API_BASE = getApiBaseUrlSync();
 
 export function useFirebaseCollectionGroup<T>(collectionId: string) {
   const isMockKey = !import.meta.env.VITE_FIREBASE_API_KEY || 
@@ -32,11 +31,11 @@ export function useFirebaseCollectionGroup<T>(collectionId: string) {
 
       // Backend Admin SDK Fallback (handles security rules and indexes with Admin privileges)
       try {
-        const res = await fetch(`${API_BASE}/api/admin/collection-group/${collectionId}`).catch(() =>
-          fetch(`http://localhost:5000/api/admin/collection-group/${collectionId}`).catch(() =>
-            fetch(`/api/admin/collection-group/${collectionId}`)
-          )
+        const base = getApiBaseUrlSync();
+        const res = await fetch(`${base}/api/admin/collection-group/${collectionId}`).catch(() =>
+          fetch(`/api/admin/collection-group/${collectionId}`)
         );
+
         if (res && res.ok) {
           const json = await res.json();
           if (Array.isArray(json.data) && json.data.length > 0) {

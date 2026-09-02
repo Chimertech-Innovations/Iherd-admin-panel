@@ -18,17 +18,16 @@ import {
 import { Button } from "@/components/ui/button";
 import { exportToCsv } from "@/lib/csvExport";
 
+import { getApiBaseUrl } from "@/lib/apiClient";
+
 export const Route = createFileRoute("/storage")({
   head: () => ({ meta: [{ title: "Storage — iHerd Admin" }] }),
   component: StoragePage,
 });
 
-const API_BASE =
-  (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ||
-  "https://iherdadminpanel.onrender.com";
-
 async function fetchStorage() {
-  const res = await fetch(`${API_BASE}/api/admin/storage`);
+  const apiBase = await getApiBaseUrl();
+  const res = await fetch(`${apiBase}/api/admin/storage`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }

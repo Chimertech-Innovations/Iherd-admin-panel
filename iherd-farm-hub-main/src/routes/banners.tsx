@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useRef } from "react";
 import { createFileRoute } from "@tanstack/react-router";
+import { getApiBaseUrlSync } from "@/lib/apiClient";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -137,9 +138,7 @@ const TARGET_PROFILES = [
   { id: "buyer", label: "Buyer", color: "bg-purple-500/10 text-purple-600 border-purple-500/30" },
 ];
 
-const API_BASE =
-  (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ||
-  "http://localhost:5000";
+const API_BASE = getApiBaseUrlSync();
 
 function BannersPage() {
   const queryClient = useQueryClient();

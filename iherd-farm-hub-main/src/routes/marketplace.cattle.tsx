@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { getApiBaseUrlSync } from "@/lib/apiClient";
 import { DataPage } from "@/components/admin/DataPage";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/admin/StatusBadge";
@@ -180,9 +181,7 @@ function CattleMarketplacePage() {
   // Client Firebase `/cattle-marketplace` collection (live real-time sync)
   const { data: cmList = [], isLoading: cmLoading, refetch: refetchFirebase } = useFirebaseCollection<any>("cattle-marketplace");
 
-  const API_BASE =
-    (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ||
-    "http://localhost:5000";
+  const API_BASE = getApiBaseUrlSync();
 
   // Fetch enriched backend data from /api/admin/cattle-marketplace
   const fetchBackendListings = async () => {

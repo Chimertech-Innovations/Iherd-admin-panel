@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { getApiBaseUrlSync, isLocalHostname } from "@/lib/apiClient";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -78,9 +79,7 @@ const YEARS = [
   { value: "2024", label: "2024" },
 ];
 
-const API_BASE =
-  (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ||
-  "http://localhost:5000";
+const API_BASE = getApiBaseUrlSync();
 
 function parseRecordDate(item: any): Date | null {
   if (!item) return null;
@@ -298,7 +297,10 @@ function Reports() {
   // Fetch backend endpoints for maximum data accuracy
   useEffect(() => {
     const fetchBackendData = async () => {
-      const endpoints = [API_BASE, "http://localhost:5000"];
+      const endpoints = [
+        getApiBaseUrlSync(),
+        isLocalHostname() ? "http://localhost:5000" : null,
+      ].filter(Boolean) as string[];
       for (const base of endpoints) {
         try {
           const [fRes, sRes, vRes, oRes, cRes, pRes] = await Promise.allSettled([

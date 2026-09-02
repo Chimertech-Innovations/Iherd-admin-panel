@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { getApiBaseUrlSync, isLocalHostname } from "@/lib/apiClient";
 import { DataPage } from "@/components/admin/DataPage";
 import { StatusBadge } from "@/components/admin/StatusBadge";
 import { Button } from "@/components/ui/button";
@@ -126,19 +127,17 @@ function FarmsPage() {
   const { data: topFarms = [] } = useFirebaseCollection<any>("farms");
   const { data: usersList = [] } = useFirebaseCollection<any>("users");
 
-  const API_BASE =
-    (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ||
-    "http://localhost:5000";
-
   // Fetch backend data with multi-endpoint fallback
   const fetchData = async () => {
     try {
       setBackendLoading(true);
+      const apiBase = getApiBaseUrlSync();
       const endpoints = [
-        `${API_BASE}/api/admin/farms`,
-        "http://localhost:5000/api/admin/farms",
+        `${apiBase}/api/admin/farms`,
+        isLocalHostname() ? "http://localhost:5000/api/admin/farms" : null,
         "/api/admin/farms",
-      ];
+      ].filter(Boolean) as string[];
+
 
       for (const ep of endpoints) {
         try {

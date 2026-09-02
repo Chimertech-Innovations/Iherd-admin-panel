@@ -1,4 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { getApiBaseUrlSync } from "@/lib/apiClient";
 import { useState, useMemo, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { doc, getDoc, collection, getDocs } from "firebase/firestore";
@@ -69,9 +70,7 @@ export const Route = createFileRoute("/users/$userId")({
   component: UserDetail,
 });
 
-const API_BASE =
-  (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ||
-  "http://localhost:5000";
+const API_BASE = getApiBaseUrlSync();
 
 function isSimilarUid(a?: string, b?: string) {
   if (!a || !b) return false;

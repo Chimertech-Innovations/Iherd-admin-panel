@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { getApiBaseUrlSync } from "@/lib/apiClient";
 import { DataPage } from "@/components/admin/DataPage";
 import { StatusBadge } from "@/components/admin/StatusBadge";
 import { Button } from "@/components/ui/button";
@@ -206,9 +207,7 @@ function CattleDetailsPage() {
   const { data: usersList = [] } = useFirebaseCollection<any>("users");
   const { data: groupFarms = [] } = useFirebaseCollectionGroup<any>("farms");
 
-  const API_BASE =
-    (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ||
-    "http://localhost:5000";
+  const API_BASE = getApiBaseUrlSync();
 
   // Fetch backend cattle data with automatic fallback
   const fetchData = async () => {

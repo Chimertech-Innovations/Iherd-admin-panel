@@ -17,6 +17,8 @@ import {
 import { useAdminUsers } from "../hooks/useAdminUsers";
 import { useFirebaseCollection, useFirebaseCollectionGroup } from "../hooks/useFirebaseData";
 import { getLocalizedText } from "@/lib/utils";
+import { getApiBaseUrlSync, isLocalHostname } from "@/lib/apiClient";
+
 
 export const Route = createFileRoute("/farmers/")({
   head: () => ({ meta: [{ title: "Farmers Directory — iHerd Admin" }] }),
@@ -57,10 +59,11 @@ function FarmersPage() {
   useEffect(() => {
     let isMounted = true;
     const fetchBackendFarms = async () => {
+      const primary = getApiBaseUrlSync();
       const endpoints = [
-        "http://localhost:5000",
-        "http://127.0.0.1:5000",
-        (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, ""),
+        primary,
+        isLocalHostname() ? "http://localhost:5000" : null,
+        isLocalHostname() ? "http://127.0.0.1:5000" : null,
         "https://iherdadminpanel.onrender.com",
       ].filter(Boolean) as string[];
 
