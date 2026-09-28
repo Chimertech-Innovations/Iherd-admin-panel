@@ -319,22 +319,80 @@ function LiveGeoMapPage() {
       }
     });
 
-    // --- B. Process Farmers & Users with Farmer Profile ---
-    [...backendFarmers, ...directFarmers, ...firestoreUsers.filter((u: any) => u.farmer || u.roles?.includes?.("farmer") || u.role === "farmer" || u.isFarmer), ...backendUsers.filter((u: any) => u.farmer || u.roles?.includes?.("farmer") || u.role === "farmer" || u.isFarmer), ...authUsers.filter((u: any) => u.farmer || u.roles?.includes?.("farmer") || u.role === "farmer" || u.isFarmer)].forEach((f: any) => {
-      const id = f.id || f.uid || `farmer_${Math.random()}`;
+    // --- B. Process Farmers (Full 3-Way Merge matching Farmers Page & Dashboard) ---
+    const farmerEntityMap = new Map<string, any>();
+
+    // 1. Backend & Direct Farmers
+    [...backendFarmers, ...directFarmers].forEach((df: any) => {
+      const id = df.id || df.uid;
+      if (!id) return;
+      farmerEntityMap.set(String(id), df);
+    });
+
+    // 2. Auth Users merged with Firestore & Backend profiles
+    authUsers.forEach((authUser: any) => {
+      const uid = authUser.uid;
+      if (!uid) return;
+      const fsUser = firestoreUsers.find((fu: any) => fu.id === uid || fu.uid === uid) || backendUsers.find((bu: any) => bu.id === uid || bu.uid === uid);
+      const directFarmer = directFarmers.find((df: any) => df.id === uid || df.uid === uid) || backendFarmers.find((bf: any) => bf.id === uid || bf.uid === uid);
+
+      const fsRoles = fsUser?.roles || (fsUser?.role ? [fsUser.role] : authUser?.roles || []);
+      const roles: string[] = Array.isArray(fsRoles) ? fsRoles : [String(fsRoles)];
+      const hasFarmerRole = roles.some((r: any) => typeof r === "string" && r.toLowerCase().includes("farmer"));
+      const hasDirectFarmerDoc = Boolean(directFarmer);
+      const hasFarmerProfile = Boolean(
+        (fsUser?.farmer && typeof fsUser.farmer === "object") ||
+        (authUser?.farmer && typeof authUser.farmer === "object") ||
+        fsUser?.isFarmer === true ||
+        authUser?.isFarmer === true
+      );
+
+      if (hasFarmerRole || hasDirectFarmerDoc || hasFarmerProfile) {
+        farmerEntityMap.set(String(uid), {
+          ...authUser,
+          ...(fsUser || {}),
+          ...(directFarmer || {}),
+          farmer: fsUser?.farmer || authUser?.farmer || directFarmer?.farmer || fsUser || authUser,
+          id: uid,
+          uid,
+        });
+      }
+    });
+
+    // 3. Standalone Firestore & Backend Users
+    [...firestoreUsers, ...backendUsers].forEach((fsUser: any) => {
+      const uid = fsUser.id || fsUser.uid;
+      if (!uid || farmerEntityMap.has(String(uid))) return;
+      const fsRoles = fsUser.roles || (fsUser.role ? [fsUser.role] : []);
+      const roles: string[] = Array.isArray(fsRoles) ? fsRoles : [String(fsRoles)];
+      const hasFarmerRole = roles.some((r: any) => typeof r === "string" && r.toLowerCase().includes("farmer"));
+      const hasFarmerProfile = Boolean(
+        (fsUser.farmer && typeof fsUser.farmer === "object") ||
+        fsUser.isFarmer === true
+      );
+      if (hasFarmerRole || hasFarmerProfile) {
+        farmerEntityMap.set(String(uid), {
+          ...fsUser,
+          farmer: fsUser.farmer || fsUser,
+          id: uid,
+          uid,
+        });
+      }
+    });
+
+    farmerEntityMap.forEach((f: any, id: string) => {
       const fObj = f.farmer || f;
       const name = getLocalizedText(fObj.name || f.name || f.displayName || fObj.farmerName, "Dairy Farmer");
       const phone = getLocalizedText(fObj.farmerPhoneNumber || fObj.phone || f.phoneNumber || f.phone, "");
       const locationText = cleanLocationString([fObj.village, fObj.taluk, fObj.district, fObj.city, fObj.state]);
-      const coords = resolveCoordinates(fObj, `farmer_${id}_${name}_${fObj.state || ""}`);
-      const userId = f.uid || f.id || fObj.uid || fObj.id || "";
+      const coords = resolveCoordinates(fObj, `farmer_${id}_${name}_${fObj.state || ""}_${fObj.district || ""}`);
 
       if (coords) {
         addEntity({
           id: String(id),
           type: "farmer",
           title: name,
-          subtitle: `Farmer • ${phone || "Verified"}`,
+          subtitle: `Farmer • ${phone || "Registered"}`,
           phone: phone || undefined,
           email: f.email || fObj.email || undefined,
           locationName: locationText || getLocalizedText(fObj.state, "India"),
@@ -347,32 +405,93 @@ function LiveGeoMapPage() {
           isExactCoordinate: coords.isExact,
           badge: "Farmer",
           status: f.status || "Active",
-          userId: userId || undefined,
-          userLinkUrl: userId ? `/users/${userId}?tab=farmer` : undefined,
+          userId: id,
+          userLinkUrl: `/users/${id}?tab=farmer`,
           details: f,
           linkUrl: `/farmers`,
         });
       }
     });
 
-    // --- C. Process Veterinarians ---
-    [...backendVets, ...directVets, ...firestoreUsers.filter((u: any) => u.vet || u.veterinarian || u.roles?.includes?.("veterinarian") || u.role === "veterinarian" || u.isVet), ...backendUsers.filter((u: any) => u.vet || u.veterinarian || u.roles?.includes?.("veterinarian") || u.role === "veterinarian" || u.isVet), ...authUsers.filter((u: any) => u.vet || u.veterinarian || u.roles?.includes?.("veterinarian") || u.role === "veterinarian" || u.isVet)].forEach((v: any) => {
-      const id = v.id || v.uid || `vet_${Math.random()}`;
-      const vObj = v.vet || v.veterinarian || v;
+    // --- C. Process Veterinarians (Full 3-Way Merge matching 24 Vets in Vets Page & Dashboard) ---
+    const vetEntityMap = new Map<string, any>();
+
+    // 1. Backend & Direct Vets
+    [...backendVets, ...directVets].forEach((dv: any) => {
+      const id = dv.id || dv.uid;
+      if (!id) return;
+      vetEntityMap.set(String(id), dv);
+    });
+
+    // 2. Auth Users merged with Firestore & Backend profiles
+    authUsers.forEach((authUser: any) => {
+      const uid = authUser.uid;
+      if (!uid) return;
+      const fsUser = firestoreUsers.find((fu: any) => fu.id === uid || fu.uid === uid) || backendUsers.find((bu: any) => bu.id === uid || bu.uid === uid);
+      const directVet = directVets.find((dv: any) => dv.id === uid || dv.uid === uid) || backendVets.find((bv: any) => bv.id === uid || bv.uid === uid);
+
+      const fsRoles = fsUser?.roles || (fsUser?.role ? [fsUser.role] : authUser?.roles || []);
+      const roles: string[] = Array.isArray(fsRoles) ? fsRoles : [String(fsRoles)];
+      const hasVetRole = roles.some((r: any) => typeof r === "string" && (r.toLowerCase().includes("vet") || r.toLowerCase().includes("veterinarian") || r.toLowerCase().includes("doctor")));
+      const hasDirectVetDoc = Boolean(directVet);
+      const hasVetProfile = Boolean(
+        (fsUser?.veterinarian && typeof fsUser.veterinarian === "object") ||
+        (fsUser?.vet && typeof fsUser.vet === "object") ||
+        (authUser?.veterinarian && typeof authUser.veterinarian === "object") ||
+        (authUser?.vet && typeof authUser.vet === "object") ||
+        fsUser?.isVet === true ||
+        authUser?.isVet === true
+      );
+
+      if (hasVetRole || hasDirectVetDoc || hasVetProfile) {
+        vetEntityMap.set(String(uid), {
+          ...authUser,
+          ...(fsUser || {}),
+          ...(directVet || {}),
+          veterinarian: fsUser?.veterinarian || fsUser?.vet || authUser?.veterinarian || authUser?.vet || directVet || fsUser,
+          id: uid,
+          uid,
+        });
+      }
+    });
+
+    // 3. Standalone Firestore & Backend Users
+    [...firestoreUsers, ...backendUsers].forEach((fsUser: any) => {
+      const uid = fsUser.id || fsUser.uid;
+      if (!uid || vetEntityMap.has(String(uid))) return;
+      const fsRoles = fsUser.roles || (fsUser.role ? [fsUser.role] : []);
+      const roles: string[] = Array.isArray(fsRoles) ? fsRoles : [String(fsRoles)];
+      const hasVetRole = roles.some((r: any) => typeof r === "string" && (r.toLowerCase().includes("vet") || r.toLowerCase().includes("veterinarian") || r.toLowerCase().includes("doctor")));
+      const hasVetProfile = Boolean(
+        (fsUser.veterinarian && typeof fsUser.veterinarian === "object") ||
+        (fsUser.vet && typeof fsUser.vet === "object") ||
+        fsUser.isVet === true
+      );
+      if (hasVetRole || hasVetProfile) {
+        vetEntityMap.set(String(uid), {
+          ...fsUser,
+          veterinarian: fsUser.veterinarian || fsUser.vet || fsUser,
+          id: uid,
+          uid,
+        });
+      }
+    });
+
+    vetEntityMap.forEach((v: any, id: string) => {
+      const vObj = v.veterinarian || v.vet || v;
       const rawName = getLocalizedText(vObj.doctorName || vObj.name || v.name || v.displayName, "Licensed Veterinarian");
       const cleanName = rawName.trim().startsWith("Dr.") ? rawName.trim() : `Dr. ${rawName.trim()}`;
       const clinic = getLocalizedText(vObj.clinic || vObj.hospital || vObj.clinicName || vObj.addInstitution, "Veterinary Clinic");
       const phone = getLocalizedText(vObj.vetPhoneNumber || vObj.phone || v.phoneNumber || v.phone, "");
       const locationText = cleanLocationString([vObj.village, vObj.city, vObj.district, vObj.state]);
       const coords = resolveCoordinates(vObj, `vet_${id}_${cleanName}_${vObj.state || ""}_${vObj.city || ""}`);
-      const userId = v.uid || v.id || vObj.uid || vObj.id || "";
 
       if (coords) {
         addEntity({
           id: String(id),
           type: "vet",
           title: cleanName,
-          subtitle: `${clinic} • ${vObj.yearsOfExperience ? `${vObj.yearsOfExperience} Yrs Exp` : vObj.qualification || "Licensed"}`,
+          subtitle: `${clinic} • ${vObj.yearsOfExperience ? `${vObj.yearsOfExperience} Yrs Exp` : vObj.qualification || "Licensed Doctor"}`,
           phone: phone || undefined,
           email: v.email || vObj.email || undefined,
           locationName: locationText || getLocalizedText(vObj.state, "India"),
@@ -386,17 +505,76 @@ function LiveGeoMapPage() {
           badge: "Veterinarian",
           status: v.status || "Active",
           rating: Number(vObj.rating || 4.9),
-          userId: userId || undefined,
-          userLinkUrl: userId ? `/users/${userId}?tab=veterinarian` : undefined,
+          userId: id,
+          userLinkUrl: `/users/${id}?tab=veterinarian`,
           details: v,
           linkUrl: `/vets`,
         });
       }
     });
 
-    // --- D. Process Sellers ---
-    [...backendSellers, ...directSellers, ...firestoreUsers.filter((u: any) => u.seller || u.roles?.includes?.("seller") || u.role === "seller" || u.isSeller), ...backendUsers.filter((u: any) => u.seller || u.roles?.includes?.("seller") || u.role === "seller" || u.isSeller), ...authUsers.filter((u: any) => u.seller || u.roles?.includes?.("seller") || u.role === "seller" || u.isSeller)].forEach((s: any) => {
-      const id = s.id || s.uid || `seller_${Math.random()}`;
+    // --- D. Process Sellers (Full 3-Way Merge matching 111 Sellers in Sellers Page & Dashboard) ---
+    const sellerEntityMap = new Map<string, any>();
+
+    // 1. Backend & Direct Sellers
+    [...backendSellers, ...directSellers].forEach((ds: any) => {
+      const id = ds.id || ds.uid;
+      if (!id) return;
+      sellerEntityMap.set(String(id), ds);
+    });
+
+    // 2. Auth Users merged with Firestore & Backend profiles
+    authUsers.forEach((authUser: any) => {
+      const uid = authUser.uid;
+      if (!uid) return;
+      const fsUser = firestoreUsers.find((fu: any) => fu.id === uid || fu.uid === uid) || backendUsers.find((bu: any) => bu.id === uid || bu.uid === uid);
+      const directSeller = directSellers.find((ds: any) => ds.id === uid || ds.uid === uid) || backendSellers.find((bs: any) => bs.id === uid || bs.uid === uid);
+
+      const fsRoles = fsUser?.roles || (fsUser?.role ? [fsUser.role] : authUser?.roles || []);
+      const roles: string[] = Array.isArray(fsRoles) ? fsRoles : [String(fsRoles)];
+      const hasSellerRole = roles.some((r: any) => typeof r === "string" && r.toLowerCase().includes("seller"));
+      const hasDirectSellerDoc = Boolean(directSeller);
+      const hasSellerProfile = Boolean(
+        (fsUser?.seller && typeof fsUser.seller === "object" && (fsUser.seller.name || fsUser.seller.shopName || fsUser.seller.storeName || fsUser.seller.phone || fsUser.seller.category)) ||
+        (authUser?.seller && typeof authUser.seller === "object" && (authUser.seller.name || authUser.seller.shopName || authUser.seller.storeName || authUser.seller.category)) ||
+        fsUser?.isSeller === true ||
+        authUser?.isSeller === true
+      );
+
+      if (hasSellerRole || hasDirectSellerDoc || hasSellerProfile) {
+        sellerEntityMap.set(String(uid), {
+          ...authUser,
+          ...(fsUser || {}),
+          ...(directSeller || {}),
+          seller: fsUser?.seller || authUser?.seller || directSeller?.seller || directSeller || fsUser || authUser,
+          id: uid,
+          uid,
+        });
+      }
+    });
+
+    // 3. Standalone Firestore & Backend Users
+    [...firestoreUsers, ...backendUsers].forEach((fsUser: any) => {
+      const uid = fsUser.id || fsUser.uid;
+      if (!uid || sellerEntityMap.has(String(uid))) return;
+      const fsRoles = fsUser.roles || (fsUser.role ? [fsUser.role] : []);
+      const roles: string[] = Array.isArray(fsRoles) ? fsRoles : [String(fsRoles)];
+      const hasSellerRole = roles.some((r: any) => typeof r === "string" && r.toLowerCase().includes("seller"));
+      const hasSellerProfile = Boolean(
+        (fsUser.seller && typeof fsUser.seller === "object" && (fsUser.seller.name || fsUser.seller.shopName || fsUser.seller.storeName || fsUser.seller.phone || fsUser.seller.category)) ||
+        fsUser.isSeller === true
+      );
+      if (hasSellerRole || hasSellerProfile) {
+        sellerEntityMap.set(String(uid), {
+          ...fsUser,
+          seller: fsUser.seller || fsUser,
+          id: uid,
+          uid,
+        });
+      }
+    });
+
+    sellerEntityMap.forEach((s: any, id: string) => {
       const sObj = s.seller || s;
       const shopName = getLocalizedText(sObj.shopName || sObj.storeName || sObj.name || s.name || s.displayName, "Agri Supplies Store");
       const owner = getLocalizedText(sObj.name || sObj.ownerName || s.name, "Seller");
@@ -404,7 +582,6 @@ function LiveGeoMapPage() {
       const category = getLocalizedText(sObj.category || sObj.address, "Feed & Farm Equipment");
       const locationText = cleanLocationString([sObj.village, sObj.taluk, sObj.district, sObj.city, sObj.state]);
       const coords = resolveCoordinates(sObj, `seller_${id}_${shopName}_${sObj.state || ""}_${sObj.district || ""}_${sObj.taluk || ""}`);
-      const userId = s.uid || s.id || sObj.uid || sObj.id || "";
 
       if (coords) {
         addEntity({
@@ -425,8 +602,8 @@ function LiveGeoMapPage() {
           badge: "Seller",
           status: s.status || "Active",
           rating: Number(sObj.rating || 4.8),
-          userId: userId || undefined,
-          userLinkUrl: userId ? `/users/${userId}?tab=seller` : undefined,
+          userId: id,
+          userLinkUrl: `/users/${id}?tab=seller`,
           details: s,
           linkUrl: `/sellers`,
         });
