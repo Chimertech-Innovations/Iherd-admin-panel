@@ -251,8 +251,13 @@ export function LeafletMap({
           ? "🏪 Seller / Store"
           : "🐄 Cattle / Livestock";
 
+      const userBtnId = `btn-popup-user-${entity.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+      const inspectBtnId = `btn-popup-inspect-${entity.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+      const hasUserProfile = Boolean(entity.userId || entity.ownerUid || entity.linkUrl?.startsWith("/users"));
+      const userTargetId = entity.userId || entity.ownerUid || (entity.type === "farmer" ? entity.id : undefined);
+
       const popupContent = `
-        <div class="p-3.5 max-w-[280px] font-sans text-slate-900 dark:text-slate-100">
+        <div class="p-3.5 max-w-[290px] font-sans text-slate-900 dark:text-slate-100">
           <div class="flex items-center justify-between gap-2 mb-2">
             <span class="text-[10px] font-bold tracking-wide uppercase px-2 py-0.5 rounded-full ${badgeClass}">
               ${typeLabel}
@@ -263,7 +268,7 @@ export function LeafletMap({
                 : '<span class="text-[9px] font-semibold text-slate-500 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">Regional</span>'
             }
           </div>
-          <h4 class="font-bold text-sm leading-snug mb-1 line-clamp-1">${entity.title}</h4>
+          <h4 class="font-bold text-sm leading-snug mb-0.5 line-clamp-1">${entity.title}</h4>
           <p class="text-xs text-slate-500 dark:text-slate-400 mb-2 line-clamp-1">${entity.subtitle}</p>
           
           <div class="space-y-1 py-1.5 border-t border-b border-slate-100 dark:border-slate-800 text-xs my-2">
@@ -279,22 +284,40 @@ export function LeafletMap({
                   </div>`
                 : ""
             }
+            ${
+              entity.ownerName
+                ? `<div class="flex items-center gap-1.5 text-slate-600 dark:text-slate-300 text-[11px]">
+                    <svg class="w-3.5 h-3.5 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+                    <span class="truncate">Owner: <strong>${entity.ownerName}</strong></span>
+                  </div>`
+                : ""
+            }
             <div class="flex items-center justify-between text-[11px] text-slate-500 pt-0.5">
-              <span>Lat, Lng:</span>
+              <span>Coordinates:</span>
               <span class="font-mono font-medium">${entity.latitude.toFixed(4)}, ${entity.longitude.toFixed(4)}</span>
             </div>
           </div>
 
-          <button id="btn-popup-inspect-${entity.id.replace(/[^a-zA-Z0-9_-]/g, "_")}" class="w-full mt-1.5 py-1.5 px-3 rounded-lg bg-primary text-primary-foreground font-semibold text-xs hover:opacity-90 transition flex items-center justify-center gap-1.5 shadow-sm">
-            <span>View Full Details</span>
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-          </button>
+          <div class="flex flex-col gap-1.5 mt-2">
+            <button id="${inspectBtnId}" class="w-full py-1.5 px-3 rounded-xl bg-primary text-primary-foreground font-semibold text-xs hover:opacity-90 transition flex items-center justify-center gap-1.5 shadow-sm">
+              <span>View Full Data & Infrastructure</span>
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+            </button>
+            ${
+              hasUserProfile && userTargetId
+                ? `<button id="${userBtnId}" class="w-full py-1.5 px-3 rounded-xl bg-muted hover:bg-muted/80 text-foreground font-medium text-xs border border-border/60 transition flex items-center justify-center gap-1.5">
+                    <svg class="w-3.5 h-3.5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+                    <span>Open User Profile</span>
+                  </button>`
+                : ""
+            }
+          </div>
         </div>
       `;
 
       marker.bindPopup(popupContent, {
         className: "custom-leaflet-popup shadow-xl rounded-2xl overflow-hidden",
-        maxWidth: 300,
+        maxWidth: 310,
       });
 
       marker.on("click", () => {
@@ -302,13 +325,22 @@ export function LeafletMap({
       });
 
       marker.on("popupopen", () => {
-        const btnId = `btn-popup-inspect-${entity.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
-        const btn = document.getElementById(btnId);
-        if (btn) {
-          btn.onclick = (e) => {
+        const inspectBtn = document.getElementById(inspectBtnId);
+        if (inspectBtn) {
+          inspectBtn.onclick = (e) => {
             e.preventDefault();
             e.stopPropagation();
             onOpenDetails(entity);
+          };
+        }
+
+        const userBtn = document.getElementById(userBtnId);
+        if (userBtn && userTargetId) {
+          userBtn.onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const tabParam = entity.type === "farmer" ? "?tab=farmer" : entity.type === "vet" ? "?tab=veterinarian" : entity.type === "seller" ? "?tab=seller" : "";
+            window.location.href = `/users/${userTargetId}${tabParam}`;
           };
         }
       });

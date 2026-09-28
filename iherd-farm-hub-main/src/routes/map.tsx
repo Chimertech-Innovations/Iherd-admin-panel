@@ -9,6 +9,7 @@ import { getLocalizedText } from "@/lib/utils";
 import { exportToCsv } from "@/lib/csvExport";
 import {
   Users,
+  User,
   Store,
   Stethoscope,
   Beef,
@@ -30,6 +31,10 @@ import {
   Compass,
   Layers,
   Sparkles,
+  Copy,
+  ChevronDown,
+  ChevronUp,
+  FileJson,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -191,6 +196,7 @@ function LiveGeoMapPage() {
       const phone = getLocalizedText(f.farmPhoneNumber || f.phone || f.phoneNumber, "");
       const locationText = cleanLocationString([f.village, f.taluk, f.district, f.state]);
       const coords = resolveCoordinates(f, `farm_${id}_${name}_${f.state || ""}`);
+      const ownerUid = f.ownerUid || f.userId || "";
 
       if (coords) {
         addEntity({
@@ -220,7 +226,9 @@ function LiveGeoMapPage() {
           veterinaryName: getLocalizedText(f.veterinaryName, undefined),
           veterinarianPhoneNumber: getLocalizedText(f.veterinarianPhoneNumber, undefined),
           ownerName: owner,
-          ownerUid: f.ownerUid || f.userId,
+          ownerUid: ownerUid || undefined,
+          userId: ownerUid || undefined,
+          userLinkUrl: ownerUid ? `/users/${ownerUid}?tab=farmer` : undefined,
           image: f.imagePath || f.imageUrl,
           details: f,
           linkUrl: `/farms`,
@@ -237,6 +245,7 @@ function LiveGeoMapPage() {
       const phone = getLocalizedText(f.farmPhoneNumber || f.phone || f.phoneNumber, "");
       const locationText = cleanLocationString([f.village, f.taluk, f.district, f.state]);
       const coords = resolveCoordinates(f, `farm_${id}_${name}_${f.state || ""}`);
+      const ownerUid = f.ownerUid || f.userId || "";
 
       if (coords) {
         addEntity({
@@ -265,7 +274,9 @@ function LiveGeoMapPage() {
           veterinaryName: getLocalizedText(f.veterinaryName, undefined),
           veterinarianPhoneNumber: getLocalizedText(f.veterinarianPhoneNumber, undefined),
           ownerName: owner,
-          ownerUid: f.ownerUid || f.userId,
+          ownerUid: ownerUid || undefined,
+          userId: ownerUid || undefined,
+          userLinkUrl: ownerUid ? `/users/${ownerUid}?tab=farmer` : undefined,
           image: f.imagePath || f.imageUrl,
           details: f,
           linkUrl: `/farms`,
@@ -281,6 +292,7 @@ function LiveGeoMapPage() {
       const phone = getLocalizedText(fObj.farmerPhoneNumber || fObj.phone || f.phoneNumber || f.phone, "");
       const locationText = cleanLocationString([fObj.village, fObj.taluk, fObj.district, fObj.city, fObj.state]);
       const coords = resolveCoordinates(fObj, `farmer_${id}_${name}_${fObj.state || ""}`);
+      const userId = f.uid || f.id || fObj.uid || fObj.id || "";
 
       if (coords) {
         addEntity({
@@ -300,6 +312,8 @@ function LiveGeoMapPage() {
           isExactCoordinate: coords.isExact,
           badge: "Farmer",
           status: f.status || "Active",
+          userId: userId || undefined,
+          userLinkUrl: userId ? `/users/${userId}?tab=farmer` : undefined,
           details: f,
           linkUrl: `/farmers`,
         });
@@ -316,6 +330,7 @@ function LiveGeoMapPage() {
       const phone = getLocalizedText(vObj.vetPhoneNumber || vObj.phone || v.phoneNumber || v.phone, "");
       const locationText = cleanLocationString([vObj.village, vObj.city, vObj.district, vObj.state]);
       const coords = resolveCoordinates(vObj, `vet_${id}_${cleanName}_${vObj.state || ""}_${vObj.city || ""}`);
+      const userId = v.uid || v.id || vObj.uid || vObj.id || "";
 
       if (coords) {
         addEntity({
@@ -336,6 +351,8 @@ function LiveGeoMapPage() {
           badge: "Veterinarian",
           status: v.status || "Active",
           rating: Number(vObj.rating || 4.9),
+          userId: userId || undefined,
+          userLinkUrl: userId ? `/users/${userId}?tab=veterinarian` : undefined,
           details: v,
           linkUrl: `/vets`,
         });
@@ -352,6 +369,7 @@ function LiveGeoMapPage() {
       const category = getLocalizedText(sObj.category || sObj.address, "Feed & Farm Equipment");
       const locationText = cleanLocationString([sObj.village, sObj.taluk, sObj.district, sObj.city, sObj.state]);
       const coords = resolveCoordinates(sObj, `seller_${id}_${shopName}_${sObj.state || ""}_${sObj.district || ""}_${sObj.taluk || ""}`);
+      const userId = s.uid || s.id || sObj.uid || sObj.id || "";
 
       if (coords) {
         addEntity({
@@ -372,6 +390,8 @@ function LiveGeoMapPage() {
           badge: "Seller",
           status: s.status || "Active",
           rating: Number(sObj.rating || 4.8),
+          userId: userId || undefined,
+          userLinkUrl: userId ? `/users/${userId}?tab=seller` : undefined,
           details: s,
           linkUrl: `/sellers`,
         });
@@ -388,6 +408,7 @@ function LiveGeoMapPage() {
       const phone = getLocalizedText(c.phone || c.sellerPhone || c.ownerPhone || c.phoneNumber, "");
       const locationText = cleanLocationString([c.village, c.taluk, c.district, c.state, c.city]);
       const coords = resolveCoordinates(c, `cattle_${id}_${breed}_${c.state || ""}_${c.district || ""}`);
+      const userId = c.ownerUid || c.farmerUid || c.sellerUid || c.userId || "";
 
       if (coords) {
         addEntity({
@@ -407,6 +428,10 @@ function LiveGeoMapPage() {
           badge: tagNo ? `Tag #${tagNo}` : "Cattle",
           status: c.status || "Healthy",
           price: typeof c.price === "number" ? c.price : undefined,
+          ownerName: owner,
+          ownerUid: userId || undefined,
+          userId: userId || undefined,
+          userLinkUrl: userId ? `/users/${userId}` : undefined,
           details: c,
           linkUrl: `/cattle`,
         });
@@ -546,6 +571,16 @@ function LiveGeoMapPage() {
       filename: `iherd_map_entities_${activeCategory}_${new Date().toISOString().slice(0, 10)}.csv`,
       data: dataToExport,
     });
+  };
+
+  const [showRawData, setShowRawData] = useState(false);
+
+  // Helper to copy user ID
+  const handleCopy = (text: string, label: string) => {
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text);
+      toast.success(`${label} copied to clipboard!`);
+    }
   };
 
   return (
@@ -895,51 +930,56 @@ function LiveGeoMapPage() {
         )}
       </div>
 
-      {/* 4. FULL ENTITY DETAILS MODAL DIALOG */}
+      {/* 4. FULL ENTITY & USER DETAILS MODAL DIALOG */}
       <Dialog open={!!detailModalEntity} onOpenChange={(o) => !o && setDetailModalEntity(null)}>
         {detailModalEntity && (
-          <DialogContent className="sm:max-w-lg rounded-2xl max-h-[90vh] overflow-y-auto">
+          <DialogContent className="sm:max-w-xl rounded-3xl max-h-[92vh] overflow-y-auto p-6">
             <DialogHeader>
-              <div className="flex items-center gap-2 mb-1 flex-wrap">
-                <Badge
-                  variant="outline"
-                  className={
-                    detailModalEntity.type === "farm"
-                      ? "bg-teal-500/10 text-teal-700 border-teal-500/20"
-                      : detailModalEntity.type === "farmer"
-                      ? "bg-emerald-500/10 text-emerald-700 border-emerald-500/20"
-                      : detailModalEntity.type === "vet"
-                      ? "bg-blue-500/10 text-blue-700 border-blue-500/20"
-                      : detailModalEntity.type === "seller"
-                      ? "bg-amber-500/10 text-amber-700 border-amber-500/20"
-                      : "bg-purple-500/10 text-purple-700 border-purple-500/20"
-                  }
-                >
-                  {detailModalEntity.type === "farm" ? "REGISTERED FARM" : detailModalEntity.type.toUpperCase()}
-                </Badge>
-                {detailModalEntity.badge && (
-                  <Badge variant="secondary" className="text-[10px]">
-                    {detailModalEntity.badge}
+              <div className="flex items-center justify-between gap-2 mb-1 flex-wrap">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <Badge
+                    variant="outline"
+                    className={
+                      detailModalEntity.type === "farm"
+                        ? "bg-teal-500/10 text-teal-700 border-teal-500/20"
+                        : detailModalEntity.type === "farmer"
+                        ? "bg-emerald-500/10 text-emerald-700 border-emerald-500/20"
+                        : detailModalEntity.type === "vet"
+                        ? "bg-blue-500/10 text-blue-700 border-blue-500/20"
+                        : detailModalEntity.type === "seller"
+                        ? "bg-amber-500/10 text-amber-700 border-amber-500/20"
+                        : "bg-purple-500/10 text-purple-700 border-purple-500/20"
+                    }
+                  >
+                    {detailModalEntity.type === "farm" ? "REGISTERED FARM" : detailModalEntity.type.toUpperCase()}
                   </Badge>
-                )}
-                {detailModalEntity.isExactCoordinate && (
-                  <Badge variant="secondary" className="text-[10px] text-emerald-600 bg-emerald-50">
-                    <CheckCircle2 className="h-3 w-3 mr-1" /> Exact GPS Geolocation
-                  </Badge>
-                )}
+                  {detailModalEntity.badge && (
+                    <Badge variant="secondary" className="text-[10px]">
+                      {detailModalEntity.badge}
+                    </Badge>
+                  )}
+                  {detailModalEntity.isExactCoordinate && (
+                    <Badge variant="secondary" className="text-[10px] text-emerald-600 bg-emerald-50 dark:bg-emerald-950">
+                      <CheckCircle2 className="h-3 w-3 mr-1" /> GPS Exact
+                    </Badge>
+                  )}
+                </div>
+
+                <StatusBadge status={detailModalEntity.status || "Active"} />
               </div>
-              <DialogTitle className="text-base sm:text-lg font-bold">
+
+              <DialogTitle className="text-lg sm:text-xl font-bold text-foreground pt-1">
                 {detailModalEntity.title}
               </DialogTitle>
-              <DialogDescription className="text-xs">
+              <DialogDescription className="text-xs text-muted-foreground">
                 {detailModalEntity.subtitle}
               </DialogDescription>
             </DialogHeader>
 
-            <div className="space-y-3 py-2 text-xs">
-              {/* Image banner if present */}
+            <div className="space-y-4 py-2 text-xs">
+              {/* Photo Banner if available */}
               {detailModalEntity.image && (
-                <div className="h-44 w-full rounded-2xl overflow-hidden border bg-muted shadow-sm">
+                <div className="h-48 w-full rounded-2xl overflow-hidden border bg-muted shadow-sm">
                   <img
                     src={detailModalEntity.image}
                     alt={detailModalEntity.title}
@@ -948,34 +988,83 @@ function LiveGeoMapPage() {
                 </div>
               )}
 
+              {/* USER PROFILE CARD (Direct Access & UID) */}
+              {(detailModalEntity.userId || detailModalEntity.ownerUid || detailModalEntity.userLinkUrl) && (
+                <div className="p-4 rounded-2xl border bg-primary/5 border-primary/20 space-y-3">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center gap-2.5">
+                      <div className="h-9 w-9 rounded-xl bg-primary text-primary-foreground flex items-center justify-center font-bold text-sm shadow-sm">
+                        <User className="h-4 w-4" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-sm text-foreground">
+                          {detailModalEntity.ownerName || detailModalEntity.title}
+                        </h4>
+                        <div className="text-[11px] text-muted-foreground flex items-center gap-1">
+                          <span>User ID:</span>
+                          <span className="font-mono text-primary">
+                            {(detailModalEntity.userId || detailModalEntity.ownerUid || "—").slice(0, 16)}...
+                          </span>
+                          <button
+                            onClick={() =>
+                              handleCopy(
+                                detailModalEntity.userId || detailModalEntity.ownerUid || "",
+                                "User ID"
+                              )
+                            }
+                            className="text-muted-foreground hover:text-foreground p-0.5 ml-1"
+                            title="Copy UID"
+                          >
+                            <Copy className="h-3 w-3" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <Button asChild size="sm" className="rounded-xl text-xs gap-1.5 shadow-sm">
+                      <Link
+                        to={
+                          (detailModalEntity.userLinkUrl as any) ||
+                          `/users/${detailModalEntity.userId || detailModalEntity.ownerUid}`
+                        }
+                      >
+                        <User className="h-3.5 w-3.5" />
+                        <span>Open Full User Profile</span>
+                        <ExternalLink className="h-3 w-3" />
+                      </Link>
+                    </Button>
+                  </div>
+                </div>
+              )}
+
               {/* Farm specific Infrastructure and Specifications */}
               {detailModalEntity.type === "farm" && (
-                <div className="space-y-2.5">
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="p-2.5 bg-muted/20 rounded-xl border">
-                      <span className="text-[10px] text-muted-foreground block">Livestock / Animals</span>
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div className="p-3 bg-muted/20 rounded-2xl border">
+                      <span className="text-[10px] text-muted-foreground block font-medium">Livestock / Animals</span>
                       <span className="font-bold text-xs text-foreground">
                         {detailModalEntity.numberOfAnimals && detailModalEntity.numberOfAnimals !== "—"
                           ? `${detailModalEntity.numberOfAnimals} Animals`
                           : detailModalEntity.cattleCount
                           ? `${detailModalEntity.cattleCount} Animals`
-                          : "Livestock Facility"} ({detailModalEntity.animal || "Cattle"})
+                          : "Dairy Facility"} ({detailModalEntity.animal || "Cattle"})
                       </span>
                     </div>
-                    <div className="p-2.5 bg-muted/20 rounded-xl border">
-                      <span className="text-[10px] text-muted-foreground block">Management Technique</span>
+                    <div className="p-3 bg-muted/20 rounded-2xl border">
+                      <span className="text-[10px] text-muted-foreground block font-medium">Management Technique</span>
                       <span className="font-bold text-xs text-foreground truncate">
                         {detailModalEntity.farmTechnique || "Modern Dairy Setup"}
                       </span>
                     </div>
-                    <div className="p-2.5 bg-muted/20 rounded-xl border">
-                      <span className="text-[10px] text-muted-foreground block">Workers / Staff</span>
+                    <div className="p-3 bg-muted/20 rounded-2xl border">
+                      <span className="text-[10px] text-muted-foreground block font-medium">Workers & Employees</span>
                       <span className="font-bold text-xs text-foreground">
                         {detailModalEntity.numberOfEmployees || "1 - 2 Staff"}
                       </span>
                     </div>
-                    <div className="p-2.5 bg-muted/20 rounded-xl border">
-                      <span className="text-[10px] text-muted-foreground block">Owner / Farmer</span>
+                    <div className="p-3 bg-muted/20 rounded-2xl border">
+                      <span className="text-[10px] text-muted-foreground block font-medium">Owner / Farmer</span>
                       <span className="font-bold text-xs text-foreground truncate">
                         {detailModalEntity.ownerName || "Registered Farmer"}
                       </span>
@@ -984,15 +1073,17 @@ function LiveGeoMapPage() {
 
                   {/* Equipment Tags */}
                   {Array.isArray(detailModalEntity.farmEquipmentList) && detailModalEntity.farmEquipmentList.length > 0 && (
-                    <div className="p-2.5 bg-muted/20 rounded-xl border space-y-1">
-                      <span className="text-[10px] text-muted-foreground block font-medium">Equipped Facilities</span>
-                      <div className="flex flex-wrap gap-1">
+                    <div className="p-3 bg-muted/20 rounded-2xl border space-y-1.5">
+                      <span className="text-[10px] text-muted-foreground block font-semibold uppercase tracking-wider">
+                        Equipped Facilities & Tools
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
                         {detailModalEntity.farmEquipmentList.map((eq, i) => (
                           <span
                             key={i}
-                            className="px-2 py-0.5 rounded-lg bg-background border text-[10px] font-medium text-foreground flex items-center gap-1"
+                            className="px-2.5 py-1 rounded-xl bg-background border text-xs font-medium text-foreground flex items-center gap-1"
                           >
-                            <CheckCircle2 className="h-2.5 w-2.5 text-emerald-500" />
+                            <CheckCircle2 className="h-3 w-3 text-emerald-500" />
                             {String(eq).replace(/_/g, " ")}
                           </span>
                         ))}
@@ -1002,15 +1093,17 @@ function LiveGeoMapPage() {
 
                   {/* Assigned Vet */}
                   {detailModalEntity.veterinaryName && (
-                    <div className="p-2.5 bg-teal-500/10 border border-teal-500/20 rounded-xl flex items-center justify-between">
+                    <div className="p-3 bg-teal-500/10 border border-teal-500/20 rounded-2xl flex items-center justify-between">
                       <div>
-                        <span className="text-[10px] text-teal-700 dark:text-teal-300 block font-medium">Assigned Veterinarian</span>
+                        <span className="text-[10px] text-teal-700 dark:text-teal-300 block font-semibold uppercase tracking-wider">
+                          Assigned Veterinarian Doctor
+                        </span>
                         <span className="font-bold text-xs text-foreground">{detailModalEntity.veterinaryName}</span>
                       </div>
                       {detailModalEntity.veterinarianPhoneNumber && (
-                        <Button size="sm" variant="outline" className="h-7 text-xs px-2.5 rounded-lg" asChild>
+                        <Button size="sm" variant="outline" className="h-7 text-xs px-2.5 rounded-xl gap-1" asChild>
                           <a href={`tel:${detailModalEntity.veterinarianPhoneNumber}`}>
-                            <Phone className="h-3 w-3 mr-1" /> Call Doctor
+                            <Phone className="h-3 w-3" /> Call Doctor
                           </a>
                         </Button>
                       )}
@@ -1020,19 +1113,19 @@ function LiveGeoMapPage() {
               )}
 
               {/* Location & Coordinates Card */}
-              <div className="p-3 bg-muted/40 rounded-xl border space-y-1.5">
-                <div className="font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
+              <div className="p-3.5 bg-muted/30 rounded-2xl border space-y-2">
+                <div className="font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
                   <MapPin className="h-4 w-4 text-primary" />
-                  <span>Geospatial Coordinates & Location</span>
+                  <span>Geospatial Coordinates & Physical Address</span>
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-slate-600 dark:text-slate-300 pt-1">
                   <div>
-                    <span className="text-muted-foreground block text-[10px]">Location Address:</span>
-                    <span className="font-medium">{detailModalEntity.locationName || "—"}</span>
+                    <span className="text-muted-foreground block text-[10px]">Location Name:</span>
+                    <span className="font-medium text-foreground">{detailModalEntity.locationName || "—"}</span>
                   </div>
                   <div>
                     <span className="text-muted-foreground block text-[10px]">District / State:</span>
-                    <span className="font-medium">
+                    <span className="font-medium text-foreground">
                       {detailModalEntity.district || detailModalEntity.city || "—"},{" "}
                       {detailModalEntity.state || "India"}
                     </span>
@@ -1052,9 +1145,9 @@ function LiveGeoMapPage() {
                 </div>
               </div>
 
-              {/* Contact Information */}
+              {/* Contact Information Card */}
               {detailModalEntity.phone && detailModalEntity.phone !== "—" && (
-                <div className="p-3 bg-muted/20 rounded-xl border flex items-center justify-between">
+                <div className="p-3 bg-muted/20 rounded-2xl border flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Phone className="h-4 w-4 text-muted-foreground" />
                     <div>
@@ -1064,60 +1157,84 @@ function LiveGeoMapPage() {
                       </a>
                     </div>
                   </div>
-                  <Button size="sm" variant="outline" className="h-7 text-xs rounded-lg" asChild>
-                    <a href={`tel:${detailModalEntity.phone}`}>Call Now</a>
+                  <Button size="sm" variant="outline" className="h-7 text-xs rounded-xl gap-1" asChild>
+                    <a href={`tel:${detailModalEntity.phone}`}>
+                      <Phone className="h-3 w-3" /> Call Now
+                    </a>
                   </Button>
                 </div>
               )}
 
               {/* Specific metadata based on entity type */}
               {detailModalEntity.type === "farmer" && (
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="p-2.5 bg-muted/20 rounded-xl border">
-                    <span className="text-[10px] text-muted-foreground block">Livestock Tagged</span>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div className="p-3 bg-muted/20 rounded-2xl border">
+                    <span className="text-[10px] text-muted-foreground block font-medium">Livestock Tagged</span>
                     <span className="font-bold text-sm text-foreground">
                       {detailModalEntity.cattleCount || 0} Cattle
                     </span>
                   </div>
-                  <div className="p-2.5 bg-muted/20 rounded-xl border">
-                    <span className="text-[10px] text-muted-foreground block">Verification Status</span>
+                  <div className="p-3 bg-muted/20 rounded-2xl border">
+                    <span className="text-[10px] text-muted-foreground block font-medium">Verification Status</span>
                     <span className="font-bold text-sm text-emerald-600">Active Verified</span>
                   </div>
                 </div>
               )}
 
               {detailModalEntity.type === "vet" && (
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="p-2.5 bg-muted/20 rounded-xl border">
-                    <span className="text-[10px] text-muted-foreground block">Rating & Review</span>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div className="p-3 bg-muted/20 rounded-2xl border">
+                    <span className="text-[10px] text-muted-foreground block font-medium">Doctor Rating</span>
                     <span className="font-bold text-sm text-foreground">
                       ⭐ {detailModalEntity.rating || 5.0} / 5.0
                     </span>
                   </div>
-                  <div className="p-2.5 bg-muted/20 rounded-xl border">
-                    <span className="text-[10px] text-muted-foreground block">Specialization</span>
+                  <div className="p-3 bg-muted/20 rounded-2xl border">
+                    <span className="text-[10px] text-muted-foreground block font-medium">Clinical Focus</span>
                     <span className="font-bold text-xs text-foreground">Bovine & Dairy Health</span>
                   </div>
                 </div>
               )}
 
               {detailModalEntity.type === "seller" && (
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="p-2.5 bg-muted/20 rounded-xl border">
-                    <span className="text-[10px] text-muted-foreground block">Store Rating</span>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div className="p-3 bg-muted/20 rounded-2xl border">
+                    <span className="text-[10px] text-muted-foreground block font-medium">Store Rating</span>
                     <span className="font-bold text-sm text-foreground">
                       ⭐ {detailModalEntity.rating || 4.8} / 5.0
                     </span>
                   </div>
-                  <div className="p-2.5 bg-muted/20 rounded-xl border">
-                    <span className="text-[10px] text-muted-foreground block">Store Status</span>
+                  <div className="p-3 bg-muted/20 rounded-2xl border">
+                    <span className="text-[10px] text-muted-foreground block font-medium">Merchant Status</span>
                     <span className="font-bold text-sm text-emerald-600">Verified Seller</span>
                   </div>
                 </div>
               )}
+
+              {/* RAW JSON DATA EXPANDER */}
+              <div className="border rounded-2xl overflow-hidden">
+                <button
+                  onClick={() => setShowRawData(!showRawData)}
+                  className="w-full p-2.5 bg-muted/40 hover:bg-muted/60 text-xs font-semibold flex items-center justify-between transition text-muted-foreground hover:text-foreground"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <FileJson className="h-3.5 w-3.5 text-primary" />
+                    <span>View Complete Database Record (JSON)</span>
+                  </div>
+                  {showRawData ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                </button>
+
+                {showRawData && (
+                  <div className="p-3 bg-slate-950 text-slate-100 font-mono text-[11px] max-h-52 overflow-y-auto rounded-b-2xl">
+                    <pre className="whitespace-pre-wrap">
+                      {JSON.stringify(detailModalEntity.details || detailModalEntity, null, 2)}
+                    </pre>
+                  </div>
+                )}
+              </div>
             </div>
 
-            <div className="flex items-center justify-between gap-2 pt-2 border-t">
+            <div className="flex items-center justify-between gap-2 pt-3 border-t mt-2">
               <Button
                 variant="outline"
                 size="sm"
@@ -1127,14 +1244,30 @@ function LiveGeoMapPage() {
                 Close
               </Button>
 
-              {detailModalEntity.linkUrl && (
-                <Button size="sm" className="rounded-xl text-xs gap-1.5" asChild>
-                  <Link to={detailModalEntity.linkUrl}>
-                    <span>Open Admin Register</span>
-                    <ExternalLink className="h-3.5 w-3.5" />
-                  </Link>
-                </Button>
-              )}
+              <div className="flex items-center gap-2">
+                {(detailModalEntity.userId || detailModalEntity.ownerUid) && (
+                  <Button asChild size="sm" variant="outline" className="rounded-xl text-xs gap-1.5 border-primary/30 text-primary hover:bg-primary/10">
+                    <Link
+                      to={
+                        (detailModalEntity.userLinkUrl as any) ||
+                        `/users/${detailModalEntity.userId || detailModalEntity.ownerUid}`
+                      }
+                    >
+                      <User className="h-3.5 w-3.5" />
+                      <span>User Profile</span>
+                    </Link>
+                  </Button>
+                )}
+
+                {detailModalEntity.linkUrl && (
+                  <Button size="sm" className="rounded-xl text-xs gap-1.5" asChild>
+                    <Link to={detailModalEntity.linkUrl}>
+                      <span>Open Register</span>
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </Link>
+                  </Button>
+                )}
+              </div>
             </div>
           </DialogContent>
         )}

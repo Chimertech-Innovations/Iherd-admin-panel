@@ -26,6 +26,8 @@ export interface GeoEntity {
   rating?: number;
   cattleCount?: number;
   price?: number;
+  userId?: string;
+  userLinkUrl?: string;
   ownerName?: string;
   ownerUid?: string;
   animal?: string;
