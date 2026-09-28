@@ -36,6 +36,7 @@ import {
   ChevronUp,
   FileJson,
 } from "lucide-react";
+import { StatusBadge } from "@/components/admin/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -85,6 +86,10 @@ function LiveGeoMapPage() {
 
   const [backendFarms, setBackendFarms] = useState<any[]>([]);
   const [backendCattle, setBackendCattle] = useState<any[]>([]);
+  const [backendFarmers, setBackendFarmers] = useState<any[]>([]);
+  const [backendVets, setBackendVets] = useState<any[]>([]);
+  const [backendSellers, setBackendSellers] = useState<any[]>([]);
+  const [backendUsers, setBackendUsers] = useState<any[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   // 2. Interactive Map & Filter States
@@ -117,17 +122,47 @@ function LiveGeoMapPage() {
 
       for (const base of endpoints) {
         try {
-          const [fRes, cRes] = await Promise.all([
+          const [fRes, cRes, farmerRes, vRes, sRes, uRes] = await Promise.all([
             fetch(`${base}/api/admin/farms`).catch(() => null),
             fetch(`${base}/api/admin/cattle`).catch(() => null),
+            fetch(`${base}/api/admin/farmers`).catch(() => null),
+            fetch(`${base}/api/admin/vets`).catch(() => null),
+            fetch(`${base}/api/admin/sellers`).catch(() => null),
+            fetch(`${base}/api/admin/users`).catch(() => null),
           ]);
           if (fRes && fRes.ok) {
             const fj = await fRes.json();
             if (Array.isArray(fj.farms)) setBackendFarms(fj.farms);
+            else if (Array.isArray(fj)) setBackendFarms(fj);
           }
           if (cRes && cRes.ok) {
             const cj = await cRes.json();
             if (Array.isArray(cj.cattle)) setBackendCattle(cj.cattle);
+            else if (Array.isArray(cj)) setBackendCattle(cj);
+          }
+          if (farmerRes && farmerRes.ok) {
+            const farmerJson = await farmerRes.json();
+            if (Array.isArray(farmerJson.farmers)) setBackendFarmers(farmerJson.farmers);
+            else if (Array.isArray(farmerJson.data)) setBackendFarmers(farmerJson.data);
+            else if (Array.isArray(farmerJson)) setBackendFarmers(farmerJson);
+          }
+          if (vRes && vRes.ok) {
+            const vj = await vRes.json();
+            if (Array.isArray(vj.vets)) setBackendVets(vj.vets);
+            else if (Array.isArray(vj.data)) setBackendVets(vj.data);
+            else if (Array.isArray(vj)) setBackendVets(vj);
+          }
+          if (sRes && sRes.ok) {
+            const sj = await sRes.json();
+            if (Array.isArray(sj.sellers)) setBackendSellers(sj.sellers);
+            else if (Array.isArray(sj.data)) setBackendSellers(sj.data);
+            else if (Array.isArray(sj)) setBackendSellers(sj);
+          }
+          if (uRes && uRes.ok) {
+            const uj = await uRes.json();
+            if (Array.isArray(uj.users)) setBackendUsers(uj.users);
+            else if (Array.isArray(uj.data)) setBackendUsers(uj.data);
+            else if (Array.isArray(uj)) setBackendUsers(uj);
           }
           break;
         } catch {}
@@ -285,7 +320,7 @@ function LiveGeoMapPage() {
     });
 
     // --- B. Process Farmers & Users with Farmer Profile ---
-    [...directFarmers, ...firestoreUsers.filter((u: any) => u.farmer || u.roles?.includes?.("farmer") || u.role === "farmer" || u.isFarmer)].forEach((f: any) => {
+    [...backendFarmers, ...directFarmers, ...firestoreUsers.filter((u: any) => u.farmer || u.roles?.includes?.("farmer") || u.role === "farmer" || u.isFarmer), ...backendUsers.filter((u: any) => u.farmer || u.roles?.includes?.("farmer") || u.role === "farmer" || u.isFarmer), ...authUsers.filter((u: any) => u.farmer || u.roles?.includes?.("farmer") || u.role === "farmer" || u.isFarmer)].forEach((f: any) => {
       const id = f.id || f.uid || `farmer_${Math.random()}`;
       const fObj = f.farmer || f;
       const name = getLocalizedText(fObj.name || f.name || f.displayName || fObj.farmerName, "Dairy Farmer");
@@ -321,7 +356,7 @@ function LiveGeoMapPage() {
     });
 
     // --- C. Process Veterinarians ---
-    [...directVets, ...firestoreUsers.filter((u: any) => u.vet || u.veterinarian || u.roles?.includes?.("veterinarian") || u.role === "veterinarian" || u.isVet)].forEach((v: any) => {
+    [...backendVets, ...directVets, ...firestoreUsers.filter((u: any) => u.vet || u.veterinarian || u.roles?.includes?.("veterinarian") || u.role === "veterinarian" || u.isVet), ...backendUsers.filter((u: any) => u.vet || u.veterinarian || u.roles?.includes?.("veterinarian") || u.role === "veterinarian" || u.isVet), ...authUsers.filter((u: any) => u.vet || u.veterinarian || u.roles?.includes?.("veterinarian") || u.role === "veterinarian" || u.isVet)].forEach((v: any) => {
       const id = v.id || v.uid || `vet_${Math.random()}`;
       const vObj = v.vet || v.veterinarian || v;
       const rawName = getLocalizedText(vObj.doctorName || vObj.name || v.name || v.displayName, "Licensed Veterinarian");
@@ -360,7 +395,7 @@ function LiveGeoMapPage() {
     });
 
     // --- D. Process Sellers ---
-    [...directSellers, ...firestoreUsers.filter((u: any) => u.seller || u.roles?.includes?.("seller") || u.role === "seller" || u.isSeller)].forEach((s: any) => {
+    [...backendSellers, ...directSellers, ...firestoreUsers.filter((u: any) => u.seller || u.roles?.includes?.("seller") || u.role === "seller" || u.isSeller), ...backendUsers.filter((u: any) => u.seller || u.roles?.includes?.("seller") || u.role === "seller" || u.isSeller), ...authUsers.filter((u: any) => u.seller || u.roles?.includes?.("seller") || u.role === "seller" || u.isSeller)].forEach((s: any) => {
       const id = s.id || s.uid || `seller_${Math.random()}`;
       const sObj = s.seller || s;
       const shopName = getLocalizedText(sObj.shopName || sObj.storeName || sObj.name || s.name || s.displayName, "Agri Supplies Store");
@@ -439,7 +474,7 @@ function LiveGeoMapPage() {
     });
 
     return list;
-  }, [backendFarms, groupFarms, topFarms, directFarmers, firestoreUsers, directVets, directSellers, backendCattle, directCattle, groupCattles]);
+  }, [backendFarms, groupFarms, topFarms, backendFarmers, directFarmers, firestoreUsers, backendUsers, authUsers, backendVets, directVets, backendSellers, directSellers, backendCattle, directCattle, groupCattles]);
 
   // Extract unique states for dropdown
   const uniqueStates = useMemo(() => {
