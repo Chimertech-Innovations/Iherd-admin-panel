@@ -21,6 +21,7 @@ import {
   Ticket,
   Flame,
   Coins,
+  MapPin,
 } from "lucide-react";
 
 import {
@@ -40,6 +41,7 @@ import { useAuth } from "@/hooks/useAuth";
 
 const main = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
+  { title: "Live Geo Map", url: "/map", icon: MapPin },
 ];
 const people = [
   { title: "App Users", url: "/users", icon: UserCircle },

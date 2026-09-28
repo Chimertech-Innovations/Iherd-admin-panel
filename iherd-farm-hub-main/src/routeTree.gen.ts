@@ -16,6 +16,7 @@ import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as FarmsRouteImport } from './routes/farms'
 import { Route as InvoicesRouteImport } from './routes/invoices'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as MapRouteImport } from './routes/map'
 import { Route as NotificationsRouteImport } from './routes/notifications'
 import { Route as PaymentsRouteImport } from './routes/payments'
 import { Route as ProfileRouteImport } from './routes/profile'
@@ -72,6 +73,11 @@ const InvoicesRoute = InvoicesRouteImport.update({
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MapRoute = MapRouteImport.update({
+  id: '/map',
+  path: '/map',
   getParentRoute: () => rootRouteImport,
 } as any)
 const NotificationsRoute = NotificationsRouteImport.update({
@@ -193,6 +199,7 @@ export interface FileRoutesByFullPath {
   '/farms': typeof FarmsRoute
   '/invoices': typeof InvoicesRoute
   '/login': typeof LoginRoute
+  '/map': typeof MapRoute
   '/notifications': typeof NotificationsRoute
   '/payments': typeof PaymentsRoute
   '/profile': typeof ProfileRoute
@@ -224,6 +231,7 @@ export interface FileRoutesByTo {
   '/farms': typeof FarmsRoute
   '/invoices': typeof InvoicesRoute
   '/login': typeof LoginRoute
+  '/map': typeof MapRoute
   '/notifications': typeof NotificationsRoute
   '/payments': typeof PaymentsRoute
   '/profile': typeof ProfileRoute
@@ -256,6 +264,7 @@ export interface FileRoutesById {
   '/farms': typeof FarmsRoute
   '/invoices': typeof InvoicesRoute
   '/login': typeof LoginRoute
+  '/map': typeof MapRoute
   '/notifications': typeof NotificationsRoute
   '/payments': typeof PaymentsRoute
   '/profile': typeof ProfileRoute
@@ -289,6 +298,7 @@ export interface FileRouteTypes {
     | '/farms'
     | '/invoices'
     | '/login'
+    | '/map'
     | '/notifications'
     | '/payments'
     | '/profile'
@@ -320,6 +330,7 @@ export interface FileRouteTypes {
     | '/farms'
     | '/invoices'
     | '/login'
+    | '/map'
     | '/notifications'
     | '/payments'
     | '/profile'
@@ -351,6 +362,7 @@ export interface FileRouteTypes {
     | '/farms'
     | '/invoices'
     | '/login'
+    | '/map'
     | '/notifications'
     | '/payments'
     | '/profile'
@@ -383,6 +395,7 @@ export interface RootRouteChildren {
   FarmsRoute: typeof FarmsRoute
   InvoicesRoute: typeof InvoicesRoute
   LoginRoute: typeof LoginRoute
+  MapRoute: typeof MapRoute
   NotificationsRoute: typeof NotificationsRoute
   PaymentsRoute: typeof PaymentsRoute
   ProfileRoute: typeof ProfileRoute
@@ -456,6 +469,13 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/map': {
+      id: '/map'
+      path: '/map'
+      fullPath: '/map'
+      preLoaderRoute: typeof MapRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/notifications': {
@@ -623,6 +643,7 @@ const rootRouteChildren: RootRouteChildren = {
   FarmsRoute: FarmsRoute,
   InvoicesRoute: InvoicesRoute,
   LoginRoute: LoginRoute,
+  MapRoute: MapRoute,
   NotificationsRoute: NotificationsRoute,
   PaymentsRoute: PaymentsRoute,
   ProfileRoute: ProfileRoute,
