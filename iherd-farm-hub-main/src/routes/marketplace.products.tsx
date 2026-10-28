@@ -185,13 +185,16 @@ function ProductsMarketplacePage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [modalTab, setModalTab] = useState("general");
   const [editingProduct, setEditingProduct] = useState<any | null>(null);
+  const [optimisticBestSellers, setOptimisticBestSellers] = useState<Record<string, boolean>>({});
 
-  // 1. Identity & Names
+  // 1. Identity & Names (en, hi, kn, mr, pa, ta)
   const [productId, setProductId] = useState("");
   const [nameEn, setNameEn] = useState("");
   const [nameHi, setNameHi] = useState("");
-  const [namePa, setNamePa] = useState("");
+  const [nameKn, setNameKn] = useState("");
   const [nameMr, setNameMr] = useState("");
+  const [namePa, setNamePa] = useState("");
+  const [nameTa, setNameTa] = useState("");
 
   // 2. Categories
   const [categoryId, setCategoryId] = useState("cat_breeding");
@@ -205,22 +208,31 @@ function ProductsMarketplacePage() {
   const [bestSeller, setBestSeller] = useState(false);
   const [cartAddded, setCartAddded] = useState(false);
 
-  // 4. Quantity & Units
+  // 4. Quantity & Units (en, hi, kn, mr, pa, ta)
   const [quantity, setQuantity] = useState("1000");
   const [quantityUnitEn, setQuantityUnitEn] = useState("Unit");
-  const [quantityUnitHi, setQuantityUnitHi] = useState("लीटर");
-  const [quantityUnitPa, setQuantityUnitPa] = useState("ਲੀਟਰ");
+  const [quantityUnitHi, setQuantityUnitHi] = useState("इकाई");
+  const [quantityUnitKn, setQuantityUnitKn] = useState("ಘಟಕ");
+  const [quantityUnitMr, setQuantityUnitMr] = useState("युनिट");
+  const [quantityUnitPa, setQuantityUnitPa] = useState("ਯੂਨਿਟ");
+  const [quantityUnitTa, setQuantityUnitTa] = useState("அலகு");
 
-  // 5. Weight & Units
+  // 5. Weight & Units (en, hi, kn, mr, pa, ta)
   const [weight, setWeight] = useState("2500");
   const [weightUnitEn, setWeightUnitEn] = useState("g");
   const [weightUnitHi, setWeightUnitHi] = useState("ग्राम");
+  const [weightUnitKn, setWeightUnitKn] = useState("g");
+  const [weightUnitMr, setWeightUnitMr] = useState("g");
   const [weightUnitPa, setWeightUnitPa] = useState("ਗ੍ਰਾਮ");
+  const [weightUnitTa, setWeightUnitTa] = useState("g");
 
-  // 6. Seller Profile & Permissions
+  // 6. Seller Profile & Permissions (en, hi, kn, mr, pa, ta)
   const [sellerNameEn, setSellerNameEn] = useState("Chimertech");
-  const [sellerNameHi, setSellerNameHi] = useState("चिमरटेक");
-  const [sellerNamePa, setSellerNamePa] = useState("ਚਿਮਰਟੈਕ");
+  const [sellerNameHi, setSellerNameHi] = useState("Chimertech");
+  const [sellerNameKn, setSellerNameKn] = useState("Chimertech");
+  const [sellerNameMr, setSellerNameMr] = useState("Chimertech");
+  const [sellerNamePa, setSellerNamePa] = useState("Chimertech");
+  const [sellerNameTa, setSellerNameTa] = useState("Chimertech");
   const [sellerLogo, setSellerLogo] = useState("");
   const [sellerType, setSellerType] = useState("seller");
   const [postedByRole, setPostedByRole] = useState("admin");
@@ -230,34 +242,52 @@ function ProductsMarketplacePage() {
   const [thumbnailUrl, setThumbnailUrl] = useState("");
   const [imageUrlsText, setImageUrlsText] = useState("");
 
-  // 8. Description & Specifications
+  // 8. Description & Specifications (en, hi, kn, mr, pa, ta)
   const [descriptionEn, setDescriptionEn] = useState("");
   const [descriptionHi, setDescriptionHi] = useState("");
+  const [descriptionKn, setDescriptionKn] = useState("");
+  const [descriptionMr, setDescriptionMr] = useState("");
   const [descriptionPa, setDescriptionPa] = useState("");
+  const [descriptionTa, setDescriptionTa] = useState("");
 
   const [specificationEn, setSpecificationEn] = useState("");
   const [specificationHi, setSpecificationHi] = useState("");
+  const [specificationKn, setSpecificationKn] = useState("");
+  const [specificationMr, setSpecificationMr] = useState("");
   const [specificationPa, setSpecificationPa] = useState("");
+  const [specificationTa, setSpecificationTa] = useState("");
 
-  // 9. Ingredients & Care
+  // 9. Ingredients & Care (en, hi, kn, mr, pa, ta)
   const [productIngredientsEn, setProductIngredientsEn] = useState("");
-  const [productIngredientsHi, setProductIngredientsHi] = useState("लागू नहीं");
-  const [productIngredientsPa, setProductIngredientsPa] = useState("ਲਾਗੂ ਨਹੀਂ");
+  const [productIngredientsHi, setProductIngredientsHi] = useState("");
+  const [productIngredientsKn, setProductIngredientsKn] = useState("");
+  const [productIngredientsMr, setProductIngredientsMr] = useState("");
+  const [productIngredientsPa, setProductIngredientsPa] = useState("");
+  const [productIngredientsTa, setProductIngredientsTa] = useState("");
 
   const [usageEn, setUsageEn] = useState("");
   const [usageHi, setUsageHi] = useState("");
 
   const [instructionsToUseEn, setInstructionsToUseEn] = useState("");
   const [instructionsToUseHi, setInstructionsToUseHi] = useState("");
+  const [instructionsToUseKn, setInstructionsToUseKn] = useState("");
+  const [instructionsToUseMr, setInstructionsToUseMr] = useState("");
   const [instructionsToUsePa, setInstructionsToUsePa] = useState("");
+  const [instructionsToUseTa, setInstructionsToUseTa] = useState("");
 
   const [storageConditionEn, setStorageConditionEn] = useState("");
   const [storageConditionHi, setStorageConditionHi] = useState("");
+  const [storageConditionKn, setStorageConditionKn] = useState("");
+  const [storageConditionMr, setStorageConditionMr] = useState("");
   const [storageConditionPa, setStorageConditionPa] = useState("");
+  const [storageConditionTa, setStorageConditionTa] = useState("");
 
-  const [bestBeforeEn, setBestBeforeEn] = useState("");
-  const [bestBeforeHi, setBestBeforeHi] = useState("लागू नहीं");
-  const [bestBeforePa, setBestBeforePa] = useState("ਲਾਗੂ ਨਹੀਂ");
+  const [bestBeforeEn, setBestBeforeEn] = useState("1 Year");
+  const [bestBeforeHi, setBestBeforeHi] = useState("1 वर्ष");
+  const [bestBeforeKn, setBestBeforeKn] = useState("1 ವರ್ಷ");
+  const [bestBeforeMr, setBestBeforeMr] = useState("१ वर्ष");
+  const [bestBeforePa, setBestBeforePa] = useState("1 ਸਾਲ");
+  const [bestBeforeTa, setBestBeforeTa] = useState("1 ஆண்டு");
 
   // 10. Delivery Config
   const [deliveryType, setDeliveryType] = useState<string>("all");
@@ -280,33 +310,44 @@ function ProductsMarketplacePage() {
     setProductId(`PRD-${Date.now().toString().slice(-6)}`);
     setNameEn("");
     setNameHi("");
-    setNamePa("");
+    setNameKn("");
     setNameMr("");
+    setNamePa("");
+    setNameTa("");
 
     setCategoryId(categories[0]?.id || "cat_breeding");
-    setSubCategoryId("subcat_ai_equipment");
+    setSubCategoryId("subcat_breeding_detection");
 
-    setPrice("8850");
-    setMrp("9999");
-    setGst("18");
+    setPrice("360");
+    setMrp("519");
+    setGst("5");
     setRating("4.5");
     setBestSeller(false);
     setCartAddded(false);
 
     setQuantity("1000");
     setQuantityUnitEn("Unit");
-    setQuantityUnitHi("लीटर");
-    setQuantityUnitPa("ਲੀਟਰ");
+    setQuantityUnitHi("इकाई");
+    setQuantityUnitKn("ಘಟಕ");
+    setQuantityUnitMr("युनिट");
+    setQuantityUnitPa("ਯੂਨਿਟ");
+    setQuantityUnitTa("அலகு");
 
-    setWeight("2500");
+    setWeight("250");
     setWeightUnitEn("g");
     setWeightUnitHi("ग्राम");
+    setWeightUnitKn("g");
+    setWeightUnitMr("g");
     setWeightUnitPa("ਗ੍ਰਾਮ");
+    setWeightUnitTa("g");
 
     setSellerNameEn("Chimertech");
-    setSellerNameHi("चिमरटेक");
-    setSellerNamePa("ਚਿਮਰਟੈਕ");
-    setSellerLogo("");
+    setSellerNameHi("Chimertech");
+    setSellerNameKn("Chimertech");
+    setSellerNameMr("Chimertech");
+    setSellerNamePa("Chimertech");
+    setSellerNameTa("Chimertech");
+    setSellerLogo("https://drive.google.com/file/d/1x72e_nlxXIzwHtgzvXcGFReKwgOBAIP4/view?usp=sharing");
     setSellerType("seller");
     setPostedByRole("admin");
     setPostedByUid("admin-root");
@@ -316,30 +357,48 @@ function ProductsMarketplacePage() {
 
     setDescriptionEn("");
     setDescriptionHi("");
+    setDescriptionKn("");
+    setDescriptionMr("");
     setDescriptionPa("");
+    setDescriptionTa("");
 
     setSpecificationEn("");
     setSpecificationHi("");
+    setSpecificationKn("");
+    setSpecificationMr("");
     setSpecificationPa("");
+    setSpecificationTa("");
 
     setProductIngredientsEn("");
-    setProductIngredientsHi("लागू नहीं");
-    setProductIngredientsPa("ਲਾਗੂ ਨਹੀਂ");
+    setProductIngredientsHi("");
+    setProductIngredientsKn("");
+    setProductIngredientsMr("");
+    setProductIngredientsPa("");
+    setProductIngredientsTa("");
 
     setUsageEn("");
     setUsageHi("");
 
     setInstructionsToUseEn("");
     setInstructionsToUseHi("");
+    setInstructionsToUseKn("");
+    setInstructionsToUseMr("");
     setInstructionsToUsePa("");
+    setInstructionsToUseTa("");
 
-    setStorageConditionEn("");
-    setStorageConditionHi("");
-    setStorageConditionPa("");
+    setStorageConditionEn("°C to 15°C");
+    setStorageConditionHi("°C से 15°C तक");
+    setStorageConditionKn("°C ರಿಂದ 15°C ವರೆಗೆ");
+    setStorageConditionMr("°C ते १५°C");
+    setStorageConditionPa("°C ਤੋਂ 15°C ਤੱਕ");
+    setStorageConditionTa("°C முதல் 15°C வரை");
 
-    setBestBeforeEn("");
-    setBestBeforeHi("लागू नहीं");
-    setBestBeforePa("ਲਾਗੂ ਨਹੀਂ");
+    setBestBeforeEn("1 Year");
+    setBestBeforeHi("1 वर्ष");
+    setBestBeforeKn("1 ವರ್ಷ");
+    setBestBeforeMr("१ वर्ष");
+    setBestBeforePa("1 ਸਾਲ");
+    setBestBeforeTa("1 ஆண்டு");
 
     setDeliveryType("all");
     setDeliveryStates([]);
@@ -354,25 +413,30 @@ function ProductsMarketplacePage() {
     setEditingProduct(p);
     setProductId(p.id || "");
 
-    // Name Map
+    // Name Map (en, hi, kn, mr, pa, ta)
     if (typeof p.name === "object" && p.name !== null) {
       setNameEn(p.name.en || "");
       setNameHi(p.name.hi || "");
-      setNamePa(p.name.pa || "");
+      setNameKn(p.name.kn || "");
       setNameMr(p.name.mr || "");
+      setNamePa(p.name.pa || "");
+      setNameTa(p.name.ta || "");
     } else {
-      setNameEn(String(p.name || p.title || ""));
+      const s = String(p.name || p.title || "");
+      setNameEn(s);
       setNameHi("");
-      setNamePa("");
+      setNameKn("");
       setNameMr("");
+      setNamePa("");
+      setNameTa("");
     }
 
     setCategoryId(p.categoryId || "cat_breeding");
-    setSubCategoryId(p.subCategoryId || "subcat_ai_equipment");
+    setSubCategoryId(p.subCategoryId || "subcat_breeding_detection");
 
     setPrice(String(p.price || 0));
     setMrp(String(p.mrp || p.price || 0));
-    setGst(String(p.gst !== undefined ? p.gst : 18));
+    setGst(String(p.gst !== undefined ? p.gst : 5));
     setRating(String(p.rating || 4.5));
     setBestSeller(Boolean(p.bestSeller || p.isBestSeller));
     setCartAddded(Boolean(p.cartAddded || p.cartAdded));
@@ -381,12 +445,19 @@ function ProductsMarketplacePage() {
     setQuantity(String(p.quantity !== undefined ? p.quantity : (p.stock !== undefined ? p.stock : 1000)));
     if (typeof p.quantityUnit === "object" && p.quantityUnit !== null) {
       setQuantityUnitEn(p.quantityUnit.en || "Unit");
-      setQuantityUnitHi(p.quantityUnit.hi || "लीटर");
-      setQuantityUnitPa(p.quantityUnit.pa || "ਲੀਟਰ");
+      setQuantityUnitHi(p.quantityUnit.hi || "इकाई");
+      setQuantityUnitKn(p.quantityUnit.kn || "ಘಟಕ");
+      setQuantityUnitMr(p.quantityUnit.mr || "युनिट");
+      setQuantityUnitPa(p.quantityUnit.pa || "ਯੂਨਿਟ");
+      setQuantityUnitTa(p.quantityUnit.ta || "அலகு");
     } else {
-      setQuantityUnitEn(String(p.quantityUnit || "Unit"));
-      setQuantityUnitHi("लीटर");
-      setQuantityUnitPa("ਲੀਟਰ");
+      const s = String(p.quantityUnit || "Unit");
+      setQuantityUnitEn(s);
+      setQuantityUnitHi("इकाई");
+      setQuantityUnitKn("ಘಟಕ");
+      setQuantityUnitMr("युनिट");
+      setQuantityUnitPa("ਯੂਨਿਟ");
+      setQuantityUnitTa("அலகு");
     }
 
     // Weight & Weight Unit Map
@@ -394,22 +465,36 @@ function ProductsMarketplacePage() {
     if (typeof p.weightUnit === "object" && p.weightUnit !== null) {
       setWeightUnitEn(p.weightUnit.en || p.weightUnit.key || "g");
       setWeightUnitHi(p.weightUnit.hi || "ग्राम");
+      setWeightUnitKn(p.weightUnit.kn || "g");
+      setWeightUnitMr(p.weightUnit.mr || "g");
       setWeightUnitPa(p.weightUnit.pa || "ਗ੍ਰਾਮ");
+      setWeightUnitTa(p.weightUnit.ta || "g");
     } else {
-      setWeightUnitEn(String(p.weightUnit || "g"));
+      const s = String(p.weightUnit || "g");
+      setWeightUnitEn(s);
       setWeightUnitHi("ग्राम");
+      setWeightUnitKn("g");
+      setWeightUnitMr("g");
       setWeightUnitPa("ਗ੍ਰਾਮ");
+      setWeightUnitTa("g");
     }
 
     // Seller Profile Map
     if (typeof p.sellerName === "object" && p.sellerName !== null) {
       setSellerNameEn(p.sellerName.en || "");
       setSellerNameHi(p.sellerName.hi || "");
+      setSellerNameKn(p.sellerName.kn || "");
+      setSellerNameMr(p.sellerName.mr || "");
       setSellerNamePa(p.sellerName.pa || "");
+      setSellerNameTa(p.sellerName.ta || "");
     } else {
-      setSellerNameEn(String(p.sellerName || "Chimertech"));
-      setSellerNameHi("चिमरटेक");
-      setSellerNamePa("ਚਿਮਰਟੈਕ");
+      const s = String(p.sellerName || "Chimertech");
+      setSellerNameEn(s);
+      setSellerNameHi(s);
+      setSellerNameKn(s);
+      setSellerNameMr(s);
+      setSellerNamePa(s);
+      setSellerNameTa(s);
     }
     setSellerLogo(p.sellerLogo || "");
     setSellerType(p.sellerType || "seller");
@@ -426,33 +511,54 @@ function ProductsMarketplacePage() {
     if (typeof p.description === "object" && p.description !== null) {
       setDescriptionEn(p.description.en || "");
       setDescriptionHi(p.description.hi || "");
+      setDescriptionKn(p.description.kn || "");
+      setDescriptionMr(p.description.mr || "");
       setDescriptionPa(p.description.pa || "");
+      setDescriptionTa(p.description.ta || "");
     } else {
-      setDescriptionEn(String(p.description || ""));
+      const s = String(p.description || "");
+      setDescriptionEn(s);
       setDescriptionHi("");
+      setDescriptionKn("");
+      setDescriptionMr("");
       setDescriptionPa("");
+      setDescriptionTa("");
     }
 
     // Specification Map
     if (typeof p.specification === "object" && p.specification !== null) {
       setSpecificationEn(p.specification.en || "");
       setSpecificationHi(p.specification.hi || "");
+      setSpecificationKn(p.specification.kn || "");
+      setSpecificationMr(p.specification.mr || "");
       setSpecificationPa(p.specification.pa || "");
+      setSpecificationTa(p.specification.ta || "");
     } else {
-      setSpecificationEn(String(p.specification || ""));
+      const s = String(p.specification || "");
+      setSpecificationEn(s);
       setSpecificationHi("");
+      setSpecificationKn("");
+      setSpecificationMr("");
       setSpecificationPa("");
+      setSpecificationTa("");
     }
 
     // Product Ingredients Map
     if (typeof p.productIngredients === "object" && p.productIngredients !== null) {
-      setProductIngredientsEn(p.productIngredients.en || "");
-      setProductIngredientsHi(p.productIngredients.hi || "लागू नहीं");
-      setProductIngredientsPa(p.productIngredients.pa || "ਲਾਗੂ ਨਹੀਂ");
+      setProductIngredientsEn(Array.isArray(p.productIngredients.en) ? p.productIngredients.en.join(", ") : (p.productIngredients.en || ""));
+      setProductIngredientsHi(Array.isArray(p.productIngredients.hi) ? p.productIngredients.hi.join(", ") : (p.productIngredients.hi || ""));
+      setProductIngredientsKn(Array.isArray(p.productIngredients.kn) ? p.productIngredients.kn.join(", ") : (p.productIngredients.kn || ""));
+      setProductIngredientsMr(Array.isArray(p.productIngredients.mr) ? p.productIngredients.mr.join(", ") : (p.productIngredients.mr || ""));
+      setProductIngredientsPa(Array.isArray(p.productIngredients.pa) ? p.productIngredients.pa.join(", ") : (p.productIngredients.pa || ""));
+      setProductIngredientsTa(Array.isArray(p.productIngredients.ta) ? p.productIngredients.ta.join(", ") : (p.productIngredients.ta || ""));
     } else {
-      setProductIngredientsEn(String(p.productIngredients || ""));
-      setProductIngredientsHi("लागू नहीं");
-      setProductIngredientsPa("ਲਾਗੂ ਨਹੀਂ");
+      const s = String(p.productIngredients || "");
+      setProductIngredientsEn(s);
+      setProductIngredientsHi("");
+      setProductIngredientsKn("");
+      setProductIngredientsMr("");
+      setProductIngredientsPa("");
+      setProductIngredientsTa("");
     }
 
     // Usage Map
@@ -468,34 +574,55 @@ function ProductsMarketplacePage() {
     if (typeof p.instructionsToUse === "object" && p.instructionsToUse !== null) {
       setInstructionsToUseEn(Array.isArray(p.instructionsToUse.en) ? p.instructionsToUse.en.join("\n") : (p.instructionsToUse.en || ""));
       setInstructionsToUseHi(Array.isArray(p.instructionsToUse.hi) ? p.instructionsToUse.hi.join("\n") : (p.instructionsToUse.hi || ""));
+      setInstructionsToUseKn(Array.isArray(p.instructionsToUse.kn) ? p.instructionsToUse.kn.join("\n") : (p.instructionsToUse.kn || ""));
+      setInstructionsToUseMr(Array.isArray(p.instructionsToUse.mr) ? p.instructionsToUse.mr.join("\n") : (p.instructionsToUse.mr || ""));
       setInstructionsToUsePa(Array.isArray(p.instructionsToUse.pa) ? p.instructionsToUse.pa.join("\n") : (p.instructionsToUse.pa || ""));
+      setInstructionsToUseTa(Array.isArray(p.instructionsToUse.ta) ? p.instructionsToUse.ta.join("\n") : (p.instructionsToUse.ta || ""));
     } else {
-      setInstructionsToUseEn(String(p.instructionsToUse || ""));
+      const s = String(p.instructionsToUse || "");
+      setInstructionsToUseEn(s);
       setInstructionsToUseHi("");
+      setInstructionsToUseKn("");
+      setInstructionsToUseMr("");
       setInstructionsToUsePa("");
+      setInstructionsToUseTa("");
     }
 
     // Storage Condition Map
     if (typeof p.storageCondition === "object" && p.storageCondition !== null) {
-      setStorageConditionEn(p.storageCondition.en || "");
-      setStorageConditionHi(p.storageCondition.hi || "");
-      setStorageConditionPa(p.storageCondition.pa || "");
+      setStorageConditionEn(Array.isArray(p.storageCondition.en) ? p.storageCondition.en.join(", ") : (p.storageCondition.en || ""));
+      setStorageConditionHi(Array.isArray(p.storageCondition.hi) ? p.storageCondition.hi.join(", ") : (p.storageCondition.hi || ""));
+      setStorageConditionKn(Array.isArray(p.storageCondition.kn) ? p.storageCondition.kn.join(", ") : (p.storageCondition.kn || ""));
+      setStorageConditionMr(Array.isArray(p.storageCondition.mr) ? p.storageCondition.mr.join(", ") : (p.storageCondition.mr || ""));
+      setStorageConditionPa(Array.isArray(p.storageCondition.pa) ? p.storageCondition.pa.join(", ") : (p.storageCondition.pa || ""));
+      setStorageConditionTa(Array.isArray(p.storageCondition.ta) ? p.storageCondition.ta.join(", ") : (p.storageCondition.ta || ""));
     } else {
-      setStorageConditionEn(String(p.storageCondition || ""));
+      const s = String(p.storageCondition || "");
+      setStorageConditionEn(s);
       setStorageConditionHi("");
+      setStorageConditionKn("");
+      setStorageConditionMr("");
       setStorageConditionPa("");
+      setStorageConditionTa("");
     }
 
     // Best Before Map
     const bb = p.bestBefore || p.best_before;
     if (typeof bb === "object" && bb !== null) {
-      setBestBeforeEn(bb.en || "");
-      setBestBeforeHi(bb.hi || "लागू नहीं");
-      setBestBeforePa(bb.pa || "ਲਾਗੂ ਨਹੀਂ");
+      setBestBeforeEn(bb.en || "1 Year");
+      setBestBeforeHi(bb.hi || "1 वर्ष");
+      setBestBeforeKn(bb.kn || "1 ವರ್ಷ");
+      setBestBeforeMr(bb.mr || "१ वर्ष");
+      setBestBeforePa(bb.pa || "1 ਸਾਲ");
+      setBestBeforeTa(bb.ta || "1 ஆண்டு");
     } else {
-      setBestBeforeEn(String(bb || ""));
-      setBestBeforeHi("लागू नहीं");
-      setBestBeforePa("ਲਾਗੂ नहीं");
+      const s = String(bb || "1 Year");
+      setBestBeforeEn(s);
+      setBestBeforeHi("1 वर्ष");
+      setBestBeforeKn("1 ವರ್ಷ");
+      setBestBeforeMr("१ वर्ष");
+      setBestBeforePa("1 ਸਾਲ");
+      setBestBeforeTa("1 ஆண்டு");
     }
 
     // Delivery Config
@@ -544,24 +671,27 @@ function ProductsMarketplacePage() {
     const categoryNameEn = selectedCategoryObj ? getLocalizedText(selectedCategoryObj.name, categoryId) : "Breeding";
     const subCategoryNameEn = toStr(subCategoryId).replace(/^subcat_/, "").replace(/_/g, " ");
 
-    // EXACT 100% Match for Flutter `ProductListingEntity` Model & Types
+    const makeMultiLang = (enVal: string, hiVal: string, knVal: string, mrVal: string, paVal: string, taVal: string, fallback = "") => {
+      const e = toStr(enVal) || toStr(hiVal) || fallback;
+      return {
+        en: e,
+        hi: toStr(hiVal) || e,
+        kn: toStr(knVal) || e,
+        mr: toStr(mrVal) || e,
+        pa: toStr(paVal) || e,
+        ta: toStr(taVal) || e,
+      };
+    };
+
+    // EXACT 100% Match for Flutter `ProductListingEntity` Model & Types with all 6 regional languages
     const payload: any = {
       id: toStr(productId) || `PRD-${Date.now()}`,
       
-      // Map<String, dynamic> name
-      name: {
-        en: cleanNameEn || cleanNameHi,
-        hi: cleanNameHi || cleanNameEn,
-        ...(toStr(namePa) ? { pa: toStr(namePa) } : {}),
-        ...(toStr(nameMr) ? { mr: toStr(nameMr) } : {}),
-      },
+      // Map<String, dynamic> name (en, hi, kn, mr, pa, ta)
+      name: makeMultiLang(nameEn, nameHi, nameKn, nameMr, namePa, nameTa, "Product"),
 
-      // Map<String, dynamic> sellerName
-      sellerName: {
-        en: toStr(sellerNameEn) || "Chimertech",
-        hi: toStr(sellerNameHi) || "चिमरटेक",
-        pa: toStr(sellerNamePa) || "ਚਿਮਰਟੈਕ",
-      },
+      // Map<String, dynamic> sellerName (en, hi, kn, mr, pa, ta)
+      sellerName: makeMultiLang(sellerNameEn, sellerNameHi, sellerNameKn, sellerNameMr, sellerNamePa, sellerNameTa, "Chimertech"),
 
       // String sellerLogo
       sellerLogo: toStr(sellerLogo),
@@ -578,12 +708,8 @@ function ProductsMarketplacePage() {
       // String thumbnailUrl
       thumbnailUrl: finalThumbnail,
 
-      // Map<String, dynamic> description
-      description: {
-        en: toStr(descriptionEn) || toStr(descriptionHi),
-        hi: toStr(descriptionHi) || toStr(descriptionEn),
-        ...(toStr(descriptionPa) ? { pa: toStr(descriptionPa) } : {}),
-      },
+      // Map<String, dynamic> description (en, hi, kn, mr, pa, ta)
+      description: makeMultiLang(descriptionEn, descriptionHi, descriptionKn, descriptionMr, descriptionPa, descriptionTa, ""),
 
       // double price
       price: Number(price) || 0.0,
@@ -600,12 +726,11 @@ function ProductsMarketplacePage() {
       // double weight
       weight: Number(weight) || 0.0,
 
-      // Map<String, dynamic> weightUnit
-      weightUnit: {
-        en: toStr(weightUnitEn) || "g",
-        hi: toStr(weightUnitHi) || "ग्राम",
-        pa: toStr(weightUnitPa) || "ਗ੍ਰਾਮ",
-      },
+      // Map<String, dynamic> weightUnit (en, hi, kn, mr, pa, ta)
+      weightUnit: makeMultiLang(weightUnitEn, weightUnitHi, weightUnitKn, weightUnitMr, weightUnitPa, weightUnitTa, "g"),
+
+      // Map<String, dynamic> quantityUnit (en, hi, kn, mr, pa, ta)
+      quantityUnit: makeMultiLang(quantityUnitEn, quantityUnitHi, quantityUnitKn, quantityUnitMr, quantityUnitPa, quantityUnitTa, "Unit"),
 
       // Map<String, dynamic>? usage
       usage: toStr(usageEn) || toStr(usageHi) ? {
@@ -613,33 +738,17 @@ function ProductsMarketplacePage() {
         ...(toStr(usageHi) ? { hi: toStr(usageHi) } : {}),
       } : null,
 
-      // Map<String, dynamic>? storageCondition
-      storageCondition: toStr(storageConditionEn) || toStr(storageConditionHi) || toStr(storageConditionPa) ? {
-        en: toStr(storageConditionEn) || null,
-        hi: toStr(storageConditionHi) || null,
-        pa: toStr(storageConditionPa) || null,
-      } : null,
+      // Map<String, dynamic>? storageCondition (en, hi, kn, mr, pa, ta)
+      storageCondition: makeMultiLang(storageConditionEn, storageConditionHi, storageConditionKn, storageConditionMr, storageConditionPa, storageConditionTa, "°C to 15°C"),
 
-      // Map<String, dynamic>? specification
-      specification: toStr(specificationEn) || toStr(specificationHi) || toStr(specificationPa) ? {
-        en: toStr(specificationEn) || toStr(specificationHi),
-        hi: toStr(specificationHi) || toStr(specificationEn),
-        ...(toStr(specificationPa) ? { pa: toStr(specificationPa) } : {}),
-      } : null,
+      // Map<String, dynamic>? specification (en, hi, kn, mr, pa, ta)
+      specification: makeMultiLang(specificationEn, specificationHi, specificationKn, specificationMr, specificationPa, specificationTa, ""),
 
-      // Map<String, dynamic>? instructionsToUse
-      instructionsToUse: toStr(instructionsToUseEn) || toStr(instructionsToUseHi) || toStr(instructionsToUsePa) ? {
-        en: toStr(instructionsToUseEn) || toStr(instructionsToUseHi),
-        hi: toStr(instructionsToUseHi) || toStr(instructionsToUseEn),
-        ...(toStr(instructionsToUsePa) ? { pa: toStr(instructionsToUsePa) } : {}),
-      } : null,
+      // Map<String, dynamic>? instructionsToUse (en, hi, kn, mr, pa, ta)
+      instructionsToUse: makeMultiLang(instructionsToUseEn, instructionsToUseHi, instructionsToUseKn, instructionsToUseMr, instructionsToUsePa, instructionsToUseTa, ""),
 
-      // Map<String, dynamic>? productIngredients
-      productIngredients: toStr(productIngredientsEn) || toStr(productIngredientsHi) || toStr(productIngredientsPa) ? {
-        en: toStr(productIngredientsEn) || toStr(productIngredientsHi),
-        hi: toStr(productIngredientsHi) || "लागू नहीं",
-        pa: toStr(productIngredientsPa) || "ਲਾਗੂ ਨਹੀਂ",
-      } : null,
+      // Map<String, dynamic>? productIngredients (en, hi, kn, mr, pa, ta)
+      productIngredients: makeMultiLang(productIngredientsEn, productIngredientsHi, productIngredientsKn, productIngredientsMr, productIngredientsPa, productIngredientsTa, ""),
 
       // String categoryId
       categoryId: toStr(categoryId),
@@ -647,34 +756,28 @@ function ProductsMarketplacePage() {
       // String subCategoryId
       subCategoryId: toStr(subCategoryId),
 
-      // Map<String, String>? category
-      category: {
-        en: categoryNameEn,
-      },
+      // Map<String, String>? category (en, hi, kn, mr, pa, ta)
+      category: makeMultiLang(categoryNameEn, selectedCategoryObj?.name?.hi || categoryNameEn, selectedCategoryObj?.name?.kn || categoryNameEn, selectedCategoryObj?.name?.mr || categoryNameEn, selectedCategoryObj?.name?.pa || categoryNameEn, selectedCategoryObj?.name?.ta || categoryNameEn, "Breeding"),
 
-      // Map<String, String>? subCategory
-      subCategory: {
-        en: subCategoryNameEn,
-      },
+      // Map<String, String>? subCategory (en, hi, kn, mr, pa, ta)
+      subCategory: makeMultiLang(subCategoryNameEn, subCategoryNameEn, subCategoryNameEn, subCategoryNameEn, subCategoryNameEn, subCategoryNameEn, "breeding detection"),
 
       // String sellerType
       sellerType: toStr(sellerType) || "seller",
 
       // double gst
-      gst: Number(gst) || 18.0,
+      gst: Number(gst) || 5.0,
 
-      // Map<String, dynamic>? bestBefore
-      bestBefore: {
-        en: toStr(bestBeforeEn) || toStr(bestBeforeHi),
-        hi: toStr(bestBeforeHi) || "लागू नहीं",
-        pa: toStr(bestBeforePa) || "ਲਾਗੂ ਨਹੀਂ",
-      },
+      // Map<String, dynamic>? bestBefore & best_before (en, hi, kn, mr, pa, ta)
+      bestBefore: makeMultiLang(bestBeforeEn, bestBeforeHi, bestBeforeKn, bestBeforeMr, bestBeforePa, bestBeforeTa, "1 Year"),
+      best_before: makeMultiLang(bestBeforeEn, bestBeforeHi, bestBeforeKn, bestBeforeMr, bestBeforePa, bestBeforeTa, "1 Year"),
 
       // bool? cartAddded
       cartAddded: Boolean(cartAddded),
 
-      // bool bestSeller
+      // bool bestSeller & isBestSeller
       bestSeller: Boolean(bestSeller),
+      isBestSeller: Boolean(bestSeller),
 
       // DeliveryConfig? deliveryConfig (null deletes mapping from Firestore, object creates/updates)
       deliveryConfig: deliveryType === "all" ? null : {
@@ -703,15 +806,27 @@ function ProductsMarketplacePage() {
     }
   };
 
+  const isProductBestSeller = (p: any) => {
+    if (!p) return false;
+    if (optimisticBestSellers[p.id] !== undefined) {
+      return optimisticBestSellers[p.id];
+    }
+    return Boolean(p.bestSeller || p.isBestSeller);
+  };
+
   const handleToggleBestSeller = async (p: any) => {
-    const isBs = Boolean(p.bestSeller || p.isBestSeller);
+    const currentBs = isProductBestSeller(p);
+    const nextBs = !currentBs;
+    // Instant optimistic visual feedback!
+    setOptimisticBestSellers((prev) => ({ ...prev, [p.id]: nextBs }));
     try {
       await toggleBestSeller.mutateAsync({
         productId: p.id,
-        isBestSeller: !isBs,
+        isBestSeller: nextBs,
       });
-      toast.success(!isBs ? `Marked "${getLocalizedText(p.name || p.title)}" as Best Seller` : `Removed Best Seller status`);
+      toast.success(nextBs ? `Marked "${getLocalizedText(p.name || p.title)}" as Best Seller` : `Removed Best Seller status`);
     } catch (err: any) {
+      setOptimisticBestSellers((prev) => ({ ...prev, [p.id]: currentBs }));
       toast.error(`Error updating best seller: ${err.message}`);
     }
   };
@@ -722,10 +837,24 @@ function ProductsMarketplacePage() {
       const pName = getLocalizedText(p.name || p.title, "").toLowerCase();
       const pId = String(p.id || "").toLowerCase();
       const pSeller = getLocalizedText(p.sellerName, "").toLowerCase();
-      const matchQ = !q || pName.includes(q.toLowerCase()) || pId.includes(q.toLowerCase()) || pSeller.includes(q.toLowerCase());
+      const queryStr = q.toLowerCase().trim();
+      const pSku = String(p.sku || p.SKU || "").toLowerCase();
+      const pBrand = String(p.brand || p.brandName || "").toLowerCase();
+      const pSellerId = String(p.sellerId || p.sellerUid || "").toLowerCase();
+      const pCategory = String(p.category || p.categoryName || categoryMap.get(p.categoryId) || "").toLowerCase();
+
+      const matchQ =
+        !queryStr ||
+        pName.includes(queryStr) ||
+        pId.includes(queryStr) ||
+        pSeller.includes(queryStr) ||
+        pSku.includes(queryStr) ||
+        pBrand.includes(queryStr) ||
+        pSellerId.includes(queryStr) ||
+        pCategory.includes(queryStr);
 
       const pStatus = (getLocalizedText(p.status, "Approved")).toLowerCase();
-      const isBs = Boolean(p.bestSeller || p.isBestSeller);
+      const isBs = isProductBestSeller(p);
 
       let matchFilter = true;
       if (filter === "approved") matchFilter = pStatus === "approved" || pStatus === "active";
@@ -953,7 +1082,7 @@ function ProductsMarketplacePage() {
                   const pName = getLocalizedText(p.name || p.title, "Unnamed Product");
                   const thumb = p.thumbnailUrl || (Array.isArray(p.imageUrls) ? p.imageUrls[0] : "") || (Array.isArray(p.images) ? p.images[0] : "") || "";
                   const pCategory = categoryMap.get(p.categoryId) || getLocalizedText(p.category, p.categoryId || "General");
-                  const isBs = Boolean(p.bestSeller || p.isBestSeller);
+                  const isBs = isProductBestSeller(p);
                   const pStatus = getLocalizedText(p.status, "Approved");
                   const currentStock = Number(p.quantity !== undefined ? p.quantity : (p.stock !== undefined ? p.stock : 0));
                   const qUnitStr = typeof p.quantityUnit === "object" ? getLocalizedText(p.quantityUnit, "Units") : String(p.quantityUnit || "Units");
@@ -1033,11 +1162,18 @@ function ProductsMarketplacePage() {
 
                       {/* Seller */}
                       <TableCell>
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-2">
                           {p.sellerLogo ? (
-                            <ProductImage src={p.sellerLogo} alt="Seller Logo" className="h-5 w-5 rounded-full object-cover border shrink-0 bg-white" fallbackIcon={Building} />
+                            <ProductImage
+                              src={p.sellerLogo}
+                              alt="Seller Logo"
+                              className="h-8 w-8 rounded-xl object-contain border shadow-2xs shrink-0 bg-white p-0.5"
+                              fallbackIcon={Building}
+                            />
                           ) : (
-                            <Building className="h-3.5 w-3.5 text-primary shrink-0" />
+                            <div className="h-8 w-8 rounded-xl bg-primary/10 text-primary font-bold text-xs flex items-center justify-center shrink-0 border border-primary/20">
+                              {(getLocalizedText(p.sellerName, "C"))[0]?.toUpperCase() || "S"}
+                            </div>
                           )}
                           <div className="font-medium text-foreground truncate max-w-[140px]">
                             {getLocalizedText(p.sellerName, "Chimertech")}
@@ -1048,10 +1184,19 @@ function ProductsMarketplacePage() {
                       {/* Status & Badges */}
                       <TableCell>
                         <div className="space-y-1">
-                          <StatusBadge status={pStatus} />
+                          <div
+                            title={
+                              pStatus.toLowerCase() === "approved" || pStatus.toLowerCase() === "active"
+                                ? "Verified by Admin and live for customer purchase on iHerd app"
+                                : "Pending review or deactivated by administrator"
+                            }
+                            className="inline-block cursor-help"
+                          >
+                            <StatusBadge status={pStatus} />
+                          </div>
                           {isBs && (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-600 border border-amber-500/20">
-                              <Flame className="h-3 w-3 fill-amber-500" /> Best Seller
+                              <Flame className="h-3 w-3 fill-amber-500 text-amber-500 drop-shadow-[0_0_6px_rgba(245,158,11,0.6)]" /> Best Seller
                             </span>
                           )}
                         </div>
@@ -1073,12 +1218,21 @@ function ProductsMarketplacePage() {
                             size="sm"
                             variant={isBs ? "default" : "outline"}
                             onClick={() => handleToggleBestSeller(p)}
-                            className={`h-8 px-2 text-xs gap-1 rounded-xl ${
-                              isBs ? "bg-amber-500 hover:bg-amber-600 text-white" : "border-amber-500/30 text-amber-600 hover:bg-amber-50"
+                            className={`h-8 px-2.5 text-xs gap-1 font-semibold rounded-xl transition-all ${
+                              isBs
+                                ? "bg-amber-500 hover:bg-amber-600 text-white shadow-sm shadow-amber-500/30 ring-2 ring-amber-400/40"
+                                : "border-amber-500/30 text-amber-600 hover:bg-amber-50"
                             }`}
                             title={isBs ? "Remove Best Seller" : "Mark as Best Seller"}
                           >
-                            <Flame className="h-3 w-3" />
+                            <Flame
+                              className={`h-3.5 w-3.5 transition-all ${
+                                isBs
+                                  ? "fill-white text-white drop-shadow-[0_0_8px_rgba(255,255,255,0.9)] animate-pulse"
+                                  : "fill-none text-amber-500"
+                              }`}
+                            />
+                            <span>{isBs ? "Best Seller" : "Feature"}</span>
                           </Button>
                           <Button
                             size="sm"
@@ -1359,33 +1513,61 @@ function ProductsMarketplacePage() {
                 </div>
 
                 {/* Multilingual Names (Map<String, dynamic> name) */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3 rounded-2xl bg-muted/30 border">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="prod-name-hi">Hindi (<code>name.hi</code>)</Label>
-                    <Input
-                      id="prod-name-hi"
-                      placeholder="e.g. पोर्टेबल लिक्विड नाइट्रोजन"
-                      value={nameHi}
-                      onChange={(e) => setNameHi(e.target.value)}
-                    />
+                <div className="p-3 rounded-2xl bg-muted/30 border space-y-2">
+                  <div className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                    Regional Languages (<code>name.hi, kn, mr, pa, ta</code>)
                   </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="prod-name-pa">Punjabi (<code>name.pa</code>)</Label>
-                    <Input
-                      id="prod-name-pa"
-                      placeholder="e.g. ਪੋਰਟੇਬਲ ਤਰਲ ਨਾਈਟ੍ਰੋਜਨ"
-                      value={namePa}
-                      onChange={(e) => setNamePa(e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="prod-name-mr">Marathi (<code>name.mr</code>)</Label>
-                    <Input
-                      id="prod-name-mr"
-                      placeholder="e.g. पोर्टेबल लिक्विड नायट्रोजन"
-                      value={nameMr}
-                      onChange={(e) => setNameMr(e.target.value)}
-                    />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-2.5">
+                    <div className="space-y-1">
+                      <Label htmlFor="prod-name-hi" className="text-[11px]">Hindi (<code>hi</code>)</Label>
+                      <Input
+                        id="prod-name-hi"
+                        placeholder="e.g. प्रेगकाइन बोवाइन..."
+                        value={nameHi}
+                        onChange={(e) => setNameHi(e.target.value)}
+                        className="text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="prod-name-kn" className="text-[11px]">Kannada (<code>kn</code>)</Label>
+                      <Input
+                        id="prod-name-kn"
+                        placeholder="e.g. ಪ್ರೆಗ್‌ಕೈನ್ ಬೋವೈನ್..."
+                        value={nameKn}
+                        onChange={(e) => setNameKn(e.target.value)}
+                        className="text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="prod-name-mr" className="text-[11px]">Marathi (<code>mr</code>)</Label>
+                      <Input
+                        id="prod-name-mr"
+                        placeholder="e.g. प्रेगकाईन बोव्हाइन..."
+                        value={nameMr}
+                        onChange={(e) => setNameMr(e.target.value)}
+                        className="text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="prod-name-pa" className="text-[11px]">Punjabi (<code>pa</code>)</Label>
+                      <Input
+                        id="prod-name-pa"
+                        placeholder="e.g. ਪ੍ਰੇਗਕਾਈਨ ਬੋਵਾਈਨ..."
+                        value={namePa}
+                        onChange={(e) => setNamePa(e.target.value)}
+                        className="text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="prod-name-ta" className="text-[11px]">Tamil (<code>ta</code>)</Label>
+                      <Input
+                        id="prod-name-ta"
+                        placeholder="e.g. பிரெக்கைன் போவின்..."
+                        value={nameTa}
+                        onChange={(e) => setNameTa(e.target.value)}
+                        className="text-xs"
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -1607,37 +1789,70 @@ function ProductsMarketplacePage() {
                   </div>
                 </div>
 
-                {/* Best Before Localized Map */}
+                {/* Best Before Localized Map (en, hi, kn, mr, pa, ta) */}
                 <div className="p-4 rounded-2xl border bg-muted/20 space-y-3">
                   <h4 className="font-semibold text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                    <Calendar className="h-4 w-4 text-primary" /> Best Before (<code>Map&lt;String, dynamic&gt;? bestBefore</code>)
+                    <Calendar className="h-4 w-4 text-primary" /> Best Before (<code>bestBefore & best_before</code>: en, hi, kn, mr, pa, ta)
                   </h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div className="space-y-1.5">
-                      <Label htmlFor="prod-bb-en">English</Label>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5">
+                    <div className="space-y-1">
+                      <Label htmlFor="prod-bb-en" className="text-[11px]">English (<code>en</code>)</Label>
                       <Input
                         id="prod-bb-en"
-                        placeholder="e.g. Not Applicable / 24 Months"
+                        placeholder="1 Year"
                         value={bestBeforeEn}
                         onChange={(e) => setBestBeforeEn(e.target.value)}
+                        className="text-xs"
                       />
                     </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="prod-bb-hi">Hindi</Label>
+                    <div className="space-y-1">
+                      <Label htmlFor="prod-bb-hi" className="text-[11px]">Hindi (<code>hi</code>)</Label>
                       <Input
                         id="prod-bb-hi"
-                        placeholder="e.g. लागू नहीं"
+                        placeholder="1 वर्ष"
                         value={bestBeforeHi}
                         onChange={(e) => setBestBeforeHi(e.target.value)}
+                        className="text-xs"
                       />
                     </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="prod-bb-pa">Punjabi</Label>
+                    <div className="space-y-1">
+                      <Label htmlFor="prod-bb-kn" className="text-[11px]">Kannada (<code>kn</code>)</Label>
+                      <Input
+                        id="prod-bb-kn"
+                        placeholder="1 ವರ್ಷ"
+                        value={bestBeforeKn}
+                        onChange={(e) => setBestBeforeKn(e.target.value)}
+                        className="text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="prod-bb-mr" className="text-[11px]">Marathi (<code>mr</code>)</Label>
+                      <Input
+                        id="prod-bb-mr"
+                        placeholder="१ वर्ष"
+                        value={bestBeforeMr}
+                        onChange={(e) => setBestBeforeMr(e.target.value)}
+                        className="text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="prod-bb-pa" className="text-[11px]">Punjabi (<code>pa</code>)</Label>
                       <Input
                         id="prod-bb-pa"
-                        placeholder="e.g. ਲਾਗੂ ਨਹੀਂ"
+                        placeholder="1 ਸਾਲ"
                         value={bestBeforePa}
                         onChange={(e) => setBestBeforePa(e.target.value)}
+                        className="text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="prod-bb-ta" className="text-[11px]">Tamil (<code>ta</code>)</Label>
+                      <Input
+                        id="prod-bb-ta"
+                        placeholder="1 ஆண்டு"
+                        value={bestBeforeTa}
+                        onChange={(e) => setBestBeforeTa(e.target.value)}
+                        className="text-xs"
                       />
                     </div>
                   </div>
@@ -1646,146 +1861,364 @@ function ProductsMarketplacePage() {
 
               {/* TAB 3: SPECS & DETAILS */}
               <TabsContent value="specs" className="space-y-4">
-                {/* Description Map */}
+                {/* Description Map (en, hi, kn, mr, pa, ta) */}
                 <div className="p-4 rounded-2xl border bg-muted/20 space-y-3">
                   <h4 className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">
-                    Description (<code>Map&lt;String, dynamic&gt; description</code>)
+                    Description (<code>description</code>: en, hi, kn, mr, pa, ta)
                   </h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="space-y-1.5">
-                      <Label htmlFor="prod-desc-en">English</Label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                    <div className="space-y-1">
+                      <Label htmlFor="prod-desc-en" className="text-[11px]">English (<code>en</code>)</Label>
                       <Textarea
                         id="prod-desc-en"
                         rows={2}
-                        placeholder="English description..."
+                        placeholder="Advanced, rapid pregnancy detection kit..."
                         value={descriptionEn}
                         onChange={(e) => setDescriptionEn(e.target.value)}
+                        className="text-xs"
                       />
                     </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="prod-desc-hi">Hindi</Label>
+                    <div className="space-y-1">
+                      <Label htmlFor="prod-desc-hi" className="text-[11px]">Hindi (<code>hi</code>)</Label>
                       <Textarea
                         id="prod-desc-hi"
                         rows={2}
-                        placeholder="e.g. 2 लीटर एलएन2 पोर्टेबल..."
+                        placeholder="गायों के लिए रैपिड प्रेगनेंसी..."
                         value={descriptionHi}
                         onChange={(e) => setDescriptionHi(e.target.value)}
+                        className="text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="prod-desc-kn" className="text-[11px]">Kannada (<code>kn</code>)</Label>
+                      <Textarea
+                        id="prod-desc-kn"
+                        rows={2}
+                        placeholder="ಕನ್ನಡ ವಿವರಣೆ..."
+                        value={descriptionKn}
+                        onChange={(e) => setDescriptionKn(e.target.value)}
+                        className="text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="prod-desc-mr" className="text-[11px]">Marathi (<code>mr</code>)</Label>
+                      <Textarea
+                        id="prod-desc-mr"
+                        rows={2}
+                        placeholder="मराठी वर्णन..."
+                        value={descriptionMr}
+                        onChange={(e) => setDescriptionMr(e.target.value)}
+                        className="text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="prod-desc-pa" className="text-[11px]">Punjabi (<code>pa</code>)</Label>
+                      <Textarea
+                        id="prod-desc-pa"
+                        rows={2}
+                        placeholder="ਪੰਜਾਬੀ ਵੇਰਵਾ..."
+                        value={descriptionPa}
+                        onChange={(e) => setDescriptionPa(e.target.value)}
+                        className="text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="prod-desc-ta" className="text-[11px]">Tamil (<code>ta</code>)</Label>
+                      <Textarea
+                        id="prod-desc-ta"
+                        rows={2}
+                        placeholder="தமிழ் விளக்கம்..."
+                        value={descriptionTa}
+                        onChange={(e) => setDescriptionTa(e.target.value)}
+                        className="text-xs"
                       />
                     </div>
                   </div>
                 </div>
 
-                {/* Specification Map */}
+                {/* Specification Map (en, hi, kn, mr, pa, ta) */}
                 <div className="p-4 rounded-2xl border bg-muted/20 space-y-3">
                   <h4 className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">
-                    Specifications (<code>Map&lt;String, dynamic&gt;? specification</code>)
+                    Specifications (<code>specification</code>: en, hi, kn, mr, pa, ta)
                   </h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="space-y-1.5">
-                      <Label htmlFor="prod-spec-en">English</Label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                    <div className="space-y-1">
+                      <Label htmlFor="prod-spec-en" className="text-[11px]">English (<code>en</code>)</Label>
                       <Textarea
                         id="prod-spec-en"
                         rows={2}
-                        placeholder="Technical specs in English..."
+                        placeholder="Detects in as early as 28 days..."
                         value={specificationEn}
                         onChange={(e) => setSpecificationEn(e.target.value)}
+                        className="text-xs"
                       />
                     </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="prod-spec-hi">Hindi</Label>
+                    <div className="space-y-1">
+                      <Label htmlFor="prod-spec-hi" className="text-[11px]">Hindi (<code>hi</code>)</Label>
                       <Textarea
                         id="prod-spec-hi"
                         rows={2}
-                        placeholder="e.g. 2 लीटर LN2 वीर्य भंडारण..."
+                        placeholder="प्रजनन या कृत्रिम गर्भाधान के बाद 28 दिनों में..."
                         value={specificationHi}
                         onChange={(e) => setSpecificationHi(e.target.value)}
+                        className="text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="prod-spec-kn" className="text-[11px]">Kannada (<code>kn</code>)</Label>
+                      <Textarea
+                        id="prod-spec-kn"
+                        rows={2}
+                        placeholder="ಸಂತಾನೋತ್ಪತ್ತಿ ಅಥವಾ ಕೃತಕ ಗರ್ಭಧಾರಣೆಯ ನಂತರ 28 ದಿನಗಳಲ್ಲಿ..."
+                        value={specificationKn}
+                        onChange={(e) => setSpecificationKn(e.target.value)}
+                        className="text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="prod-spec-mr" className="text-[11px]">Marathi (<code>mr</code>)</Label>
+                      <Textarea
+                        id="prod-spec-mr"
+                        rows={2}
+                        placeholder="प्रजनन किंवा कृत्रिम रेतन नंतर अवघ्या २८ दिवसांत..."
+                        value={specificationMr}
+                        onChange={(e) => setSpecificationMr(e.target.value)}
+                        className="text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="prod-spec-pa" className="text-[11px]">Punjabi (<code>pa</code>)</Label>
+                      <Textarea
+                        id="prod-spec-pa"
+                        rows={2}
+                        placeholder="ਪ੍ਰਜਨਨ ਜਾਂ ਕ੍ਰਿਤ੍ਰਿਮ ਗਰਭਧਾਰਣ ਤੋਂ 28 ਦਿਨਾਂ ਬਾਅਦ..."
+                        value={specificationPa}
+                        onChange={(e) => setSpecificationPa(e.target.value)}
+                        className="text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="prod-spec-ta" className="text-[11px]">Tamil (<code>ta</code>)</Label>
+                      <Textarea
+                        id="prod-spec-ta"
+                        rows={2}
+                        placeholder="இனப்பெருக்கம் அல்லது செயற்கை கருத்தரிப்பிற்குப் பின் 28 நாட்களிலேயே..."
+                        value={specificationTa}
+                        onChange={(e) => setSpecificationTa(e.target.value)}
+                        className="text-xs"
                       />
                     </div>
                   </div>
                 </div>
 
-                {/* Product Ingredients Map */}
+                {/* Product Ingredients Map (en, hi, kn, mr, pa, ta) */}
                 <div className="p-4 rounded-2xl border bg-muted/20 space-y-3">
                   <h4 className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">
-                    Ingredients (<code>Map&lt;String, dynamic&gt;? productIngredients</code>)
+                    Ingredients (<code>productIngredients</code>: en, hi, kn, mr, pa, ta)
                   </h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="space-y-1.5">
-                      <Label htmlFor="prod-ing-en">English</Label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
+                    <div className="space-y-1">
+                      <Label htmlFor="prod-ing-en" className="text-[11px]">English</Label>
                       <Input
                         id="prod-ing-en"
-                        placeholder="e.g. Not Applicable / Reagent"
+                        placeholder="Vaccutainer, 18G Needle, Syringe..."
                         value={productIngredientsEn}
                         onChange={(e) => setProductIngredientsEn(e.target.value)}
+                        className="text-xs"
                       />
                     </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="prod-ing-hi">Hindi</Label>
+                    <div className="space-y-1">
+                      <Label htmlFor="prod-ing-hi" className="text-[11px]">Hindi</Label>
                       <Input
                         id="prod-ing-hi"
-                        placeholder="e.g. लागू नहीं"
+                        placeholder="वै큠टेनर, 18G सुई, सिरिंज..."
                         value={productIngredientsHi}
                         onChange={(e) => setProductIngredientsHi(e.target.value)}
+                        className="text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="prod-ing-kn" className="text-[11px]">Kannada</Label>
+                      <Input
+                        id="prod-ing-kn"
+                        placeholder="ವ್ಯಾಕ್ಯೂಟೈನರ್, 18G ಸೂಜಿ..."
+                        value={productIngredientsKn}
+                        onChange={(e) => setProductIngredientsKn(e.target.value)}
+                        className="text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="prod-ing-mr" className="text-[11px]">Marathi</Label>
+                      <Input
+                        id="prod-ing-mr"
+                        placeholder="व्हॅक्यूटेनर, १८G सुई..."
+                        value={productIngredientsMr}
+                        onChange={(e) => setProductIngredientsMr(e.target.value)}
+                        className="text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="prod-ing-pa" className="text-[11px]">Punjabi</Label>
+                      <Input
+                        id="prod-ing-pa"
+                        placeholder="ਵੈਕਿਊਟੇਨਰ, 18G ਸੂਈ..."
+                        value={productIngredientsPa}
+                        onChange={(e) => setProductIngredientsPa(e.target.value)}
+                        className="text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="prod-ing-ta" className="text-[11px]">Tamil</Label>
+                      <Input
+                        id="prod-ing-ta"
+                        placeholder="வாக்குடெய்னர், 18G ஊசி..."
+                        value={productIngredientsTa}
+                        onChange={(e) => setProductIngredientsTa(e.target.value)}
+                        className="text-xs"
                       />
                     </div>
                   </div>
                 </div>
 
-                {/* Usage & Instructions */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="prod-usage-en">Usage (<code>Map? usage</code>)</Label>
-                    <Textarea
-                      id="prod-usage-en"
-                      rows={2}
-                      placeholder="e.g. Apply 10ml to the affected area..."
-                      value={usageEn}
-                      onChange={(e) => setUsageEn(e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="prod-inst-hi">Instructions (<code>Map? instructionsToUse</code>)</Label>
-                    <Textarea
-                      id="prod-inst-hi"
-                      rows={2}
-                      placeholder="e.g. लिक्विड नाइट्रोजन हैंडलिंग निर्देश..."
-                      value={instructionsToUseHi}
-                      onChange={(e) => setInstructionsToUseHi(e.target.value)}
-                    />
-                  </div>
-                </div>
-
-                {/* Storage Condition Map */}
+                {/* Instructions to Use (en, hi, kn, mr, pa, ta) */}
                 <div className="p-4 rounded-2xl border bg-muted/20 space-y-3">
                   <h4 className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">
-                    Storage Condition (<code>Map&lt;String, dynamic&gt;? storageCondition</code>)
+                    Instructions To Use (<code>instructionsToUse</code>: en, hi, kn, mr, pa, ta)
                   </h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div className="space-y-1.5">
-                      <Label htmlFor="prod-store-en">English</Label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                    <div className="space-y-1">
+                      <Label htmlFor="prod-inst-en" className="text-[11px]">English (<code>en</code>)</Label>
+                      <Textarea
+                        id="prod-inst-en"
+                        rows={2}
+                        placeholder="Step - 1: Add one drop of Whole Blood..."
+                        value={instructionsToUseEn}
+                        onChange={(e) => setInstructionsToUseEn(e.target.value)}
+                        className="text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="prod-inst-hi" className="text-[11px]">Hindi (<code>hi</code>)</Label>
+                      <Textarea
+                        id="prod-inst-hi"
+                        rows={2}
+                        placeholder="वैक्यूम जाँचें, प्री-हाइजीन के बाद..."
+                        value={instructionsToUseHi}
+                        onChange={(e) => setInstructionsToUseHi(e.target.value)}
+                        className="text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="prod-inst-kn" className="text-[11px]">Kannada (<code>kn</code>)</Label>
+                      <Textarea
+                        id="prod-inst-kn"
+                        rows={2}
+                        placeholder="ಹಂತ - 1: ರಕ್ತದ ಹನಿಯನ್ನು ಸೇರಿಸಿ..."
+                        value={instructionsToUseKn}
+                        onChange={(e) => setInstructionsToUseKn(e.target.value)}
+                        className="text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="prod-inst-mr" className="text-[11px]">Marathi (<code>mr</code>)</Label>
+                      <Textarea
+                        id="prod-inst-mr"
+                        rows={2}
+                        placeholder="पायरी - १: नमुना रक्ताचा थेंब घाला..."
+                        value={instructionsToUseMr}
+                        onChange={(e) => setInstructionsToUseMr(e.target.value)}
+                        className="text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="prod-inst-pa" className="text-[11px]">Punjabi (<code>pa</code>)</Label>
+                      <Textarea
+                        id="prod-inst-pa"
+                        rows={2}
+                        placeholder="ਕਦਮ - 1: ਖੂਨ ਦੀ ਇੱਕ ਬੂੰਦ ਪਾਓ..."
+                        value={instructionsToUsePa}
+                        onChange={(e) => setInstructionsToUsePa(e.target.value)}
+                        className="text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="prod-inst-ta" className="text-[11px]">Tamil (<code>ta</code>)</Label>
+                      <Textarea
+                        id="prod-inst-ta"
+                        rows={2}
+                        placeholder="படி - 1: இரத்த மாதிரியை சேர்க்கவும்..."
+                        value={instructionsToUseTa}
+                        onChange={(e) => setInstructionsToUseTa(e.target.value)}
+                        className="text-xs"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Storage Condition Map (en, hi, kn, mr, pa, ta) */}
+                <div className="p-4 rounded-2xl border bg-muted/20 space-y-3">
+                  <h4 className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">
+                    Storage Condition (<code>storageCondition</code>: en, hi, kn, mr, pa, ta)
+                  </h4>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5">
+                    <div className="space-y-1">
+                      <Label htmlFor="prod-store-en" className="text-[11px]">English</Label>
                       <Input
                         id="prod-store-en"
-                        placeholder="e.g. Store in a cool dry place"
+                        placeholder="°C to 15°C"
                         value={storageConditionEn}
                         onChange={(e) => setStorageConditionEn(e.target.value)}
+                        className="text-xs"
                       />
                     </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="prod-store-hi">Hindi (<code>hi</code>)</Label>
+                    <div className="space-y-1">
+                      <Label htmlFor="prod-store-hi" className="text-[11px]">Hindi</Label>
                       <Input
                         id="prod-store-hi"
-                        placeholder="e.g. ठंडी और सूखी जगह पर रखें"
+                        placeholder="°C से 15°C तक"
                         value={storageConditionHi}
                         onChange={(e) => setStorageConditionHi(e.target.value)}
+                        className="text-xs"
                       />
                     </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="prod-store-pa">Punjabi (<code>pa</code>)</Label>
+                    <div className="space-y-1">
+                      <Label htmlFor="prod-store-kn" className="text-[11px]">Kannada</Label>
+                      <Input
+                        id="prod-store-kn"
+                        placeholder="°C ರಿಂದ 15°C ವರೆಗೆ"
+                        value={storageConditionKn}
+                        onChange={(e) => setStorageConditionKn(e.target.value)}
+                        className="text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="prod-store-mr" className="text-[11px]">Marathi</Label>
+                      <Input
+                        id="prod-store-mr"
+                        placeholder="°C ते १५°C"
+                        value={storageConditionMr}
+                        onChange={(e) => setStorageConditionMr(e.target.value)}
+                        className="text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="prod-store-pa" className="text-[11px]">Punjabi</Label>
                       <Input
                         id="prod-store-pa"
-                        placeholder="e.g. ਕਮਰੇ ਦੇ ਤਾਪਮਾਨ ਤੇ ਰੱਖੋ"
+                        placeholder="°C ਤੋਂ 15°C ਤੱਕ"
                         value={storageConditionPa}
                         onChange={(e) => setStorageConditionPa(e.target.value)}
+                        className="text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="prod-store-ta" className="text-[11px]">Tamil</Label>
+                      <Input
+                        id="prod-store-ta"
+                        placeholder="°C முதல் 15°C வரை"
+                        value={storageConditionTa}
+                        onChange={(e) => setStorageConditionTa(e.target.value)}
+                        className="text-xs"
                       />
                     </div>
                   </div>

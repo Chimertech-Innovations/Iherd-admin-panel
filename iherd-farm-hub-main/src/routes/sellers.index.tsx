@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Store, Plus, Phone, Mail, MapPin, CheckCircle2 } from "lucide-react";
 import { doc, setDoc, collection, addDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { fetchApiJson } from "@/lib/apiClient";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/sellers/")({
@@ -81,8 +82,17 @@ function AddSellerDialog({ onCreated }: { onCreated?: () => void }) {
         updatedAt: new Date().toISOString(),
       };
 
-      // Save directly into Firestore 'sellers' collection
-      await addDoc(collection(db, "sellers"), sellerData);
+      // Save via backend API (Admin SDK) with fallback to Firestore addDoc
+      try {
+        await fetchApiJson("/api/admin/sellers", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(sellerData),
+        });
+      } catch (apiErr) {
+        console.warn("Backend /api/admin/sellers failed, falling back to direct addDoc:", apiErr);
+        await addDoc(collection(db, "sellers"), sellerData);
+      }
 
       toast.success(`Seller "${sellerData.shopName}" registered successfully!`);
       setOpen(false);
@@ -104,9 +114,6 @@ function AddSellerDialog({ onCreated }: { onCreated?: () => void }) {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button size="sm" className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-sm">
-          <Plus className="h-4 w-4" /> Add Seller
-        </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md rounded-2xl">
         <DialogHeader>
@@ -384,21 +391,21 @@ function SellersPage() {
 
   const totalSellers = sellers.length;
   const verifiedSellers = sellers.filter((s) => s.verified || s.status === "Active").length;
+  const distinctRegions = new Set(sellers.map((s) => s.city || s.state).filter((c) => c && c !== "—")).size;
+  const totalListedProducts = sellers.reduce((acc, s) => acc + (s.products || 0), 0);
 
   return (
     <div className="space-y-6">
       <DataPage
         title="Seller Management"
         description="All registered marketplace sellers — feed, equipment, medicines, and cattle trading."
-        primaryAction={<AddSellerDialog onCreated={handleRefresh} />}
         isLoading={isLoading}
         searchPlaceholder="Search sellers by store name, owner, phone, or category..."
         searchKeys={["name", "ownerName", "phone", "category", "city", "state"]}
         kpis={[
           { label: "Total Sellers", value: isLoading ? "…" : totalSellers.toLocaleString(), change: "Registered vendors", up: true },
           { label: "Verified & Active", value: isLoading ? "…" : verifiedSellers.toLocaleString(), change: "Active in marketplace", up: true },
-          { label: "GMV (30d)", value: isLoading ? "…" : "₹0", change: "Marketplace revenue", up: true },
-          { label: "Avg Payout", value: isLoading ? "…" : "₹0", change: "Vendor payouts", up: true },
+          { label: "Products Listed", value: isLoading ? "…" : totalListedProducts.toLocaleString(), change: "Catalog items", up: true },
         ]}
         data={sellers}
         rowHref={(row) => `/users/${row.id}`}

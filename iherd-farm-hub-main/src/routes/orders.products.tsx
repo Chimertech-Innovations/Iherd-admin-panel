@@ -342,10 +342,8 @@ function ProductOrdersPage() {
       <DataPage<any>
         title="Product Marketplace Orders & Shipping"
         description="Monitor farm hub e-commerce orders, customer shipments, and update live courier tracking information."
-        primaryAction=""
         isLoading={isLoading}
         filters={[
-          "All",
           "Ordered",
           "Processing",
           "Packed",
@@ -359,10 +357,7 @@ function ProductOrdersPage() {
         statusKey="status"
         kpis={[
           { label: "Total Orders", value: isLoading ? "…" : totalCount.toLocaleString() },
-          { label: "Pending / Processing", value: isLoading ? "…" : processingCount.toLocaleString() },
-          { label: "In Transit / Shipped", value: isLoading ? "…" : inTransitCount.toLocaleString() },
-          { label: "Delivered / Completed", value: isLoading ? "…" : completedCount.toLocaleString() },
-          { label: "Total Revenue", value: isLoading ? "…" : `₹${totalRevenue.toLocaleString()}` },
+          { label: "Total Revenue", value: isLoading ? "…" : `₹${totalRevenue.toLocaleString()}` }
         ]}
         data={orders.map((o: any) => {
           return {
@@ -506,38 +501,67 @@ function ProductOrdersPage() {
             render: (r) => {
               const hasTracking = r.trackingId && r.trackingId !== "—" && r.trackingId.trim() !== "";
               const carrier = r.carrierName || r.courierPartner || "Courier";
+              const statusStr = (r.status || "").toLowerCase();
+              const isCancelled = statusStr === "cancelled" || statusStr === "canceled";
+              const isDelivered = statusStr === "delivered" || statusStr === "completed";
+              const isDispatched = statusStr === "shipped" || statusStr === "dispatched" || statusStr === "in transit" || statusStr === "out for delivery";
+
+              if (isCancelled) {
+                return (
+                  <Badge variant="outline" className="text-[10px] text-muted-foreground border-border bg-muted/40">
+                    Cancelled / N/A
+                  </Badge>
+                );
+              }
+
+              if (hasTracking) {
+                return (
+                  <div className="space-y-0.5 min-w-[160px]">
+                    <div className="flex items-center gap-1 text-xs font-semibold text-foreground">
+                      <Truck className="h-3 w-3 text-primary" />
+                      <span className="truncate">{carrier}</span>
+                    </div>
+                    <div className="flex items-center gap-1 text-[11px]">
+                      <span className="font-mono bg-muted/60 px-1.5 py-0.5 rounded text-foreground font-medium">
+                        {r.trackingId}
+                      </span>
+                      {r.trackingUrl && (
+                        <a
+                          href={r.trackingUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-primary hover:underline inline-flex items-center"
+                          title="Open tracking page"
+                        >
+                          <ExternalLink className="h-2.5 w-2.5" />
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                );
+              }
+
+              if (isDelivered) {
+                return (
+                  <Badge variant="outline" className="text-[10px] text-emerald-600 border-emerald-300 bg-emerald-50 dark:bg-emerald-950/20">
+                    Delivered
+                  </Badge>
+                );
+              }
+
+              if (isDispatched) {
+                return (
+                  <Badge variant="outline" className="text-[10px] text-blue-600 border-blue-300 bg-blue-50 dark:bg-blue-950/20">
+                    In Transit
+                  </Badge>
+                );
+              }
+
               return (
-                <div className="space-y-1 min-w-[160px]">
-                  {hasTracking ? (
-                    <div className="space-y-0.5">
-                      <div className="flex items-center gap-1 text-xs font-semibold text-foreground">
-                        <Truck className="h-3 w-3 text-primary" />
-                        <span className="truncate">{carrier}</span>
-                      </div>
-                      <div className="flex items-center gap-1 text-[11px]">
-                        <span className="font-mono bg-muted/60 px-1.5 py-0.5 rounded text-foreground font-medium">
-                          {r.trackingId}
-                        </span>
-                        {r.trackingUrl && (
-                          <a
-                            href={r.trackingUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-primary hover:underline inline-flex items-center"
-                            title="Open tracking page"
-                          >
-                            <ExternalLink className="h-2.5 w-2.5" />
-                          </a>
-                        )}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-1">
-                      <Badge variant="outline" className="text-[10px] text-amber-600 border-amber-300 bg-amber-50 dark:bg-amber-950/20">
-                        Not Dispatched
-                      </Badge>
-                    </div>
-                  )}
+                <div className="flex items-center gap-1">
+                  <Badge variant="outline" className="text-[10px] text-amber-600 border-amber-300 bg-amber-50 dark:bg-amber-950/20">
+                    Not Dispatched
+                  </Badge>
                 </div>
               );
             },
@@ -562,28 +586,38 @@ function ProductOrdersPage() {
           {
             key: "actions",
             label: "Actions",
-            render: (r) => (
-              <div className="flex items-center gap-1.5">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 text-xs rounded-xl gap-1 px-2.5"
-                  onClick={() => setSelectedOrder(r.rawOrder || r)}
-                  title="View complete order details"
-                >
-                  <Info className="h-3.5 w-3.5" /> Details
-                </Button>
-                <Button
-                  size="sm"
-                  variant="default"
-                  className="h-7 text-xs rounded-xl gap-1 px-2.5 bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm"
-                  onClick={(e) => openTrackingDialog(r, e)}
-                  title="Fill or edit shipping tracking details"
-                >
-                  <Truck className="h-3.5 w-3.5" /> Track / Ship
-                </Button>
-              </div>
-            ),
+            render: (r) => {
+              const statusStr = (r.status || "").toLowerCase();
+              const isCancelled = statusStr === "cancelled" || statusStr === "canceled";
+
+              return (
+                <div className="flex items-center gap-1.5">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs rounded-xl gap-1 px-2.5"
+                    onClick={() => setSelectedOrder(r.rawOrder || r)}
+                    title="View complete order details"
+                  >
+                    <Info className="h-3.5 w-3.5" /> Details
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={isCancelled ? "secondary" : "default"}
+                    disabled={isCancelled}
+                    className={`h-7 text-xs rounded-xl gap-1 px-2.5 shadow-sm ${
+                      isCancelled
+                        ? "opacity-40 cursor-not-allowed bg-muted text-muted-foreground"
+                        : "bg-primary text-primary-foreground hover:bg-primary/90"
+                    }`}
+                    onClick={(e) => !isCancelled && openTrackingDialog(r, e)}
+                    title={isCancelled ? "Order was cancelled" : "Fill or edit shipping tracking details"}
+                  >
+                    <Truck className="h-3.5 w-3.5" /> Track / Ship
+                  </Button>
+                </div>
+              );
+            },
           },
         ]}
       />

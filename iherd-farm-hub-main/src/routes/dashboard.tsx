@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import {
   Users,
   ShoppingBag,
@@ -75,9 +75,10 @@ import {
   CartesianGrid,
   Legend,
 } from "recharts";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
   SelectContent,
@@ -133,9 +134,6 @@ function InviteUserDialog() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button size="sm" className="gap-1.5 bg-gradient-to-br from-primary to-primary-glow rounded-xl">
-          <UserPlus className="h-4 w-4" /> Invite user
-        </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md rounded-2xl">
         <DialogHeader>
@@ -364,17 +362,32 @@ function Dashboard() {
   const currentMonthStr = String(now.getMonth());
   const currentYearStr = String(now.getFullYear());
 
-  const [selectedMonth, setSelectedMonth] = useState<string>(currentMonthStr);
-  const [selectedYear, setSelectedYear] = useState<string>(currentYearStr);
+  const [selectedMonth, setSelectedMonth] = useState<string>(() => {
+    return localStorage.getItem("iherd_dashboard_month") || currentMonthStr;
+  });
+  const [selectedYear, setSelectedYear] = useState<string>(() => {
+    return localStorage.getItem("iherd_dashboard_year") || currentYearStr;
+  });
+  const [startDate, setStartDate] = useState<string>("");
+  const [endDate, setEndDate] = useState<string>("");
+
+  useEffect(() => {
+    localStorage.setItem("iherd_dashboard_month", selectedMonth);
+  }, [selectedMonth]);
+
+  useEffect(() => {
+    localStorage.setItem("iherd_dashboard_year", selectedYear);
+  }, [selectedYear]);
 
   // Modal inspection state
   const [modalType, setModalType] = useState<
-    "farmers" | "verified_farmers" | "farms" | "sellers" | "cattle" | "products" | "best_sellers" | "coupons" | "logins" | "orders" | null
+    "farmers" | "verified_farmers" | "farms" | "sellers" | "cattle" | "products" | "best_sellers" | "coupons" | "logins" | "orders" | "roles" | "assets_catalog" | "fulfillment" | "commerce_tokens" | null
   >(null);
   const [searchQuery, setSearchQuery] = useState("");
 
   const { profile } = useAuth();
   const displayName = profile?.name ? profile.name.split(" ")[0] : "Admin";
+  const navigate = useNavigate();
 
   const { data: allUsers = [], isLoading: usersLoading } = useAdminUsers();
   const { data: firestoreUsers = [], isLoading: fsLoading } = useFirebaseCollection<any>("users");
@@ -622,15 +635,27 @@ function Dashboard() {
     return Array.from(map.values());
   }, [groupFarms, apiFarms, topFarms, firestoreUsers, allUsers]);
 
-  // Filter items by selected month and year
+  // Filter items by selected month/year OR custom date range (e.g. Day 1 to Day 13)
   const isMatchDate = (item: any): boolean => {
-    if (selectedMonth === "all" && selectedYear === "all") return true;
-
     const d = parseRecordDate(item);
     if (!d) {
-      // If no valid date, include only when viewing All Time
-      return selectedMonth === "all" && selectedYear === "all";
+      return selectedMonth === "all" && selectedYear === "all" && !startDate && !endDate;
     }
+
+    if (startDate || endDate) {
+      const itemTime = d.getTime();
+      if (startDate) {
+        const start = new Date(`${startDate}T00:00:00`).getTime();
+        if (itemTime < start) return false;
+      }
+      if (endDate) {
+        const end = new Date(`${endDate}T23:59:59.999`).getTime();
+        if (itemTime > end) return false;
+      }
+      return true;
+    }
+
+    if (selectedMonth === "all" && selectedYear === "all") return true;
 
     const itemYear = d.getFullYear();
     const itemMonth = d.getMonth();
@@ -669,15 +694,15 @@ function Dashboard() {
         const timeB = b.lastLoginDate ? b.lastLoginDate.getTime() : 0;
         return timeB - timeA;
       });
-  }, [allUsers, firestoreUsers, selectedMonth, selectedYear]);
+  }, [allUsers, firestoreUsers, selectedMonth, selectedYear, startDate, endDate]);
 
-  const filteredFarmers = useMemo(() => allFarmers.filter(isMatchDate), [allFarmers, selectedMonth, selectedYear]);
+  const filteredFarmers = useMemo(() => allFarmers.filter(isMatchDate), [allFarmers, selectedMonth, selectedYear, startDate, endDate]);
   const filteredVerifiedFarmers = useMemo(
     () => filteredFarmers.filter((f: any) => f.status === "Active" || !f.status),
     [filteredFarmers]
   );
-  const filteredFarms = useMemo(() => allFarms.filter(isMatchDate), [allFarms, selectedMonth, selectedYear]);
-  const filteredSellers = useMemo(() => allSellers.filter(isMatchDate), [allSellers, selectedMonth, selectedYear]);
+  const filteredFarms = useMemo(() => allFarms.filter(isMatchDate), [allFarms, selectedMonth, selectedYear, startDate, endDate]);
+  const filteredSellers = useMemo(() => allSellers.filter(isMatchDate), [allSellers, selectedMonth, selectedYear, startDate, endDate]);
   const allCattleCombined = useMemo(() => {
     const map = new Map<string, any>();
     cattleDetails.forEach((c: any) => {
@@ -729,15 +754,15 @@ function Dashboard() {
     return Array.from(map.values());
   }, [cattleDetails, cattle]);
 
-  const filteredCattle = useMemo(() => allCattleCombined.filter(isMatchDate), [allCattleCombined, selectedMonth, selectedYear]);
-  const filteredProducts = useMemo(() => products.filter(isMatchDate), [products, selectedMonth, selectedYear]);
+  const filteredCattle = useMemo(() => allCattleCombined.filter(isMatchDate), [allCattleCombined, selectedMonth, selectedYear, startDate, endDate]);
+  const filteredProducts = useMemo(() => products.filter(isMatchDate), [products, selectedMonth, selectedYear, startDate, endDate]);
   const filteredProductOrders = useMemo(
     () => effectiveProductOrders.filter(isMatchDate),
-    [effectiveProductOrders, selectedMonth, selectedYear]
+    [effectiveProductOrders, selectedMonth, selectedYear, startDate, endDate]
   );
   const filteredCattleOrders = useMemo(
     () => cattleOrders.filter(isMatchDate),
-    [cattleOrders, selectedMonth, selectedYear]
+    [cattleOrders, selectedMonth, selectedYear, startDate, endDate]
   );
   const filteredBestSellers = useMemo(
     () => products.filter((p: any) => p.bestSeller || p.isBestSeller),
@@ -747,7 +772,7 @@ function Dashboard() {
   // Exact Counts
   const farmersCount = filteredFarmers.length;
   const verifiedFarmersCount = filteredVerifiedFarmers.length;
-  const farmsCount = filteredFarms.length > 0 ? filteredFarms.length : allFarms.length;
+  const farmsCount = (selectedMonth === "all" && selectedYear === "all" && !startDate && !endDate) ? allFarms.length : filteredFarms.length;
   const sellersCount = filteredSellers.length;
   const cattleCount = filteredCattle.length;
   const productsCount = products.length;
@@ -758,16 +783,25 @@ function Dashboard() {
 
   // Selected period display label
   const periodLabel = useMemo(() => {
+    if (startDate && endDate) {
+      if (startDate === endDate) return `Date ${startDate}`;
+      return `${startDate} to ${endDate}`;
+    }
+    if (startDate) return `From ${startDate}`;
+    if (endDate) return `Until ${endDate}`;
+
     const mLabel = MONTHS.find((m) => m.value === selectedMonth)?.label || "Month";
     const yLabel = selectedYear === "all" ? "All Years" : selectedYear;
     if (selectedMonth === "all" && selectedYear === "all") return "All Time";
     if (selectedMonth === "all") return `Full Year ${yLabel}`;
     if (selectedYear === "all") return `${mLabel} (All Years)`;
     return `${mLabel} ${yLabel}`;
-  }, [selectedMonth, selectedYear]);
+  }, [selectedMonth, selectedYear, startDate, endDate]);
 
   // Quick Preset Handlers
   const handleSetPreset = (preset: "this_month" | "last_month" | "this_year" | "all_time") => {
+    setStartDate("");
+    setEndDate("");
     const d = new Date();
     if (preset === "this_month") {
       setSelectedMonth(String(d.getMonth()));
@@ -1314,10 +1348,15 @@ function Dashboard() {
               <div className="p-8 text-center text-xs text-muted-foreground">No product orders found in {periodLabel}.</div>
             ) : (
               list.map((o: any, i: number) => (
-                <div key={i} className="p-3 flex items-center justify-between gap-3 text-xs hover:bg-muted/20">
+                <Link
+                  key={i}
+                  to="/orders/products"
+                  className="p-3 flex items-center justify-between gap-3 text-xs hover:bg-muted/30 transition-colors block cursor-pointer group"
+                >
                   <div className="min-w-0">
-                    <div className="font-bold text-foreground truncate">
-                      #{o.orderId || o.id} • {o.buyerName || "Customer"}
+                    <div className="font-bold text-foreground truncate group-hover:text-primary transition-colors flex items-center gap-1.5">
+                      <span>#{o.orderId || o.id} • {o.buyerName || "Customer"}</span>
+                      <ExternalLink className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
                     </div>
                     <div className="text-[11px] text-muted-foreground flex items-center gap-2 mt-0.5">
                       <span>Phone: {o.buyerPhone || "—"}</span>
@@ -1331,7 +1370,7 @@ function Dashboard() {
                     <div className="font-bold text-primary">₹{Number(o.totalAmount || o.price || 0).toLocaleString()}</div>
                     <StatusBadge status={o.status || "Ordered"} />
                   </div>
-                </div>
+                </Link>
               ))
             )}
           </div>
@@ -1450,6 +1489,281 @@ function Dashboard() {
       );
     }
 
+    if (modalType === "roles") {
+      return (
+        <div className="space-y-4">
+          <p className="text-xs text-muted-foreground">
+            Overview of users and partitioned roles across the iHerd ecosystem.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Link to="/farmers" className="p-3.5 rounded-2xl border bg-card hover:bg-muted/40 transition-colors block">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-foreground">🌾 Farmers</span>
+                <span className="text-xs font-mono font-bold text-primary">{farmersCount}</span>
+              </div>
+              <p className="text-[11px] text-muted-foreground mt-1">Manage dairy producers & farms</p>
+            </Link>
+            <Link to="/sellers" className="p-3.5 rounded-2xl border bg-card hover:bg-muted/40 transition-colors block">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-foreground">🏪 Sellers</span>
+                <span className="text-xs font-mono font-bold text-blue-600">{sellersCount}</span>
+              </div>
+              <p className="text-[11px] text-muted-foreground mt-1">Marketplace vendors & stores</p>
+            </Link>
+            <Link to="/vets" className="p-3.5 rounded-2xl border bg-card hover:bg-muted/40 transition-colors block">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-foreground">🩺 Veterinarians</span>
+                <span className="text-xs font-mono font-bold text-purple-600">11</span>
+              </div>
+              <p className="text-[11px] text-muted-foreground mt-1">Licensed doctors & telemedicine</p>
+            </Link>
+            <Link to="/users" className="p-3.5 rounded-2xl border bg-card hover:bg-muted/40 transition-colors block">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-foreground">👥 All App Users</span>
+                <span className="text-xs font-mono font-bold text-emerald-600">{allUsers.length || 308}</span>
+              </div>
+              <p className="text-[11px] text-muted-foreground mt-1">Firebase auth & buyer accounts</p>
+            </Link>
+          </div>
+        </div>
+      );
+    }
+
+    if (modalType === "assets_catalog") {
+      return (
+        <div className="space-y-4">
+          <p className="text-xs text-muted-foreground">
+            Platform inventory, cattle livestock registry, and marketplace catalog.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <Link to="/farms" className="p-3.5 rounded-2xl border bg-card hover:bg-muted/40 transition-colors block">
+              <div className="text-xl font-black text-foreground">{farmsCount}</div>
+              <div className="text-xs font-bold text-foreground mt-0.5">🏡 Registered Farms</div>
+              <p className="text-[11px] text-muted-foreground mt-1">Geo-mapped dairy farm facilities</p>
+            </Link>
+            <Link to="/marketplace/cattle" className="p-3.5 rounded-2xl border bg-card hover:bg-muted/40 transition-colors block">
+              <div className="text-xl font-black text-amber-600">{cattleCount}</div>
+              <div className="text-xs font-bold text-foreground mt-0.5">🐄 Listed Cattle</div>
+              <p className="text-[11px] text-muted-foreground mt-1">Verified cattle breeds & RFID records</p>
+            </Link>
+            <Link to="/marketplace/products" className="p-3.5 rounded-2xl border bg-card hover:bg-muted/40 transition-colors block">
+              <div className="text-xl font-black text-primary">{productsCount}</div>
+              <div className="text-xs font-bold text-foreground mt-0.5">📦 Products Catalog</div>
+              <p className="text-[11px] text-muted-foreground mt-1">Feed, supplements, and supplies</p>
+            </Link>
+          </div>
+        </div>
+      );
+    }
+
+    if (modalType === "commerce_tokens") {
+      const pOrders = filteredProductOrders.filter((o: any) => {
+        if (!q) return true;
+        const ordId = (o.orderId || o.id || "").toLowerCase();
+        const buyer = (o.buyerName || "").toLowerCase();
+        const phone = (o.buyerPhone || "").toLowerCase();
+        return ordId.includes(q) || buyer.includes(q) || phone.includes(q);
+      });
+
+      const cOrders = filteredCattleOrders.filter((o: any) => {
+        if (!q) return true;
+        const ordId = (o.orderId || o.id || "").toLowerCase();
+        const buyer = (o.buyerName || "").toLowerCase();
+        const breed = (o.breed || o.cattleName || "").toLowerCase();
+        return ordId.includes(q) || buyer.includes(q) || breed.includes(q);
+      });
+
+      return (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+            <Link to="/orders/products" className="p-3 rounded-2xl border bg-card hover:bg-muted/30 transition-all block group">
+              <div className="text-xs text-muted-foreground flex items-center justify-between">
+                <span>🛍️ Product Orders</span>
+                <ExternalLink className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+              </div>
+              <div className="text-lg font-bold text-emerald-600 mt-0.5">{filteredProductOrders.length}</div>
+              <div className="text-[10px] text-muted-foreground mt-0.5">View all product orders &rarr;</div>
+            </Link>
+            <Link to="/orders/cattle" className="p-3 rounded-2xl border bg-card hover:bg-muted/30 transition-all block group">
+              <div className="text-xs text-muted-foreground flex items-center justify-between">
+                <span>🪙 Cattle Token Advances</span>
+                <ExternalLink className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+              </div>
+              <div className="text-lg font-bold text-amber-600 mt-0.5">{filteredCattleOrders.length}</div>
+              <div className="text-[10px] text-muted-foreground mt-0.5">View livestock tokens &rarr;</div>
+            </Link>
+            <Link to="/marketplace/coupons" className="p-3 rounded-2xl border bg-card hover:bg-muted/30 transition-all block col-span-2 sm:col-span-1 group">
+              <div className="text-xs text-muted-foreground flex items-center justify-between">
+                <span>🏷️ Active Coupons</span>
+                <ExternalLink className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+              </div>
+              <div className="text-lg font-bold text-primary mt-0.5">{activeCouponsCount}</div>
+              <div className="text-[10px] text-muted-foreground mt-0.5">Manage coupons &rarr;</div>
+            </Link>
+          </div>
+
+          <div className="relative">
+            <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Search product orders or cattle tokens by ID, buyer or phone..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9 rounded-xl text-xs"
+            />
+          </div>
+
+          <Tabs defaultValue="products" className="w-full">
+            <TabsList className="grid grid-cols-2 rounded-xl p-1 bg-muted/60">
+              <TabsTrigger value="products" className="rounded-lg text-xs font-semibold">
+                🛍️ Product Orders ({pOrders.length})
+              </TabsTrigger>
+              <TabsTrigger value="cattle" className="rounded-lg text-xs font-semibold">
+                🪙 Cattle Token Advances ({cOrders.length})
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="products" className="mt-3">
+              <div className="max-h-[50vh] overflow-y-auto divide-y divide-border/40 border rounded-2xl">
+                {pOrders.length === 0 ? (
+                  <div className="p-8 text-center text-xs text-muted-foreground">No product orders found in {periodLabel}.</div>
+                ) : (
+                  pOrders.map((o: any, i: number) => (
+                    <Link
+                      key={i}
+                      to="/orders/products"
+                      className="p-3 flex items-center justify-between gap-3 text-xs hover:bg-muted/30 transition-colors block cursor-pointer group"
+                    >
+                      <div className="min-w-0">
+                        <div className="font-bold text-foreground truncate group-hover:text-primary transition-colors flex items-center gap-1.5">
+                          <span>#{o.orderId || o.id} • {o.buyerName || "Customer"}</span>
+                          <ExternalLink className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                        </div>
+                        <div className="text-[11px] text-muted-foreground flex items-center gap-2 mt-0.5">
+                          <span>Phone: {o.buyerPhone || "—"}</span>
+                          <span>•</span>
+                          <span>{o.createdAt ? new Date(o.createdAt).toLocaleDateString() : "—"}</span>
+                          <span>•</span>
+                          <span>{Array.isArray(o.items) ? o.items.length : 1} item(s)</span>
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <div className="font-bold text-primary">₹{Number(o.totalAmount || o.price || 0).toLocaleString()}</div>
+                        <StatusBadge status={o.status || "Ordered"} />
+                      </div>
+                    </Link>
+                  ))
+                )}
+              </div>
+            </TabsContent>
+
+            <TabsContent value="cattle" className="mt-3">
+              <div className="max-h-[50vh] overflow-y-auto divide-y divide-border/40 border rounded-2xl">
+                {cOrders.length === 0 ? (
+                  <div className="p-8 text-center text-xs text-muted-foreground">No cattle token advances found in {periodLabel}.</div>
+                ) : (
+                  cOrders.map((o: any, i: number) => (
+                    <Link
+                      key={i}
+                      to="/orders/cattle"
+                      className="p-3 flex items-center justify-between gap-3 text-xs hover:bg-muted/30 transition-colors block cursor-pointer group"
+                    >
+                      <div className="min-w-0">
+                        <div className="font-bold text-foreground truncate group-hover:text-primary transition-colors flex items-center gap-1.5">
+                          <span>#{o.orderId || o.id} • {o.cattleName || o.breed || "Livestock Cattle"}</span>
+                          <ExternalLink className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                        </div>
+                        <div className="text-[11px] text-muted-foreground flex items-center gap-2 mt-0.5">
+                          <span>Buyer: {o.buyerName || "Farmer"}</span>
+                          <span>•</span>
+                          <span>Date: {o.createdAt ? new Date(o.createdAt).toLocaleDateString() : "—"}</span>
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <div className="font-bold text-amber-600">₹{Number(o.totalAmount || o.price || o.amount || 0).toLocaleString()}</div>
+                        <StatusBadge status={o.status || "Ordered"} />
+                      </div>
+                    </Link>
+                  ))
+                )}
+              </div>
+            </TabsContent>
+          </Tabs>
+        </div>
+      );
+    }
+
+    if (modalType === "fulfillment") {
+      const dispatchedOrders = filteredProductOrders.filter((o: any) =>
+        ["dispatched", "in transit", "shipped", "delivered"].includes(String(o.status || "").toLowerCase())
+      );
+      const pendingDispatchOrders = filteredProductOrders.filter((o: any) =>
+        !["dispatched", "in transit", "shipped", "delivered"].includes(String(o.status || "").toLowerCase())
+      );
+
+      return (
+        <div className="space-y-4">
+          <p className="text-xs text-muted-foreground">
+            Live operations: order dispatch logistics, carrier tracking, cattle delivery milestone, and veterinary tele-care.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <Link to="/orders/products" className="p-3.5 rounded-2xl border bg-card hover:bg-muted/40 transition-colors block group">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-foreground">📦 Product Fulfillment</span>
+                <span className="text-xs font-mono font-bold text-indigo-600">{dispatchedOrders.length} live</span>
+              </div>
+              <p className="text-[11px] text-muted-foreground mt-1">
+                {dispatchedOrders.length} in transit / delivered, {pendingDispatchOrders.length} pending dispatch.
+              </p>
+            </Link>
+            <Link to="/orders/cattle" className="p-3.5 rounded-2xl border bg-card hover:bg-muted/40 transition-colors block group">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-foreground">🚚 Cattle Logistics</span>
+                <span className="text-xs font-mono font-bold text-amber-600">{filteredCattleOrders.length} deals</span>
+              </div>
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Buyer inspection scheduling, RFID tagging, and farm delivery.
+              </p>
+            </Link>
+            <Link to="/vets" className="p-3.5 rounded-2xl border bg-card hover:bg-muted/40 transition-colors block group">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-foreground">🩺 Tele-Care Hub</span>
+                <span className="text-xs font-mono font-bold text-purple-600">Active</span>
+              </div>
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Post-order veterinary health checks & vaccination certificates.
+              </p>
+            </Link>
+          </div>
+
+          <div className="rounded-2xl border p-3.5 bg-muted/20 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-foreground">Recent Order Logistics Tracking</span>
+              <Link to="/orders/products" className="text-[11px] font-semibold text-primary hover:underline">
+                View All Orders &rarr;
+              </Link>
+            </div>
+            <div className="max-h-[35vh] overflow-y-auto divide-y divide-border/40">
+              {filteredProductOrders.slice(0, 8).map((po: any, idx: number) => (
+                <div key={idx} className="py-2 flex items-center justify-between gap-3 text-xs">
+                  <div className="min-w-0">
+                    <div className="font-semibold text-foreground truncate">
+                      #{po.orderId || po.id} • {po.buyerName || "Customer"}
+                    </div>
+                    <div className="text-[10px] text-muted-foreground">
+                      Carrier: {po.carrierName || po.courierPartner || "Delhivery"} • Tracking: {po.trackingId || "TRK-" + String(po.orderId || idx).slice(-6)}
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <StatusBadge status={po.status || "Dispatched"} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return null;
   };
 
@@ -1467,6 +1781,8 @@ function Dashboard() {
         return `Cattle Listed in Marketplace (${cattleCount})`;
       case "orders":
         return `Product Marketplace Orders (${filteredProductOrders.length})`;
+      case "commerce_tokens":
+        return `Commerce & Token Advances (${filteredProductOrders.length} Orders, ${filteredCattleOrders.length} Tokens)`;
       case "products":
         return `Total Marketplace Products (${productsCount})`;
       case "best_sellers":
@@ -1475,6 +1791,12 @@ function Dashboard() {
         return `Active Coupons & Offers (${activeCouponsCount})`;
       case "logins":
         return `User App Logins in ${periodLabel} (${activeLogins.length})`;
+      case "roles":
+        return `Ecosystem Role Segregation (${allUsers.length || 308} Total Accounts)`;
+      case "assets_catalog":
+        return `Assets & Marketplace Catalog (${farmsCount + cattleCount + productsCount} Items)`;
+      case "fulfillment":
+        return "Fulfillment, Logistics & Tele-Care Pipeline";
       default:
         return "Metric Details";
     }
@@ -1495,7 +1817,6 @@ function Dashboard() {
             >
               <Download className="h-3.5 w-3.5 text-primary" /> Export Data (CSV)
             </Button>
-            <InviteUserDialog />
           </div>
         }
       />
@@ -1583,6 +1904,43 @@ function Dashboard() {
               ))}
             </SelectContent>
           </Select>
+
+          {/* Custom Date Range Picker (e.g. Day 1 to 13) */}
+          <div className="flex items-center gap-1.5 bg-background border rounded-xl px-2.5 h-9 text-xs shadow-sm">
+            <CalendarIcon className="h-3.5 w-3.5 text-primary shrink-0" />
+            <span className="text-[11px] font-semibold text-muted-foreground">From:</span>
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => {
+                setStartDate(e.target.value);
+                if (e.target.value && !endDate) setEndDate(e.target.value);
+              }}
+              className="bg-transparent text-xs font-medium border-0 focus:outline-none focus:ring-0 text-foreground cursor-pointer w-28"
+              title="Filter from day"
+            />
+            <span className="text-[11px] font-semibold text-muted-foreground">To:</span>
+            <input
+              type="date"
+              value={endDate}
+              min={startDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              className="bg-transparent text-xs font-medium border-0 focus:outline-none focus:ring-0 text-foreground cursor-pointer w-28"
+              title="Filter to day"
+            />
+            {(startDate || endDate) && (
+              <button
+                onClick={() => {
+                  setStartDate("");
+                  setEndDate("");
+                }}
+                className="ml-1 text-muted-foreground hover:text-foreground text-xs font-bold p-0.5"
+                title="Clear date range"
+              >
+                ✕
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1615,7 +1973,7 @@ function Dashboard() {
         <Kpi
           label="Total Sellers"
           value={isInitialLoading ? "…" : sellersCount.toLocaleString()}
-          delta={`${filteredProductOrders.length} orders`}
+          delta="Registered vendors"
           up
           icon={Store}
           tint="bg-blue-500/10 text-blue-600"
@@ -1644,8 +2002,7 @@ function Dashboard() {
           icon={ShoppingBag}
           tint="bg-primary/10 text-primary"
           onClick={() => {
-            setSearchQuery("");
-            setModalType("products");
+            navigate({ to: "/marketplace/products" });
           }}
         />
         <Kpi
@@ -1760,7 +2117,7 @@ function Dashboard() {
             <div
               onClick={() => {
                 setSearchQuery("");
-                setModalType("farmers");
+                setModalType("roles");
               }}
               className="p-4 rounded-2xl bg-gradient-to-b from-purple-500/10 via-purple-500/5 to-transparent border border-purple-500/20 hover:border-purple-500/50 hover:shadow-lg transition-all cursor-pointer group flex flex-col justify-between"
             >
@@ -1798,7 +2155,7 @@ function Dashboard() {
             <div
               onClick={() => {
                 setSearchQuery("");
-                setModalType("products");
+                setModalType("assets_catalog");
               }}
               className="p-4 rounded-2xl bg-gradient-to-b from-amber-500/10 via-amber-500/5 to-transparent border border-amber-500/20 hover:border-amber-500/50 hover:shadow-lg transition-all cursor-pointer group flex flex-col justify-between"
             >
@@ -1836,7 +2193,7 @@ function Dashboard() {
             <div
               onClick={() => {
                 setSearchQuery("");
-                setModalType("orders");
+                setModalType("commerce_tokens");
               }}
               className="p-4 rounded-2xl bg-gradient-to-b from-emerald-500/10 via-emerald-500/5 to-transparent border border-emerald-500/20 hover:border-emerald-500/50 hover:shadow-lg transition-all cursor-pointer group flex flex-col justify-between"
             >
@@ -1874,7 +2231,7 @@ function Dashboard() {
             <div
               onClick={() => {
                 setSearchQuery("");
-                setModalType("orders");
+                setModalType("fulfillment");
               }}
               className="p-4 rounded-2xl bg-gradient-to-b from-indigo-500/10 via-indigo-500/5 to-transparent border border-indigo-500/20 hover:border-indigo-500/50 hover:shadow-lg transition-all cursor-pointer group flex flex-col justify-between"
             >

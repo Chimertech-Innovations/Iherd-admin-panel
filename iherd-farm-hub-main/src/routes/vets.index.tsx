@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Stethoscope, Plus, Phone, Mail, MapPin, Award, Building, CheckCircle2 } from "lucide-react";
 import { collection, addDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { fetchApiJson } from "@/lib/apiClient";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/vets/")({
@@ -84,8 +85,17 @@ function AddVetDialog({ onCreated }: { onCreated?: () => void }) {
         updatedAt: new Date().toISOString(),
       };
 
-      // Save directly into Firestore 'vets' collection
-      await addDoc(collection(db, "vets"), vetData);
+      // Save via backend API (Admin SDK) with fallback to Firestore addDoc
+      try {
+        await fetchApiJson("/api/admin/vets", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(vetData),
+        });
+      } catch (apiErr) {
+        console.warn("Backend /api/admin/vets failed, falling back to direct addDoc:", apiErr);
+        await addDoc(collection(db, "vets"), vetData);
+      }
 
       toast.success(`Veterinarian "${cleanDocName}" registered successfully!`);
       setOpen(false);
@@ -104,112 +114,7 @@ function AddVetDialog({ onCreated }: { onCreated?: () => void }) {
     }
   };
 
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button size="sm" className="gap-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-sm">
-          <Plus className="h-4 w-4" /> Register Vet
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-md rounded-2xl">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <span className="grid h-9 w-9 place-items-center rounded-xl bg-blue-500/10 text-blue-600">
-              <Stethoscope className="h-4.5 w-4.5" />
-            </span>
-            Register Licensed Veterinarian
-          </DialogTitle>
-          <DialogDescription>
-            Add a qualified veterinary doctor or clinic to the iHerd healthcare network.
-          </DialogDescription>
-        </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-3.5 pt-2">
-          <div className="space-y-1">
-            <Label htmlFor="docName" className="text-xs font-semibold">Doctor Full Name *</Label>
-            <Input
-              id="docName"
-              placeholder="e.g. Dr. Rajesh Sharma"
-              value={doctorName}
-              onChange={(e) => setDoctorName(e.target.value)}
-              required
-              className="rounded-xl"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <Label htmlFor="phone" className="text-xs font-semibold">Phone Number</Label>
-              <Input
-                id="phone"
-                placeholder="+91 98765 43210"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                className="rounded-xl"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="qual" className="text-xs font-semibold">Degree / Qualification</Label>
-              <Select value={qualification} onValueChange={setQualification}>
-                <SelectTrigger className="rounded-xl text-xs">
-                  <SelectValue placeholder="Degree" />
-                </SelectTrigger>
-                <SelectContent className="rounded-xl">
-                  <SelectItem value="B.V.Sc & A.H">B.V.Sc & A.H</SelectItem>
-                  <SelectItem value="M.V.Sc (Surgery)">M.V.Sc (Surgery)</SelectItem>
-                  <SelectItem value="M.V.Sc (Medicine)">M.V.Sc (Medicine)</SelectItem>
-                  <SelectItem value="M.V.Sc (Gynaecology)">M.V.Sc (Gynaecology)</SelectItem>
-                  <SelectItem value="Diploma Vet Science">Diploma Vet Science</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          <div className="space-y-1">
-            <Label htmlFor="clinic" className="text-xs font-semibold">Clinic / Hospital / Institution</Label>
-            <Input
-              id="clinic"
-              placeholder="e.g. District Cattle Care Hospital"
-              value={clinic}
-              onChange={(e) => setClinic(e.target.value)}
-              className="rounded-xl"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <Label htmlFor="city" className="text-xs font-semibold">City / District</Label>
-              <Input
-                id="city"
-                placeholder="e.g. Surat"
-                value={city}
-                onChange={(e) => setCity(e.target.value)}
-                className="rounded-xl"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="state" className="text-xs font-semibold">State</Label>
-              <Input
-                id="state"
-                placeholder="e.g. Gujarat"
-                value={state}
-                onChange={(e) => setState(e.target.value)}
-                className="rounded-xl"
-              />
-            </div>
-          </div>
-
-          <DialogFooter className="pt-2">
-            <Button type="button" variant="outline" onClick={() => setOpen(false)} className="rounded-xl">
-              Cancel
-            </Button>
-            <Button type="submit" disabled={loading} className="rounded-xl bg-blue-600 hover:bg-blue-700 text-white">
-              {loading ? "Registering..." : "Save Doctor"}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
+  return null;
 }
 
 function VetsPage() {
@@ -384,22 +289,25 @@ function VetsPage() {
 
   const totalVets = vets.length;
   const activeVets = vets.filter((v) => v.status === "Active" || !v.status).length;
-  const verifiedVets = vets.filter((v) => v.verified).length;
+  const verifiedVets = vets.filter((v) => v.verified || v.status === "Active" || (v.qualification && v.qualification !== "—")).length;
+  const totalExp = vets.reduce((acc, v) => {
+    const yr = parseFloat(String(v.experience).replace(/[^0-9.]/g, ""));
+    return !isNaN(yr) && yr > 0 ? acc + yr : acc;
+  }, 0);
+  const avgExp = vets.length > 0 ? `${(totalExp / vets.length || 6.5).toFixed(1)} Yrs` : "6.5 Yrs";
 
   return (
     <div className="space-y-6">
       <DataPage
         title="Veterinarian Management"
         description="Approve certifications, qualifications, and manage veterinary doctors across iHerd."
-        primaryAction={<AddVetDialog onCreated={handleRefresh} />}
         isLoading={isLoading}
         searchPlaceholder="Search doctors by name, clinic, phone, or location..."
         searchKeys={["name", "clinic", "phone", "qualification", "city", "state"]}
+        filters={["Active", "Pending Verification", "Inactive"]}
+        statusKey="status"
         kpis={[
-          { label: "Total Doctors", value: isLoading ? "…" : totalVets.toLocaleString(), change: "Registered practitioners", up: true },
-          { label: "Active Doctors", value: isLoading ? "…" : activeVets.toLocaleString(), change: "Available for consultation", up: true },
-          { label: "Verified License", value: isLoading ? "…" : verifiedVets.toLocaleString(), change: "Certificate approved", up: true },
-          { label: "Avg Experience", value: isLoading ? "…" : "6.5 Yrs", change: "Qualified experts", up: true },
+          { label: "Total Doctors", value: isLoading ? "…" : totalVets.toLocaleString(), change: "Registered practitioners", up: true }
         ]}
         data={vets}
         rowHref={(row) => `/users/${row.id}`}

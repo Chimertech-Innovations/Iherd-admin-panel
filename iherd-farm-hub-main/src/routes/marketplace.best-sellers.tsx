@@ -137,9 +137,19 @@ function BestSellersPage() {
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [addSearch, setAddSearch] = useState("");
+  const [addCategoryFilter, setAddCategoryFilter] = useState("all");
   const [selectedPreviewImage, setSelectedPreviewImage] = useState<{ url: string; title: string } | null>(null);
+  const [optimisticBestSellers, setOptimisticBestSellers] = useState<Record<string, boolean>>({});
 
-  const bestSellerProducts = allProducts.filter((p) => p.bestSeller || p.isBestSeller);
+  const isProductBestSeller = (p: any) => {
+    if (!p) return false;
+    if (optimisticBestSellers[p.id] !== undefined) {
+      return optimisticBestSellers[p.id];
+    }
+    return Boolean(p.bestSeller || p.isBestSeller);
+  };
+
+  const bestSellerProducts = allProducts.filter((p) => isProductBestSeller(p));
 
   const categoryMap = new Map();
   categories.forEach((cat) => {
@@ -147,7 +157,17 @@ function BestSellersPage() {
   });
 
   const handleToggle = async (product: any) => {
-    const nextStatus = !(product.bestSeller || product.isBestSeller);
+    const currentStatus = isProductBestSeller(product);
+    const nextStatus = !currentStatus;
+    if (!nextStatus) {
+      const prodName = getLocalizedText(product.name, product.id);
+      const confirmed = window.confirm(`Are you sure you want to remove "${prodName}" from Best Sellers?`);
+      if (!confirmed) return;
+    }
+
+    // Instantly update UI with glow / un-glow
+    setOptimisticBestSellers((prev) => ({ ...prev, [product.id]: nextStatus }));
+
     try {
       await toggleBestSeller.mutateAsync({
         productId: product.id,
@@ -159,6 +179,8 @@ function BestSellersPage() {
           : `Removed "${getLocalizedText(product.name, product.id)}" from Best Sellers.`
       );
     } catch (err: any) {
+      // Revert if error
+      setOptimisticBestSellers((prev) => ({ ...prev, [product.id]: currentStatus }));
       toast.error(`Failed to toggle best seller: ${err.message}`);
     }
   };
@@ -175,12 +197,15 @@ function BestSellersPage() {
     return matchesQ && matchesCat;
   });
 
-  // Non best-sellers for "Add Best Seller" modal
+  // Candidate products for "Feature product" modal showing all products with category and search filter
   const candidateProducts = allProducts.filter((p) => {
-    const isBs = p.bestSeller || p.isBestSeller;
-    if (isBs) return false;
     const name = getLocalizedText(p.name || p.title || p.id).toLowerCase();
-    return name.includes(addSearch.toLowerCase()) || p.id?.toLowerCase().includes(addSearch.toLowerCase());
+    const id = (p.id || "").toLowerCase();
+    const seller = getLocalizedText(p.sellerName, "").toLowerCase();
+    const qStr = addSearch.toLowerCase().trim();
+    const matchesSearch = !qStr || name.includes(qStr) || id.includes(qStr) || seller.includes(qStr);
+    const matchesCat = addCategoryFilter === "all" || p.categoryId === addCategoryFilter;
+    return matchesSearch && matchesCat;
   });
 
   const handleExportBestSellers = () => {
@@ -536,65 +561,175 @@ function BestSellersPage() {
 
       {/* Feature / Add to Best Sellers Dialog */}
       <Dialog open={addModalOpen} onOpenChange={setAddModalOpen}>
-        <DialogContent className="sm:max-w-xl rounded-2xl max-h-[85vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-3xl rounded-3xl max-h-[88vh] overflow-y-auto p-6 bg-card text-foreground">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <span className="grid h-9 w-9 place-items-center rounded-xl bg-amber-500/10 text-amber-600">
-                <Flame className="h-4.5 w-4.5" />
+            <DialogTitle className="flex items-center gap-2.5 text-lg">
+              <span className="grid h-10 w-10 place-items-center rounded-2xl bg-amber-500/10 text-amber-600 shadow-sm shadow-amber-500/20">
+                <Flame className="h-5 w-5 fill-amber-500 text-amber-500 drop-shadow-[0_0_8px_rgba(245,158,11,0.6)]" />
               </span>
-              Feature a Product as Best Seller
+              <div>
+                <div className="font-bold">Feature Products as Best Sellers</div>
+                <DialogDescription className="text-xs text-muted-foreground mt-0.5">
+                  Browse all catalog products and click the flame button to instantly feature or unfeature.
+                </DialogDescription>
+              </div>
             </DialogTitle>
-            <DialogDescription>
-              Select any catalog product to add to the featured best seller highlights.
-            </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 pt-2">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={addSearch}
-                onChange={(e) => setAddSearch(e.target.value)}
-                placeholder="Search catalog products..."
-                className="pl-9"
-              />
+            {/* Search & Category Filter Toolbar */}
+            <div className="flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center">
+              <div className="relative flex-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={addSearch}
+                  onChange={(e) => setAddSearch(e.target.value)}
+                  placeholder="Search products by name, SKU, brand, ID..."
+                  className="pl-9 rounded-xl bg-muted/40"
+                />
+              </div>
+
+              <Select value={addCategoryFilter} onValueChange={setAddCategoryFilter}>
+                <SelectTrigger className="w-full sm:w-48 rounded-xl bg-muted/40">
+                  <SelectValue placeholder="All Categories" />
+                </SelectTrigger>
+                <SelectContent className="rounded-2xl">
+                  <SelectItem value="all">All Categories ({allProducts.length})</SelectItem>
+                  {categories.map((c) => {
+                    const count = allProducts.filter((p) => p.categoryId === c.id).length;
+                    return (
+                      <SelectItem key={c.id} value={c.id}>
+                        {getLocalizedText(c.name, c.id)} ({count})
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
             </div>
 
-            <div className="divide-y max-h-96 overflow-y-auto border rounded-xl">
+            {/* Category Quick Filter Pills */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs no-scrollbar">
+              <button
+                type="button"
+                onClick={() => setAddCategoryFilter("all")}
+                className={`px-3 py-1 rounded-full font-medium transition-all shrink-0 ${
+                  addCategoryFilter === "all"
+                    ? "bg-amber-500 text-white shadow-sm shadow-amber-500/30"
+                    : "bg-muted text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                All ({allProducts.length})
+              </button>
+              {categories.slice(0, 6).map((c) => {
+                const count = allProducts.filter((p) => p.categoryId === c.id).length;
+                const isSelected = addCategoryFilter === c.id;
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => setAddCategoryFilter(c.id)}
+                    className={`px-3 py-1 rounded-full font-medium transition-all shrink-0 ${
+                      isSelected
+                        ? "bg-amber-500 text-white shadow-sm shadow-amber-500/30"
+                        : "bg-muted text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {getLocalizedText(c.name, c.id)} ({count})
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Product List */}
+            <div className="divide-y max-h-[50vh] overflow-y-auto border rounded-2xl bg-card">
               {candidateProducts.length === 0 ? (
-                <div className="p-6 text-center text-xs text-muted-foreground">
-                  No unfeatured products found matching search.
+                <div className="p-8 text-center space-y-2">
+                  <Package className="h-8 w-8 text-muted-foreground mx-auto opacity-50" />
+                  <p className="text-xs text-muted-foreground">No products found matching your search or category filter.</p>
                 </div>
               ) : (
-                candidateProducts.slice(0, 20).map((p) => {
+                candidateProducts.map((p) => {
                   const img = getProductThumbnail(p);
                   const prodName = getLocalizedText(p.name || p.title, p.id);
+                  const catName = categoryMap.get(p.categoryId) || getLocalizedText(p.category || p.categoryId, "General");
+                  const isBs = isProductBestSeller(p);
 
                   return (
-                    <div key={p.id} className="p-3 flex items-center justify-between hover:bg-muted/30 transition-colors">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="h-10 w-10 rounded-lg bg-muted overflow-hidden shrink-0 border flex items-center justify-center">
+                    <div
+                      key={p.id}
+                      className={`p-3.5 flex items-center justify-between gap-3 transition-colors ${
+                        isBs ? "bg-amber-500/5 hover:bg-amber-500/10" : "hover:bg-muted/30"
+                      }`}
+                    >
+                      <div className="flex items-center gap-3 min-w-0 flex-1">
+                        <div
+                          className="h-12 w-12 rounded-xl bg-muted overflow-hidden shrink-0 border relative flex items-center justify-center cursor-pointer hover:opacity-90"
+                          onClick={() => {
+                            if (img) setSelectedPreviewImage({ url: img, title: prodName });
+                          }}
+                        >
                           <ProductImage src={img} alt={prodName} className="h-full w-full object-cover" />
                         </div>
-                        <div className="min-w-0">
-                          <div className="font-medium text-xs text-foreground truncate">{prodName}</div>
-                          <div className="text-[11px] text-muted-foreground font-mono">{p.id} • ₹{Number(p.price || 0).toLocaleString()}</div>
+
+                        <div className="min-w-0 space-y-0.5 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-xs text-foreground truncate">{prodName}</span>
+                            {isBs && (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded-md bg-amber-500/15 text-amber-600 font-bold text-[10px] shrink-0 border border-amber-500/30">
+                                <Flame className="h-3 w-3 fill-amber-500 text-amber-500 drop-shadow-[0_0_6px_rgba(245,158,11,0.6)]" />
+                                Best Seller
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-muted-foreground flex items-center gap-2 flex-wrap">
+                            <span className="font-mono text-[10px] bg-muted px-1.5 py-0.2 rounded">{p.id}</span>
+                            <span>•</span>
+                            <span className="text-primary font-medium">{catName}</span>
+                            <span>•</span>
+                            <span className="font-bold text-foreground">₹{Number(p.price || 0).toLocaleString()}</span>
+                            {p.mrp && <span className="line-through text-muted-foreground text-[10px]">₹{p.mrp}</span>}
+                            <span>•</span>
+                            <span>Stock: <strong>{p.quantity ?? p.stock ?? "—"}</strong></span>
+                          </div>
                         </div>
                       </div>
 
+                      {/* Instant Toggle Button */}
                       <Button
                         size="sm"
                         onClick={async () => {
                           await handleToggle(p);
                         }}
-                        className="h-7 px-2.5 text-xs bg-amber-500 hover:bg-amber-600 text-white font-medium shrink-0 ml-2"
+                        className={`h-8 px-3 text-xs font-semibold rounded-xl shrink-0 transition-all ${
+                          isBs
+                            ? "bg-amber-500 hover:bg-amber-600 text-white shadow-sm shadow-amber-500/30"
+                            : "border border-amber-500/40 text-amber-600 hover:bg-amber-500/10"
+                        }`}
+                        variant={isBs ? "default" : "outline"}
                       >
-                        <Flame className="h-3 w-3 mr-1" /> Feature
+                        <Flame
+                          className={`h-3.5 w-3.5 mr-1 transition-all ${
+                            isBs
+                              ? "fill-white text-white drop-shadow-[0_0_6px_rgba(255,255,255,0.8)] animate-pulse"
+                              : "fill-none text-amber-500 group-hover:fill-amber-500"
+                          }`}
+                        />
+                        {isBs ? "Featured" : "Feature"}
                       </Button>
                     </div>
                   );
                 })
               )}
+            </div>
+
+            <div className="flex items-center justify-between text-xs text-muted-foreground pt-1">
+              <span>
+                Total Featured: <strong className="text-amber-600">{bestSellerProducts.length}</strong> of{" "}
+                {allProducts.length} products
+              </span>
+              <Button size="sm" variant="ghost" onClick={() => setAddModalOpen(false)} className="rounded-xl">
+                Done
+              </Button>
             </div>
           </div>
         </DialogContent>

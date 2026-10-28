@@ -38,10 +38,10 @@ export async function getApiBaseUrl(): Promise<string> {
     }
 
     if (isLocal) {
-      // Test if local backend on port 5000 is active with an 800ms quick probe
+      // Test if local backend on port 5000 is active with an adaptive probe
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 800);
+        const timeoutId = setTimeout(() => controller.abort(), 2000);
         const res = await fetch("http://localhost:5000/ping", {
           signal: controller.signal,
           method: "GET",
@@ -52,7 +52,9 @@ export async function getApiBaseUrl(): Promise<string> {
           return resolvedApiBase;
         }
       } catch {
-        // Local server not running, fall through to Render
+        // Local server not ready yet, temporarily use Render without permanently locking out local
+        resolvingPromise = null;
+        return DEFAULT_RENDER_BACKEND;
       }
     }
 

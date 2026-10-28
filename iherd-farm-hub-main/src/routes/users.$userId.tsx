@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { getApiBaseUrlSync } from "@/lib/apiClient";
 import { useState, useMemo, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { doc, getDoc, collection, getDocs } from "firebase/firestore";
 import { db } from "../lib/firebase";
 import { useFirebaseCollection, useFirebaseCollectionGroup } from "../hooks/useFirebaseData";
@@ -130,6 +130,7 @@ function formatDateTime(val: any) {
 
 function UserDetail() {
   const { userId } = Route.useParams();
+  const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState("overview");
   const [copiedId, setCopiedId] = useState(false);
   const [selectedPreviewImage, setSelectedPreviewImage] = useState<{ url: string; title: string } | null>(null);
@@ -137,6 +138,7 @@ function UserDetail() {
   const [selectedOrderDetail, setSelectedOrderDetail] = useState<any | null>(null);
   const [isEditFarmOpen, setIsEditFarmOpen] = useState(false);
   const [isSavingFarm, setIsSavingFarm] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const isClient = typeof window !== "undefined";
 
@@ -686,13 +688,28 @@ function UserDetail() {
             variant="outline"
             size="sm"
             className="gap-1.5 text-xs"
-            onClick={() => {
-              refetchFullData();
-              toast.success("Refreshing user and farm data...");
+            disabled={isRefreshing}
+            onClick={async () => {
+              try {
+                setIsRefreshing(true);
+                await fetch(`${API_BASE}/api/admin/user-full-data/${encodeURIComponent(resolvedDocId || userId)}?refresh=1`).catch(() => {});
+                await Promise.all([
+                  queryClient.invalidateQueries({ queryKey: ["userFullData"] }),
+                  queryClient.invalidateQueries({ queryKey: ["directFarmerRole"] }),
+                  queryClient.invalidateQueries({ queryKey: ["admin_users"] }),
+                ]);
+                await refetchFullData();
+                toast.success("User and farm data refreshed successfully!");
+              } catch {
+                toast.error("Failed to refresh data");
+              } finally {
+                setIsRefreshing(false);
+              }
             }}
             title="Refresh connected data"
           >
-            <RefreshCw className="h-3.5 w-3.5" /> Refresh Data
+            <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? "animate-spin text-primary" : ""}`} />
+            {isRefreshing ? "Refreshing..." : "Refresh Data"}
           </Button>
           <Button
             variant="outline"

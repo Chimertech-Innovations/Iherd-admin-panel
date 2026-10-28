@@ -128,6 +128,11 @@ function clearCache(prefix = "") {
 // REST API: list all Firebase Storage files across all known paths
 app.get("/api/admin/storage", async (req, res) => {
   try {
+    const cached = getCached("admin_storage", 120000);
+    if (cached && !req.query.force) {
+      return res.json(cached);
+    }
+
     const defaultBucketName = process.env.VITE_FIREBASE_STORAGE_BUCKET || "auth-b404a.appspot.com";
     const candidateBuckets = [
       defaultBucketName,
@@ -140,6 +145,7 @@ app.get("/api/admin/storage", async (req, res) => {
     let invoices = [];
     let cattleMarketplace = [];
     let marketplace = [];
+    let banners = [];
     let success = false;
     let lastError = null;
 
@@ -150,7 +156,6 @@ app.get("/api/admin/storage", async (req, res) => {
         const [files] = await testBucket.getFiles({ maxResults: 1 });
         bucket = testBucket;
         success = true;
-        console.log(`Successfully connected to Storage Bucket: ${bName}`);
         break;
       } catch (bErr) {
         lastError = bErr;
@@ -169,30 +174,128 @@ app.get("/api/admin/storage", async (req, res) => {
         invoices: [],
         cattleMarketplace: [],
         marketplace: [],
-        totals: { userImages: 0, invoices: 0, cattleMarketplace: 0, marketplace: 0, total: 0 }
+        banners: [],
+        offerBanners: [],
+        otherBanners: [],
+        totals: { userImages: 0, invoices: 0, cattleMarketplace: 0, marketplace: 0, banners: 0, offerBanners: 0, otherBanners: 0, total: 0 }
       });
     }
 
-    [userImages, invoices, cattleMarketplace, marketplace] = await Promise.all([
+    // Concurrently fetch all storage prefixes and Firestore banners metadata
+    const [
+      uImages,
+      invs,
+      cattleMkt,
+      mkt,
+      rawBanners,
+      offerSnap,
+      adsSnap,
+    ] = await Promise.all([
       listFilesUnderPrefix(bucket, "UserImages/"),
       listFilesUnderPrefix(bucket, "invoices/"),
       listFilesUnderPrefix(bucket, "cattle-marketplace/"),
       listFilesUnderPrefix(bucket, "marketplace/"),
+      listFilesUnderPrefix(bucket, "banners/"),
+      getFirestore().collection("banners").doc("offer_banners").collection("items").get().catch(() => ({ docs: [] })),
+      getFirestore().collection("banners").doc("ads_banners").collection("items").get().catch(() => ({ docs: [] })),
     ]);
 
-    res.json({
+    userImages = uImages || [];
+    invoices = invs || [];
+    cattleMarketplace = cattleMkt || [];
+    marketplace = mkt || [];
+    const validBanners = (rawBanners || []).filter((b) => b && b.name && !b.name.endsWith("/"));
+
+    // Extract Firestore banner image URLs to accurately categorize offer banners vs general banners
+    const offerImageUrls = new Set();
+    const offerBannersList = [];
+    const otherBannersList = [];
+
+    (offerSnap.docs || []).forEach((doc) => {
+      const d = doc.data();
+      if (d?.imageUrl) offerImageUrls.add(d.imageUrl);
+    });
+
+    const adsImageUrls = new Set();
+    (adsSnap.docs || []).forEach((doc) => {
+      const d = doc.data();
+      if (d?.imageUrl) adsImageUrls.add(d.imageUrl);
+    });
+
+    // Categorize files found in storage
+    validBanners.forEach((b) => {
+      const isOffer =
+        b.name.includes("offer_banners") ||
+        offerImageUrls.has(b.url) ||
+        b.name.includes("ad1");
+      if (isOffer) {
+        offerBannersList.push(b);
+      } else {
+        otherBannersList.push(b);
+      }
+    });
+
+    // Include any Firestore banner document if its imageUrl wasn't in the storage scan
+    (offerSnap.docs || []).forEach((doc) => {
+      const d = doc.data();
+      if (d?.imageUrl && !offerBannersList.some((b) => b.url === d.imageUrl)) {
+        offerBannersList.push({
+          name: `banners/offer_banners/${doc.id}`,
+          size: 0,
+          contentType: "image/png",
+          updated: d.updatedAt || null,
+          url: d.imageUrl,
+          title: d.title || doc.id,
+          actionType: d.actionType,
+          actionValue: d.actionValue,
+        });
+      }
+    });
+
+    (adsSnap.docs || []).forEach((doc) => {
+      const d = doc.data();
+      if (d?.imageUrl && !otherBannersList.some((b) => b.url === d.imageUrl)) {
+        otherBannersList.push({
+          name: `banners/ads_banners/${doc.id}`,
+          size: 0,
+          contentType: "image/png",
+          updated: d.updatedAt || null,
+          url: d.imageUrl,
+          title: d.title || doc.id,
+          actionType: d.actionType,
+          actionValue: d.actionValue,
+        });
+      }
+    });
+
+    const responsePayload = {
       userImages,
       invoices,
       cattleMarketplace,
       marketplace,
+      banners: [...offerBannersList, ...otherBannersList],
+      offerBanners: offerBannersList,
+      otherBanners: otherBannersList,
       totals: {
         userImages: userImages.length,
         invoices: invoices.length,
         cattleMarketplace: cattleMarketplace.length,
         marketplace: marketplace.length,
-        total: userImages.length + invoices.length + cattleMarketplace.length + marketplace.length,
+        banners: offerBannersList.length + otherBannersList.length,
+        offerBanners: offerBannersList.length,
+        otherBanners: otherBannersList.length,
+        total:
+          userImages.length +
+          invoices.length +
+          cattleMarketplace.length +
+          marketplace.length +
+          offerBannersList.length +
+          otherBannersList.length,
       },
-    });
+    };
+
+    setCache("admin_storage", responsePayload);
+    res.json(responsePayload);
   } catch (error) {
     console.error("Error in /api/admin/storage:", error);
     res.status(500).json({ error: error.message });
@@ -214,12 +317,15 @@ app.get("/api/admin/user-full-data/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
     const phone = req.query.phone || "";
+    const forceRefresh = req.query.refresh === "1" || req.query.refresh === "true";
     const cleanPhone = phone.replace(/\D/g, "").slice(-10);
     const cacheKey = `user_full_${userId}_${cleanPhone}`;
 
-    const cachedData = getCached(cacheKey, 180000);
-    if (cachedData) {
-      return res.json(cachedData);
+    if (!forceRefresh) {
+      const cachedData = getCached(cacheKey, 180000);
+      if (cachedData) {
+        return res.json(cachedData);
+      }
     }
 
     const db = getFirestore();
@@ -926,6 +1032,7 @@ app.get("/api/admin/user-full-data/:userId", async (req, res) => {
 // REST API: Save or update custom farm data for a user
 app.post("/api/admin/user-farm-data/:userId", async (req, res) => {
   try {
+    const db = getFirestore();
     const { userId } = req.params;
     const farmData = req.body;
     if (!farmData) return res.status(400).json({ error: "Missing farm data payload" });
@@ -3333,11 +3440,49 @@ app.post("/api/admin/best-sellers/toggle", async (req, res) => {
       await bsRef.delete().catch(() => {});
     }
 
+    clearCache("admin_products");
+    clearCache();
     console.log(`Toggled bestSeller for ${productId} to ${newStatus}`);
     res.json({ success: true, productId, bestSeller: newStatus });
   } catch (error) {
     console.error("Error in /api/admin/best-sellers/toggle:", error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// REST API: Register a seller with Admin SDK
+app.post("/api/admin/sellers", async (req, res) => {
+  try {
+    const db = getFirestore();
+    const sellerData = req.body;
+    if (!sellerData) return res.status(400).json({ error: "Missing seller data payload" });
+    const docRef = await db.collection("sellers").add({
+      ...sellerData,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    clearCache();
+    res.json({ success: true, id: docRef.id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// REST API: Register a veterinarian with Admin SDK
+app.post("/api/admin/vets", async (req, res) => {
+  try {
+    const db = getFirestore();
+    const vetData = req.body;
+    if (!vetData) return res.status(400).json({ error: "Missing vet data payload" });
+    const docRef = await db.collection("vets").add({
+      ...vetData,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    clearCache();
+    res.json({ success: true, id: docRef.id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

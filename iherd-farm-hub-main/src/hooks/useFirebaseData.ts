@@ -416,6 +416,8 @@ export function useBestSellers() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["bestSellers"] });
+      queryClient.invalidateQueries({ queryKey: ["admin_products"] });
+      queryClient.invalidateQueries({ queryKey: ["adminProducts"] });
       queryClient.invalidateQueries({ queryKey: ["product_marketplace/main/products"] });
       queryClient.invalidateQueries({ queryKey: ["product_marketplace/main/best_seller"] });
     },

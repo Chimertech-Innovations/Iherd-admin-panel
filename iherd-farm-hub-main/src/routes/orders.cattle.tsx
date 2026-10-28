@@ -73,8 +73,22 @@ function formatDateTime(val: any) {
   }
 }
 
+const DEFAULT_CATTLE_IMAGE = "https://images.unsplash.com/photo-1546445317-29f4545e9d53?auto=format&fit=crop&w=300&q=80";
+
+function formatImageUrl(url?: string | null) {
+  if (!url) return DEFAULT_CATTLE_IMAGE;
+  if (url.includes("drive.google.com")) {
+    const idMatch = url.match(/\/d\/([a-zA-Z0-9_-]+)/) || url.match(/id=([a-zA-Z0-9_-]+)/);
+    if (idMatch && idMatch[1]) {
+      return `https://drive.google.com/thumbnail?id=${idMatch[1]}&sz=w800`;
+    }
+  }
+  return url;
+}
+
 function CattleOrdersPage() {
   const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
+  const [selectedInvoiceOrder, setSelectedInvoiceOrder] = useState<any | null>(null);
   const [selectedImagePreview, setSelectedImagePreview] = useState<{ url: string; title: string } | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
@@ -115,7 +129,8 @@ function CattleOrdersPage() {
         description="Buyer–Seller cattle marketplace transactions, escrow deposits, and verified livestock deliveries."
         primaryAction=""
         isLoading={isLoading}
-        filters={["Ordered", "Pending", "In escrow", "In transit", "Completed", "Cancelled"]}
+        hideStatusFilter={true}
+        filters={[]}
         statusKey="status"
         kpis={[
           { label: "Total Cattle Orders", value: isLoading ? "…" : totalCount.toLocaleString() },
@@ -212,26 +227,28 @@ function CattleOrdersPage() {
           {
             key: "animal",
             label: "Livestock Cattle",
-            render: (r) => (
-              <div className="flex items-center gap-2.5 min-w-[180px]">
-                {r.image ? (
+            render: (r) => {
+              const displayImg = formatImageUrl(r.image || r.cattleImage || r.imageUrl || r.thumbnail || r.faceViewImage || r.leftViewImage);
+              return (
+                <div className="flex items-center gap-2.5 min-w-[180px]">
                   <img
-                    src={r.image}
+                    src={displayImg}
                     alt={r.cattleName || "Cattle"}
                     className="h-9 w-9 rounded-xl object-cover ring-1 ring-border cursor-pointer shrink-0 hover:scale-105 transition-all"
-                    onClick={() => setSelectedImagePreview({ url: r.image, title: r.cattleName || "Cattle" })}
+                    onError={(e) => {
+                      if (e.currentTarget.src !== DEFAULT_CATTLE_IMAGE) {
+                        e.currentTarget.src = DEFAULT_CATTLE_IMAGE;
+                      }
+                    }}
+                    onClick={() => setSelectedImagePreview({ url: displayImg, title: r.cattleName || "Cattle" })}
                   />
-                ) : (
-                  <div className="h-9 w-9 rounded-xl bg-primary/10 text-primary grid place-items-center shrink-0">
-                    <Beef className="h-5 w-5" />
+                  <div className="min-w-0">
+                    <div className="font-bold text-xs text-foreground truncate">{r.cattleName || "Livestock"}</div>
+                    <div className="text-[11px] text-muted-foreground truncate">{r.breed || "Amritmahal"} • {r.species || "Cow"}</div>
                   </div>
-                )}
-                <div className="min-w-0">
-                  <div className="font-bold text-xs text-foreground truncate">{r.cattleName || "Livestock"}</div>
-                  <div className="text-[11px] text-muted-foreground truncate">{r.breed || "Amritmahal"} • {r.species || "Cow"}</div>
                 </div>
-              </div>
-            ),
+              );
+            },
           },
           {
             key: "amount",
@@ -259,22 +276,21 @@ function CattleOrdersPage() {
             key: "invoice",
             label: "Invoice",
             render: (r) => {
-              if (r.invoiceUrl) {
-                return (
-                  <a
-                    href={r.invoiceUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-success text-success-foreground text-[11px] font-bold shadow-sm hover:opacity-90 transition-all"
-                  >
-                    <FileText className="h-3 w-3" /> PDF <ExternalLink className="h-2.5 w-2.5" />
-                  </a>
-                );
-              }
               return (
-                <span className="text-[11px] font-mono text-muted-foreground bg-muted px-2 py-0.5 rounded">
-                  {r.invoiceNumber || "—"}
-                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (r.invoiceUrl) {
+                      window.open(r.invoiceUrl, "_blank");
+                    } else {
+                      setSelectedInvoiceOrder(r.rawOrder || r);
+                    }
+                  }}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold shadow-sm transition-all"
+                  title="View Official Tax Invoice"
+                >
+                  <FileText className="h-3 w-3" /> PDF <ExternalLink className="h-2.5 w-2.5" />
+                </button>
               );
             },
           },
@@ -412,6 +428,131 @@ function CattleOrdersPage() {
               alt={selectedImagePreview.title}
               className="w-full max-h-[70vh] object-contain rounded-2xl"
             />
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Tax Invoice Printable Modal */}
+      <Dialog open={!!selectedInvoiceOrder} onOpenChange={() => setSelectedInvoiceOrder(null)}>
+        <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto rounded-3xl p-6 bg-card text-foreground">
+          {selectedInvoiceOrder && (
+            <div className="space-y-6">
+              {/* Header */}
+              <div className="flex items-start justify-between border-b pb-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Beef className="h-6 w-6 text-primary" />
+                    <span className="text-xl font-black tracking-tight">iHerd Farm Hub</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-0.5">Livestock & Cattle Marketplace Invoice</p>
+                </div>
+                <div className="text-right">
+                  <div className="inline-block px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-600 font-bold text-xs">
+                    TAX INVOICE
+                  </div>
+                  <p className="font-mono text-xs font-bold text-foreground mt-1">
+                    #{selectedInvoiceOrder.invoiceNumber || selectedInvoiceOrder.id}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Date: {formatDateTime(selectedInvoiceOrder.createdAt || selectedInvoiceOrder.date)}
+                  </p>
+                </div>
+              </div>
+
+              {/* Parties */}
+              <div className="grid grid-cols-2 gap-4 text-xs">
+                <div className="p-3 rounded-2xl bg-muted/30 border">
+                  <p className="text-[10px] font-bold uppercase text-muted-foreground tracking-wider mb-1">Billed To (Buyer)</p>
+                  <p className="font-bold text-foreground text-sm">{selectedInvoiceOrder.buyerName || "Buyer"}</p>
+                  <p className="text-muted-foreground mt-0.5">Phone: {selectedInvoiceOrder.buyerPhone || "—"}</p>
+                  <p className="text-muted-foreground text-[11px] leading-relaxed mt-1">
+                    {selectedInvoiceOrder.buyerLocation || "Verified Farm Hub User"}
+                  </p>
+                </div>
+
+                <div className="p-3 rounded-2xl bg-muted/30 border">
+                  <p className="text-[10px] font-bold uppercase text-muted-foreground tracking-wider mb-1">Billed By (Seller)</p>
+                  <p className="font-bold text-foreground text-sm">{selectedInvoiceOrder.sellerName || "Verified Seller"}</p>
+                  <p className="text-muted-foreground mt-0.5">Role: Certified Cattle Farmer / Seller</p>
+                  <p className="text-muted-foreground text-[11px] leading-relaxed mt-1">iHerd Platform Verified Livestock</p>
+                </div>
+              </div>
+
+              {/* Items Table */}
+              <div className="rounded-2xl border overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead className="bg-muted/50 border-b">
+                    <tr>
+                      <th className="py-2.5 px-3 text-left font-bold text-muted-foreground">Item Description</th>
+                      <th className="py-2.5 px-3 text-center font-bold text-muted-foreground">Breed / Type</th>
+                      <th className="py-2.5 px-3 text-center font-bold text-muted-foreground">Qty</th>
+                      <th className="py-2.5 px-3 text-right font-bold text-muted-foreground">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    <tr>
+                      <td className="py-3 px-3 font-semibold text-foreground">
+                        {selectedInvoiceOrder.cattleName || "Livestock Cattle"}
+                      </td>
+                      <td className="py-3 px-3 text-center text-muted-foreground">
+                        {selectedInvoiceOrder.breed || "Amritmahal"} ({selectedInvoiceOrder.species || "Cow"})
+                      </td>
+                      <td className="py-3 px-3 text-center font-mono font-medium">1</td>
+                      <td className="py-3 px-3 text-right font-bold text-foreground">
+                        ₹{Number(selectedInvoiceOrder.totalAmount || selectedInvoiceOrder.price || 0).toLocaleString()}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Totals & Status */}
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pt-2 border-t">
+                <div className="space-y-1">
+                  <div className="text-xs text-muted-foreground flex items-center gap-1.5">
+                    <ShieldCheck className="h-4 w-4 text-emerald-600" />
+                    <span>Payment Protected via <strong>iHerd Escrow</strong></span>
+                  </div>
+                  <div className="text-[11px] text-muted-foreground">
+                    Status: <strong className="text-emerald-600 font-bold uppercase">{selectedInvoiceOrder.status || "COMPLETED"}</strong>
+                  </div>
+                </div>
+
+                <div className="w-full sm:w-48 space-y-1 text-xs">
+                  <div className="flex justify-between text-muted-foreground">
+                    <span>Subtotal:</span>
+                    <span>₹{Number(selectedInvoiceOrder.totalAmount || selectedInvoiceOrder.price || 0).toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between text-muted-foreground">
+                    <span>GST (Included):</span>
+                    <span>₹0.00</span>
+                  </div>
+                  <div className="flex justify-between font-black text-sm text-foreground pt-1 border-t">
+                    <span>Total Amount:</span>
+                    <span className="text-primary">₹{Number(selectedInvoiceOrder.totalAmount || selectedInvoiceOrder.price || 0).toLocaleString()}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center justify-end gap-2 pt-2 border-t">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="rounded-xl text-xs gap-1"
+                  onClick={() => window.print()}
+                >
+                  <Download className="h-3.5 w-3.5" /> Print / Save PDF
+                </Button>
+                <Button
+                  size="sm"
+                  className="rounded-xl text-xs"
+                  onClick={() => setSelectedInvoiceOrder(null)}
+                >
+                  Close
+                </Button>
+              </div>
+            </div>
           )}
         </DialogContent>
       </Dialog>

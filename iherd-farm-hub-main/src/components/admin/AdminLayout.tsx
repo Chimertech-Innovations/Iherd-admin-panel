@@ -1,5 +1,23 @@
-import { type ReactNode } from "react";
-import { Bell, Search, ChevronDown, LogOut, User as UserIcon, Settings as SettingsIcon } from "lucide-react";
+import { type ReactNode, useState, useEffect } from "react";
+import {
+  Bell,
+  Search,
+  ChevronDown,
+  LogOut,
+  User as UserIcon,
+  Settings as SettingsIcon,
+  Home,
+  Users,
+  Landmark,
+  Store,
+  Stethoscope,
+  Beef,
+  ShoppingBag,
+  PackageCheck,
+  Ticket,
+  MapPin,
+  ExternalLink,
+} from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { Input } from "@/components/ui/input";
@@ -12,6 +30,15 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  CommandDialog,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+} from "@/components/ui/command";
 import { AppSidebar } from "./AppSidebar";
 import { NotificationBellPopover } from "./NotificationBellPopover";
 import { useAuth } from "@/hooks/useAuth";
@@ -19,6 +46,19 @@ import { useAuth } from "@/hooks/useAuth";
 export function AdminLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const { profile, logout } = useAuth();
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [headerQuery, setHeaderQuery] = useState("");
+
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => {
+      if ((e.key === "k" || e.key === "K") && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        setSearchOpen((open) => !open);
+      }
+    };
+    document.addEventListener("keydown", down);
+    return () => document.removeEventListener("keydown", down);
+  }, []);
 
   const handleLogout = async () => {
     try {
@@ -27,6 +67,18 @@ export function AdminLayout({ children }: { children: ReactNode }) {
     } catch (error) {
       console.error("Logout failed:", error);
     }
+  };
+
+  const handleHeaderSearchSubmit = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" && headerQuery.trim()) {
+      navigate({ to: "/users" });
+      setSearchOpen(false);
+    }
+  };
+
+  const handleNavigate = (path: string) => {
+    setSearchOpen(false);
+    navigate({ to: path as any });
   };
 
   const displayName = profile?.name || "Admin User";
@@ -49,14 +101,22 @@ export function AdminLayout({ children }: { children: ReactNode }) {
             <div className="relative hidden lg:block flex-1 max-w-md">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
-                placeholder="Search farmers, sellers, cattle, orders..."
-                className="pl-9 bg-muted/60 border-transparent focus-visible:bg-background"
+                placeholder="Search farmers, sellers, cattle, orders... (Ctrl + K)"
+                value={headerQuery}
+                onChange={(e) => setHeaderQuery(e.target.value)}
+                onKeyDown={handleHeaderSearchSubmit}
+                onClick={() => setSearchOpen(true)}
+                className="pl-9 pr-16 bg-muted/60 border-transparent focus-visible:bg-background cursor-pointer"
               />
+              <kbd className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 hidden h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground opacity-100 sm:flex">
+                <span className="text-xs">⌘</span>K
+              </kbd>
             </div>
             <div className="ml-auto flex items-center gap-2">
               <button
                 type="button"
                 aria-label="Search"
+                onClick={() => setSearchOpen(true)}
                 className="lg:hidden grid h-10 w-10 place-items-center rounded-xl bg-muted/60 hover:bg-muted transition-colors"
               >
                 <Search className="h-4.5 w-4.5 text-foreground/80" />
@@ -104,6 +164,74 @@ export function AdminLayout({ children }: { children: ReactNode }) {
           <main className="flex-1 p-4 md:p-6 lg:p-8">{children}</main>
         </div>
       </div>
+
+      {/* Global Quick Search & Command Dialog */}
+      <CommandDialog open={searchOpen} onOpenChange={setSearchOpen}>
+        <CommandInput placeholder="Type a search query or jump to a section..." />
+        <CommandList>
+          <CommandEmpty>No matching records or pages found.</CommandEmpty>
+          
+          <CommandGroup heading="Quick Record Search">
+            <CommandItem onSelect={() => handleNavigate("/users")}>
+              <Users className="mr-2 h-4 w-4 text-primary" />
+              <span>Search in Farmers & Users Directory</span>
+            </CommandItem>
+            <CommandItem onSelect={() => handleNavigate("/orders/products")}>
+              <PackageCheck className="mr-2 h-4 w-4 text-primary" />
+              <span>Search in Product Orders</span>
+            </CommandItem>
+            <CommandItem onSelect={() => handleNavigate("/marketplace/cattle")}>
+              <Beef className="mr-2 h-4 w-4 text-primary" />
+              <span>Search in Cattle Marketplace</span>
+            </CommandItem>
+            <CommandItem onSelect={() => handleNavigate("/marketplace/products")}>
+              <ShoppingBag className="mr-2 h-4 w-4 text-primary" />
+              <span>Search in Products Catalog</span>
+            </CommandItem>
+          </CommandGroup>
+
+          <CommandSeparator />
+
+          <CommandGroup heading="Platform Navigation">
+            <CommandItem onSelect={() => handleNavigate("/dashboard")}>
+              <Home className="mr-2 h-4 w-4" />
+              <span>Dashboard & Analytics</span>
+            </CommandItem>
+            <CommandItem onSelect={() => handleNavigate("/farmers")}>
+              <Users className="mr-2 h-4 w-4" />
+              <span>Farmers & Milk Producers</span>
+            </CommandItem>
+            <CommandItem onSelect={() => handleNavigate("/farms")}>
+              <Landmark className="mr-2 h-4 w-4" />
+              <span>Registered Dairy Farms</span>
+            </CommandItem>
+            <CommandItem onSelect={() => handleNavigate("/sellers")}>
+              <Store className="mr-2 h-4 w-4" />
+              <span>Marketplace Sellers</span>
+            </CommandItem>
+            <CommandItem onSelect={() => handleNavigate("/vets")}>
+              <Stethoscope className="mr-2 h-4 w-4" />
+              <span>Veterinarians & Doctors</span>
+            </CommandItem>
+            <CommandItem onSelect={() => handleNavigate("/orders/products")}>
+              <PackageCheck className="mr-2 h-4 w-4" />
+              <span>Product Orders</span>
+            </CommandItem>
+            <CommandItem onSelect={() => handleNavigate("/orders/cattle")}>
+              <Beef className="mr-2 h-4 w-4" />
+              <span>Cattle Token Orders</span>
+            </CommandItem>
+            <CommandItem onSelect={() => handleNavigate("/marketplace/coupons")}>
+              <Ticket className="mr-2 h-4 w-4" />
+              <span>Coupons & Offers</span>
+            </CommandItem>
+            <CommandItem onSelect={() => handleNavigate("/map")}>
+              <MapPin className="mr-2 h-4 w-4" />
+              <span>GIS Interactive Map</span>
+            </CommandItem>
+          </CommandGroup>
+        </CommandList>
+      </CommandDialog>
     </SidebarProvider>
   );
 }

@@ -220,23 +220,30 @@ function FarmersPage() {
     const fsRoles = fsUser?.roles || (fsUser?.role ? [fsUser.role] : []);
     const fsRolesList: string[] = Array.isArray(fsRoles) ? fsRoles : [String(fsRoles)];
     const hasFarmerRole = fsRolesList.some((r: any) => typeof r === "string" && r.toLowerCase().includes("farmer"));
+    const hasAuthFarmerRole =
+      authUser.role === "Farmer" ||
+      (Array.isArray(authUser.roles) && authUser.roles.some((r: any) => String(r).toLowerCase().includes("farmer"))) ||
+      authUser.isFarmer === true ||
+      Boolean(authUser.farmer);
     const hasDirectFarmerDoc = Boolean(directFarmer);
     const hasFarm = Boolean(
       meta.farmId ||
       meta.farmName ||
+      authUser?.farms ||
       (fsUser?.farms && typeof fsUser.farms === "object" && (fsUser.farms.name || fsUser.farms.farmName || (Array.isArray(fsUser.farms) && fsUser.farms.length > 0)))
     );
     const hasCattle = (cattleCountMap.get(uid) || 0) > 0;
     const hasGenuineFarmerProfile = Boolean(
-      fsUser?.farmer &&
-      typeof fsUser.farmer === "object" &&
-      (fsUser.farmer.farmName ||
-       fsUser.farmer.farmerName ||
-       (fsUser.farmer.village && fsUser.farmer.village !== "—") ||
-       (fsUser.farmer.name && fsUser.farmer.name !== "Farmer" && !fsUser.farmer.name.startsWith("Farmer (") && !fsUser.farmer.name.startsWith("Farmer #")))
+      (fsUser?.farmer &&
+        typeof fsUser.farmer === "object" &&
+        (fsUser.farmer.farmName ||
+          fsUser.farmer.farmerName ||
+          (fsUser.farmer.village && fsUser.farmer.village !== "—") ||
+          (fsUser.farmer.name && fsUser.farmer.name !== "Farmer" && !fsUser.farmer.name.startsWith("Farmer (") && !fsUser.farmer.name.startsWith("Farmer #")))) ||
+      (authUser?.farmer && typeof authUser.farmer === "object")
     );
 
-    const isFarmer = hasFarmerRole || hasDirectFarmerDoc || hasFarm || hasCattle || hasGenuineFarmerProfile || fsUser?.isFarmer === true;
+    const isFarmer = hasFarmerRole || hasAuthFarmerRole || hasDirectFarmerDoc || hasFarm || hasCattle || hasGenuineFarmerProfile || fsUser?.isFarmer === true;
 
     if (isFarmer) {
       const farmerProfile = fsUser?.farmer || authUser?.farmer || directFarmer || {};
@@ -277,12 +284,12 @@ function FarmersPage() {
         }
       }
 
-      const village = meta.village || farmerProfile.village || fsUser?.village || "—";
-      const district = meta.district || farmerProfile.district || fsUser?.district || "—";
-      const state = meta.state || farmerProfile.state || fsUser?.state || "—";
+      const village = meta.village || farmerProfile.village || fsUser?.village || authUser?.village || authUser?.farmer?.village || "—";
+      const district = meta.district || farmerProfile.district || fsUser?.district || authUser?.district || authUser?.farmer?.district || "—";
+      const state = meta.state || farmerProfile.state || fsUser?.state || authUser?.state || authUser?.farmer?.state || "—";
 
       const trackedCattle = cattleCountMap.get(uid) || Number(farmerProfile.cattle || fsUser?.cattle || 0);
-      const registeredFarmName = meta.farmName || (fsUser?.farms?.name || farmerProfile?.farmName || null);
+      const registeredFarmName = meta.farmName || (fsUser?.farms?.name || farmerProfile?.farmName || authUser?.farms?.name || null);
 
       farmerMap.set(uid, {
         id: uid,

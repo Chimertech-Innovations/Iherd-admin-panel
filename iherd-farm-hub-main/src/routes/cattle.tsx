@@ -601,7 +601,20 @@ function CattleDetailsPage() {
           { header: "State", accessor: "state" },
           { header: "Registration Date", accessor: (r) => r.createdAt ? formatDate(r.createdAt) : "—" },
         ]}
-        filters={["All", "Insured", "High Yield (>12L)", "Active"]}
+        searchKeys={[
+          "title",
+          "breed",
+          "tagNo",
+          "rfid",
+          "cattleId",
+          "species",
+          "ownerName",
+          "ownerPhone",
+          "state",
+          "village",
+          "farmName",
+        ]}
+        filters={["Insured", "High Yield (>12L)", "Active"]}
         statusKey="statusFilter"
         isLoading={isLoading}
         kpis={[

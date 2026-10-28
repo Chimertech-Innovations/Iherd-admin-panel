@@ -969,7 +969,7 @@ function LiveGeoMapPage() {
                   <SelectTrigger className="h-8 text-xs rounded-xl bg-background">
                     <SelectValue placeholder="All States" />
                   </SelectTrigger>
-                  <SelectContent className="rounded-xl max-h-56">
+                  <SelectContent className="rounded-xl max-h-56 z-[9999]">
                     <SelectItem value="all">All States ({uniqueStates.length})</SelectItem>
                     {uniqueStates.map((st) => (
                       <SelectItem key={st} value={st}>
@@ -983,7 +983,7 @@ function LiveGeoMapPage() {
                   <SelectTrigger className="h-8 text-xs rounded-xl bg-background">
                     <SelectValue placeholder="Sort By" />
                   </SelectTrigger>
-                  <SelectContent className="rounded-xl">
+                  <SelectContent className="rounded-xl z-[9999]">
                     <SelectItem value="gps_first">GPS Exact First</SelectItem>
                     <SelectItem value="name_asc">Name (A → Z)</SelectItem>
                     <SelectItem value="name_desc">Name (Z → A)</SelectItem>
@@ -1016,7 +1016,7 @@ function LiveGeoMapPage() {
                       <SelectTrigger className="h-8 text-xs rounded-xl bg-background text-blue-600 font-medium">
                         <SelectValue placeholder="Radius" />
                       </SelectTrigger>
-                      <SelectContent className="rounded-xl">
+                      <SelectContent className="rounded-xl z-[9999]">
                         <SelectItem value="0">All Dist</SelectItem>
                         <SelectItem value="25">25 km</SelectItem>
                         <SelectItem value="50">50 km</SelectItem>
@@ -1145,7 +1145,7 @@ function LiveGeoMapPage() {
       {/* 4. FULL ENTITY & USER DETAILS MODAL DIALOG */}
       <Dialog open={!!detailModalEntity} onOpenChange={(o) => !o && setDetailModalEntity(null)}>
         {detailModalEntity && (
-          <DialogContent className="sm:max-w-xl rounded-3xl max-h-[92vh] overflow-y-auto p-6">
+          <DialogContent className="sm:max-w-xl rounded-3xl max-h-[92vh] overflow-y-auto p-6 z-[9999]">
             <DialogHeader>
               <div className="flex items-center justify-between gap-2 mb-1 flex-wrap">
                 <div className="flex items-center gap-1.5 flex-wrap">

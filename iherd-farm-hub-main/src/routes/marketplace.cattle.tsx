@@ -38,6 +38,7 @@ import {
   Copy,
   Layers,
   Code2,
+  HardDrive,
 } from "lucide-react";
 import { useFirebaseCollection } from "../hooks/useFirebaseData";
 import { getLocalizedText } from "@/lib/utils";
@@ -446,9 +447,21 @@ function CattleMarketplacePage() {
       <DataPage
         title="Live Cattle Marketplace"
         description="Real-time livestock listings fetched directly from Firestore /cattle-marketplace, featuring multi-angle camera proofs, RFID verification, milk yields, and seller contacts."
-        primaryAction=""
         isLoading={isLoading}
-        filters={["All", "On Sale", "Verified RFID", "High Milk Yield (>12L)", "Insured"]}
+        hideStatusFilter={true}
+        searchKeys={[
+          "title",
+          "breed",
+          "rfid",
+          "tagNo",
+          "sellerName",
+          "sellerPhone",
+          "ownerUid",
+          "state",
+          "city",
+          "description",
+        ]}
+        filters={[]}
         statusKey="filterCategory"
         kpis={[
           { label: "Total Marketplace Listings", value: isLoading ? "…" : allCattle.length.toLocaleString() },
@@ -550,11 +563,30 @@ function CattleMarketplacePage() {
             key: "ownerName",
             label: "Farmer / Seller & Location",
             render: (r) => (
-              <div className="space-y-0.5">
+              <div className="space-y-1">
                 <div className="font-semibold text-xs text-foreground flex items-center gap-1">
                   <User className="h-3 w-3 text-primary shrink-0" />
                   <span>{r.ownerName}</span>
                 </div>
+                {r.ownerUid && (
+                  <div className="flex items-center gap-1 text-[10px] font-mono text-muted-foreground" title={`User ID: ${r.ownerUid}`}>
+                    <span className="text-[9px] font-bold text-primary uppercase">UID:</span>
+                    <span className="truncate max-w-[100px] select-all">{r.ownerUid}</span>
+                  </div>
+                )}
+                {r.ownerUid && (
+                  <div
+                    className="text-[10px] font-mono text-emerald-600 dark:text-emerald-400 truncate max-w-[160px] cursor-pointer hover:underline select-all"
+                    title={`Storage Path: /cattle-marketplace/${r.ownerUid}/`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigator.clipboard.writeText(`/cattle-marketplace/${r.ownerUid}/`);
+                      toast.success("Storage path copied to clipboard");
+                    }}
+                  >
+                    path: /{r.ownerUid.slice(0, 10)}…
+                  </div>
+                )}
                 {r.ownerPhone !== "—" && (
                   <div className="text-[11px] text-muted-foreground flex items-center gap-1">
                     <Phone className="h-3 w-3 text-muted-foreground shrink-0" />
@@ -899,6 +931,76 @@ function CattleMarketplacePage() {
                   <p className="text-foreground whitespace-pre-line leading-relaxed">{selectedCattleDetail.description}</p>
                 </div>
               )}
+
+              {/* Storage & Ownership Path */}
+              <div className="p-4 rounded-2xl bg-primary/5 border border-primary/20 space-y-2.5">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-primary flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <HardDrive className="h-4 w-4" /> User Storage & Certificate Paths
+                  </span>
+                  <span className="text-[10px] lowercase text-muted-foreground font-normal">All media stored under User ID</span>
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                  <div className="space-y-1">
+                    <span className="text-muted-foreground text-[11px] block font-medium">Owner User ID:</span>
+                    <div className="font-mono font-bold text-foreground text-xs bg-background/80 p-2.5 rounded-xl border select-all flex items-center justify-between">
+                      <span className="truncate">{selectedCattleDetail.ownerUid || "—"}</span>
+                      {selectedCattleDetail.ownerUid && (
+                        <button
+                          type="button"
+                          className="text-primary hover:underline text-[11px] font-sans shrink-0 ml-2 font-semibold"
+                          onClick={() => {
+                            navigator.clipboard.writeText(selectedCattleDetail.ownerUid);
+                            toast.success("User ID copied");
+                          }}
+                        >
+                          Copy
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <span className="text-muted-foreground text-[11px] block font-medium">Cattle Media Storage Path:</span>
+                    <div className="font-mono font-bold text-emerald-600 dark:text-emerald-400 text-xs bg-background/80 p-2.5 rounded-xl border select-all flex items-center justify-between">
+                      <span className="truncate">{selectedCattleDetail.ownerUid ? `/cattle-marketplace/${selectedCattleDetail.ownerUid}/` : "—"}</span>
+                      {selectedCattleDetail.ownerUid && (
+                        <button
+                          type="button"
+                          className="text-emerald-600 hover:underline text-[11px] font-sans shrink-0 ml-2 font-semibold"
+                          onClick={() => {
+                            navigator.clipboard.writeText(`/cattle-marketplace/${selectedCattleDetail.ownerUid}/`);
+                            toast.success("Storage path copied");
+                          }}
+                        >
+                          Copy
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="sm:col-span-2 space-y-1">
+                    <span className="text-muted-foreground text-[11px] block font-medium">Verified Certificate & Document Path:</span>
+                    <div className="font-mono text-muted-foreground text-[11px] bg-background/80 p-2.5 rounded-xl border select-all flex items-center justify-between">
+                      <span className="truncate">
+                        {selectedCattleDetail.ownerUid
+                          ? `/cattle-marketplace/${selectedCattleDetail.ownerUid}/${selectedCattleDetail.id || selectedCattleDetail.cattleId}/`
+                          : "—"}
+                      </span>
+                      {selectedCattleDetail.ownerUid && (
+                        <button
+                          type="button"
+                          className="text-muted-foreground hover:text-foreground text-[11px] font-sans shrink-0 ml-2 font-semibold"
+                          onClick={() => {
+                            navigator.clipboard.writeText(`/cattle-marketplace/${selectedCattleDetail.ownerUid}/${selectedCattleDetail.id || selectedCattleDetail.cattleId}/`);
+                            toast.success("Certificate path copied");
+                          }}
+                        >
+                          Copy
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
 
               {/* Seller / Farmer Contact & Profile Card */}
               <div className="flex items-center justify-between p-4 rounded-2xl bg-muted/40 border border-border/60 flex-wrap gap-4">

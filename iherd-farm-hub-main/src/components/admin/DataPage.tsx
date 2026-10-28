@@ -23,6 +23,7 @@ import { PageHeader } from "./PageHeader";
 import { StatusBadge } from "./StatusBadge";
 
 import { getLocalizedText } from "@/lib/utils";
+import { toast } from "sonner";
 
 import { exportToCsv, type CsvColumn } from "@/lib/csvExport";
 
@@ -77,6 +78,43 @@ function getRowLocation(row: any): string {
   return parts.length > 0 ? parts.join(", ") : "—";
 }
 
+function extractRowState(row: any): string {
+  if (!row) return "";
+  const s =
+    row.state ||
+    row.stateName ||
+    row.stateCode ||
+    row.clinicState ||
+    row.farmerState ||
+    row.farms?.state ||
+    row.farmer?.state ||
+    row.seller?.state ||
+    row.veterinarian?.state ||
+    row.raw?.state ||
+    (row.location && typeof row.location === "string" ? row.location.split(",").pop() : "") ||
+    "";
+  const clean = getLocalizedText(s).trim();
+  return clean === "—" ? "" : clean;
+}
+
+function extractRowName(row: any): string {
+  if (!row) return "";
+  const n =
+    row.name ||
+    row.displayName ||
+    row.title ||
+    row.fullName ||
+    row.farmerName ||
+    row.shopName ||
+    row.doctorName ||
+    row.buyerName ||
+    row.sellerName ||
+    row.breed ||
+    "";
+  const clean = getLocalizedText(n).trim();
+  return clean === "—" ? "" : clean;
+}
+
 const MONTHS = [
   { value: "all", label: "All Months" },
   { value: "1", label: "January" },
@@ -105,7 +143,7 @@ export function DataPage<T extends Record<string, any>>({
   stats,
   searchPlaceholder = "Search...",
   searchKeys,
-  primaryAction = "Add new",
+  primaryAction,
   onPrimaryAction,
   rowHref,
   isLoading = false,
@@ -114,6 +152,7 @@ export function DataPage<T extends Record<string, any>>({
   onExport,
   customExportColumns,
   locationOptions,
+  hideStatusFilter = false,
 }: {
   title: string;
   description?: string;
@@ -135,13 +174,15 @@ export function DataPage<T extends Record<string, any>>({
   onExport?: (exportData: T[]) => void;
   customExportColumns?: CsvColumn<T>[];
   locationOptions?: string[];
+  hideStatusFilter?: boolean;
 }) {
   const navigate = useNavigate();
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState("all");
   const [selectedYear, setSelectedYear] = useState<string>("all");
   const [selectedMonth, setSelectedMonth] = useState<string>("all");
-  const [selectedExactDate, setSelectedExactDate] = useState<string>("");
+  const [startDate, setStartDate] = useState<string>("");
+  const [endDate, setEndDate] = useState<string>("");
   const [selectedState, setSelectedState] = useState("all");
   const [stateSearch, setStateSearch] = useState("");
   const [locationSearch, setLocationSearch] = useState("");
@@ -152,7 +193,7 @@ export function DataPage<T extends Record<string, any>>({
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [q, filter, selectedYear, selectedMonth, selectedExactDate, selectedState, locationFilter, sortBy]);
+  }, [q, filter, selectedYear, selectedMonth, startDate, endDate, selectedState, locationFilter, sortBy]);
 
   const effectiveKpis = kpis || stats;
   const effectiveFilters = (statusOptions && statusOptions.length > 0) ? statusOptions : filters;
@@ -219,30 +260,23 @@ export function DataPage<T extends Record<string, any>>({
     return { min, max };
   }, [selectedYear, selectedMonth]);
 
-  // Reset exact date if it lies outside the newly selected Year/Month range
+  // Reset date range if it lies outside the newly selected Year/Month range
   useEffect(() => {
-    if (selectedExactDate && (dateMinMax.min || dateMinMax.max)) {
-      if (dateMinMax.min && selectedExactDate < dateMinMax.min) {
-        setSelectedExactDate("");
-      } else if (dateMinMax.max && selectedExactDate > dateMinMax.max) {
-        setSelectedExactDate("");
+    if (startDate && (dateMinMax.min || dateMinMax.max)) {
+      if (dateMinMax.min && startDate < dateMinMax.min) {
+        setStartDate("");
+      } else if (dateMinMax.max && startDate > dateMinMax.max) {
+        setStartDate("");
       }
     }
-  }, [selectedYear, selectedMonth, dateMinMax, selectedExactDate]);
-
-  // Sync Year & Month when user picks a date directly in Date Picker
-  const handleDateInputChange = (val: string) => {
-    setSelectedExactDate(val);
-    if (val) {
-      const parts = val.split("-");
-      if (parts.length === 3) {
-        const y = parts[0];
-        const m = String(Number(parts[1]));
-        setSelectedYear(y);
-        setSelectedMonth(m);
+    if (endDate && (dateMinMax.min || dateMinMax.max)) {
+      if (dateMinMax.min && endDate < dateMinMax.min) {
+        setEndDate("");
+      } else if (dateMinMax.max && endDate > dateMinMax.max) {
+        setEndDate("");
       }
     }
-  };
+  }, [selectedYear, selectedMonth, dateMinMax, startDate, endDate]);
 
   const ALL_INDIAN_STATES = [
     "Andhra Pradesh",
@@ -328,10 +362,12 @@ export function DataPage<T extends Record<string, any>>({
         const queryDigits = q.replace(/[^0-9]/g, "");
 
         const searchFields = [
-          "email", "userEmail", "authEmail", "farmerEmail", "sellerEmail", "vetEmail",
+          "email", "userEmail", "authEmail", "farmerEmail", "sellerEmail", "vetEmail", "emailAddress", "mail",
           "phone", "phoneNumber", "userPhone", "authPhone", "farmerPhone", "sellerPhone", "vetPhone",
           "uid", "id", "userId", "farmerId", "sellerId", "vetId",
-          "name", "fullName", "ownerName", "doctorName", "shopName", "storeName", "displayName",
+          "tagNo", "rfid", "cattleId", "breed", "species", "cattleName", "title",
+          "sku", "sellerName", "shopName", "storeName", "productName",
+          "name", "fullName", "ownerName", "doctorName", "displayName",
           "role", "roles", "status", "category",
           "village", "district", "city", "state", "location", "address"
         ];
@@ -370,7 +406,7 @@ export function DataPage<T extends Record<string, any>>({
       const rowStatus = getLocalizedText(row[statusKey]).toLowerCase();
       const matchF = filter === "all" ? true : rowStatus === filter.toLowerCase();
 
-      // 3. Cascading Date Filter (Year -> Month -> Date)
+      // 3. Cascading Date Filter (Year -> Month -> Date Range)
       const ts = getRowTimestamp(row);
       let matchDate = true;
 
@@ -382,17 +418,21 @@ export function DataPage<T extends Record<string, any>>({
         const dTwoDigit = d.getDate() < 10 ? `0${d.getDate()}` : `${d.getDate()}`;
         const dateStr = `${y}-${mTwoDigit}-${dTwoDigit}`;
 
+        if (startDate && dateStr < startDate) {
+          matchDate = false;
+        }
+        if (endDate && dateStr > endDate) {
+          matchDate = false;
+        }
+
         if (selectedYear !== "all" && y !== selectedYear) {
           matchDate = false;
         }
         if (selectedMonth !== "all" && m !== selectedMonth) {
           matchDate = false;
         }
-        if (selectedExactDate && dateStr !== selectedExactDate) {
-          matchDate = false;
-        }
       } else {
-        if (selectedYear !== "all" || selectedMonth !== "all" || selectedExactDate !== "") {
+        if (selectedYear !== "all" || selectedMonth !== "all" || startDate !== "" || endDate !== "") {
           matchDate = false;
         }
       }
@@ -421,34 +461,56 @@ export function DataPage<T extends Record<string, any>>({
         return getRowTimestamp(a) - getRowTimestamp(b);
       }
       if (sortBy === "state-asc") {
-        const stateA = getLocalizedText(a.state || a.clinicState || getRowLocation(a) || "");
-        const stateB = getLocalizedText(b.state || b.clinicState || getRowLocation(b) || "");
+        const stateA = extractRowState(a);
+        const stateB = extractRowState(b);
+        if (!stateA && !stateB) return 0;
+        if (!stateA) return 1;
+        if (!stateB) return -1;
         return stateA.localeCompare(stateB);
       }
       if (sortBy === "state-desc") {
-        const stateA = getLocalizedText(a.state || a.clinicState || getRowLocation(a) || "");
-        const stateB = getLocalizedText(b.state || b.clinicState || getRowLocation(b) || "");
+        const stateA = extractRowState(a);
+        const stateB = extractRowState(b);
+        if (!stateA && !stateB) return 0;
+        if (!stateA) return 1;
+        if (!stateB) return -1;
         return stateB.localeCompare(stateA);
       }
       if (sortBy === "loc-asc") {
-        return getRowLocation(a).localeCompare(getRowLocation(b));
+        const locA = getRowLocation(a);
+        const locB = getRowLocation(b);
+        if ((!locA || locA === "—") && (!locB || locB === "—")) return 0;
+        if (!locA || locA === "—") return 1;
+        if (!locB || locB === "—") return -1;
+        return locA.localeCompare(locB);
       }
       if (sortBy === "loc-desc") {
-        return getRowLocation(b).localeCompare(getRowLocation(a));
+        const locA = getRowLocation(a);
+        const locB = getRowLocation(b);
+        if ((!locA || locA === "—") && (!locB || locB === "—")) return 0;
+        if (!locA || locA === "—") return 1;
+        if (!locB || locB === "—") return -1;
+        return locB.localeCompare(locA);
       }
       if (sortBy === "name-asc") {
-        const nameA = getLocalizedText(a.name || a.title || a.shopName || a.doctorName || "");
-        const nameB = getLocalizedText(b.name || b.title || b.shopName || b.doctorName || "");
+        const nameA = extractRowName(a);
+        const nameB = extractRowName(b);
+        if (!nameA && !nameB) return 0;
+        if (!nameA) return 1;
+        if (!nameB) return -1;
         return nameA.localeCompare(nameB);
       }
       if (sortBy === "name-desc") {
-        const nameA = getLocalizedText(a.name || a.title || a.shopName || a.doctorName || "");
-        const nameB = getLocalizedText(b.name || b.title || b.shopName || b.doctorName || "");
+        const nameA = extractRowName(a);
+        const nameB = extractRowName(b);
+        if (!nameA && !nameB) return 0;
+        if (!nameA) return 1;
+        if (!nameB) return -1;
         return nameB.localeCompare(nameA);
       }
       return 0;
     });
-  }, [data, q, filter, selectedYear, selectedMonth, selectedExactDate, selectedState, locationFilter, sortBy, statusKey, searchKeys]);
+  }, [data, q, filter, selectedYear, selectedMonth, startDate, endDate, selectedState, locationFilter, sortBy, statusKey, searchKeys]);
 
   const filtered = filteredAndSorted;
   const totalRecords = filtered.length;
@@ -466,7 +528,8 @@ export function DataPage<T extends Record<string, any>>({
     filter !== "all" ||
     selectedYear !== "all" ||
     selectedMonth !== "all" ||
-    selectedExactDate !== "" ||
+    startDate !== "" ||
+    endDate !== "" ||
     selectedState !== "all" ||
     locationFilter !== "all";
 
@@ -475,7 +538,8 @@ export function DataPage<T extends Record<string, any>>({
     setFilter("all");
     setSelectedYear("all");
     setSelectedMonth("all");
-    setSelectedExactDate("");
+    setStartDate("");
+    setEndDate("");
     setSelectedState("all");
     setStateSearch("");
     setLocationFilter("all");
@@ -509,6 +573,7 @@ export function DataPage<T extends Record<string, any>>({
       data: exportData,
       columns: exportCols,
     });
+    toast.success(`Successfully exported ${exportData.length} records to CSV!`);
   };
 
   return (
@@ -529,9 +594,11 @@ export function DataPage<T extends Record<string, any>>({
               <Download className="h-4 w-4 text-emerald-600" /> Export CSV ({filtered.length})
             </Button>
             {typeof primaryAction === "string" ? (
-              <Button size="sm" onClick={onPrimaryAction} className="gap-1.5 bg-gradient-to-br from-primary to-primary-glow">
-                <Plus className="h-4 w-4" /> {primaryAction}
-              </Button>
+              primaryAction && onPrimaryAction ? (
+                <Button size="sm" onClick={onPrimaryAction} className="gap-1.5 bg-gradient-to-br from-primary to-primary-glow">
+                  <Plus className="h-4 w-4" /> {primaryAction}
+                </Button>
+              ) : null
             ) : (
               primaryAction
             )}
@@ -644,23 +711,42 @@ export function DataPage<T extends Record<string, any>>({
               </SelectContent>
             </Select>
 
-            {/* 3. Bounded Date Picker Selector */}
-            <div className="relative flex items-center">
-              <Input
+            {/* 3. Bounded Date Range Selector (From -> To, e.g. Day 1 to 13) */}
+            <div className="relative flex items-center bg-background rounded-xl border border-input shadow-xs h-9 px-2 text-xs">
+              <CalendarDays className="h-3.5 w-3.5 mr-1 text-primary shrink-0" />
+              <span className="text-[10px] text-muted-foreground font-semibold mr-1">From:</span>
+              <input
                 type="date"
                 min={dateMinMax.min}
                 max={dateMinMax.max}
-                value={selectedExactDate}
-                onChange={(e) => handleDateInputChange(e.target.value)}
-                className="w-36 text-xs h-9 pr-2 font-medium"
-                title={dateMinMax.min && dateMinMax.max ? `Select date between ${dateMinMax.min} and ${dateMinMax.max}` : "Select date"}
+                value={startDate}
+                onChange={(e) => {
+                  setStartDate(e.target.value);
+                  if (e.target.value && !endDate) setEndDate(e.target.value);
+                }}
+                className="bg-transparent text-xs font-medium border-0 focus:outline-none focus:ring-0 text-foreground cursor-pointer w-28"
+                title={dateMinMax.min && dateMinMax.max ? `Select start date between ${dateMinMax.min} and ${dateMinMax.max}` : "Select start date"}
                 disabled={isLoading}
               />
-              {selectedExactDate && (
+              <span className="text-[10px] text-muted-foreground font-semibold mx-1">To:</span>
+              <input
+                type="date"
+                min={startDate || dateMinMax.min}
+                max={dateMinMax.max}
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="bg-transparent text-xs font-medium border-0 focus:outline-none focus:ring-0 text-foreground cursor-pointer w-28"
+                title={dateMinMax.min && dateMinMax.max ? `Select end date between ${dateMinMax.min} and ${dateMinMax.max}` : "Select end date"}
+                disabled={isLoading}
+              />
+              {(startDate || endDate) && (
                 <button
-                  onClick={() => setSelectedExactDate("")}
-                  className="absolute right-2 text-muted-foreground hover:text-foreground text-xs font-bold"
-                  title="Clear exact date"
+                  onClick={() => {
+                    setStartDate("");
+                    setEndDate("");
+                  }}
+                  className="ml-1 text-muted-foreground hover:text-foreground text-xs font-bold p-0.5"
+                  title="Clear date range"
                 >
                   ✕
                 </button>
@@ -673,7 +759,7 @@ export function DataPage<T extends Record<string, any>>({
                 <MapPin className="h-3.5 w-3.5 mr-1 text-emerald-500 shrink-0" />
                 <SelectValue placeholder="State" />
               </SelectTrigger>
-              <SelectContent className="max-h-64 overflow-y-auto min-w-[220px]">
+              <SelectContent className="max-h-64 overflow-y-auto min-w-[200px]">
                 <div className="p-2 border-b sticky top-0 bg-popover z-10">
                   <div className="relative">
                     <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
@@ -738,19 +824,21 @@ export function DataPage<T extends Record<string, any>>({
             )}
 
             {/* 6. Status Filter */}
-            {effectiveFilters.length > 0 && (
+            {!hideStatusFilter && effectiveFilters.length > 0 && (
               <Select value={filter} onValueChange={setFilter} disabled={isLoading}>
                 <SelectTrigger className="w-32 text-xs h-9">
                   <Filter className="h-3.5 w-3.5 mr-1 text-amber-500 shrink-0" />
-                  <SelectValue />
+                  <SelectValue placeholder="All Status" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Status</SelectItem>
-                  {effectiveFilters.map((f) => (
-                    <SelectItem key={f} value={f.toLowerCase()}>
-                      {f}
-                    </SelectItem>
-                  ))}
+                  {effectiveFilters
+                    .filter((f) => f.toLowerCase() !== "all" && f.toLowerCase() !== "all status")
+                    .map((f) => (
+                      <SelectItem key={f} value={f.toLowerCase()}>
+                        {f}
+                      </SelectItem>
+                    ))}
                 </SelectContent>
               </Select>
             )}

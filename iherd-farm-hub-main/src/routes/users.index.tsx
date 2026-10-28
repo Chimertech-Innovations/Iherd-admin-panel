@@ -156,7 +156,7 @@ function UsersPage() {
         name: resolvedName,
         displayName: resolvedName,
         phoneNumber: resolvedPhone,
-        email: authUser.email || fsUser?.email || null,
+        email: authUser.email || fsUser?.email || fsUser?.emailAddress || fsUser?.mail || (authUser?.providerData && authUser.providerData[0]?.email) || null,
         roles: roles.length > 0 ? roles : [primaryRole],
         role: primaryRole,
         farmer: farmerProfile,
@@ -254,7 +254,7 @@ function UsersPage() {
         name: fu.name || fu.fullName || fu.displayName || (fu.phoneNumber ? `User (${fu.phoneNumber})` : `User #${uid.slice(-6).toUpperCase()}`),
         displayName: fu.name || fu.fullName || fu.displayName || `User #${uid.slice(-6).toUpperCase()}`,
         phoneNumber: fu.phoneNumber || fu.phone || "—",
-        email: fu.email || null,
+        email: fu.email || fu.emailAddress || fu.mail || (fu.providerData && fu.providerData[0]?.email) || null,
         roles,
         role: primaryRole,
         farmer: farmerProfile,
@@ -291,7 +291,6 @@ function UsersPage() {
       <DataPage
         title="User Accounts Directory"
         description="All registered Firebase Authentication users, verified farmer roles, store profiles, and contact details."
-        primaryAction="Add User"
         isLoading={isLoading}
         isFetchingBalance={isFetchingBalance}
         filters={["Farmer", "Seller", "Veterinarian", "User"]}
