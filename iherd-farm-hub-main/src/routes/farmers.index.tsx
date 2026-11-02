@@ -459,13 +459,13 @@ function FarmersPage() {
           {
             label: "Total Registered Farmers",
             value: isLoading ? "…" : String(totalFarmers),
-            change: `${activeFarmers} active farmers`,
+            change: `${activeFarmers} registered farmers`,
             up: true,
           },
           {
             label: "Farmers with Registered Farms",
             value: isLoading ? "…" : String(farmersWithFarms),
-            change: "Have active farms",
+            change: "Have registered farms",
             up: true,
           },
           {
@@ -475,7 +475,7 @@ function FarmersPage() {
             up: true,
           },
           {
-            label: "Active Verification Rate",
+            label: "Verification Rate",
             value: isLoading ? "…" : (totalFarmers > 0 ? `${Math.round((activeFarmers / totalFarmers) * 100)}%` : "0%"),
             change: "Verified accounts",
             up: true,
@@ -575,11 +575,6 @@ function FarmersPage() {
                 </div>
               </div>
             ),
-          },
-          {
-            key: "status",
-            label: "Status",
-            render: (r) => <StatusBadge status={r.status} />,
           },
           {
             key: "actions",

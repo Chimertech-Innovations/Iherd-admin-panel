@@ -654,11 +654,6 @@ function CattleMarketplacePage() {
             ),
           },
           {
-            key: "status",
-            label: "Status",
-            render: (r) => <StatusBadge status={r.status} />,
-          },
-          {
             key: "actions",
             label: "Actions",
             render: (r) => (

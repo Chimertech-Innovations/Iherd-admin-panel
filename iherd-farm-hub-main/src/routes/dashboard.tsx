@@ -834,14 +834,14 @@ function Dashboard() {
       rows.push(["--- KEY METRICS SUMMARY ---"]);
       rows.push(["Metric", "Count / Value"]);
       rows.push(["Total Registered Farmers", String(farmersCount)]);
-      rows.push(["Verified / Active Farmers", String(verifiedFarmersCount)]);
+      rows.push(["Verified Farmers", String(verifiedFarmersCount)]);
       rows.push(["Total Registered Farms", String(farmsCount)]);
       rows.push(["Total Registered Sellers", String(sellersCount)]);
       rows.push(["Cattle Listed in Marketplace", String(cattleCount)]);
       rows.push(["Total Products Catalog", String(productsCount)]);
       rows.push(["Best Seller Products", String(bestSellersCount)]);
-      rows.push(["Active Coupons", String(activeCouponsCount)]);
-      rows.push(["Active App User Logins", String(activeLogins.length)]);
+      rows.push(["Available Coupons", String(activeCouponsCount)]);
+      rows.push(["App User Logins", String(activeLogins.length)]);
       rows.push(["Product Marketplace Orders", String(filteredProductOrders.length)]);
       rows.push(["Cattle Orders & Deals", String(filteredCattleOrders.length)]);
       rows.push([]);
@@ -1058,7 +1058,6 @@ function Dashboard() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
-                    <StatusBadge status={f.status || "Active"} />
                     <Link
                       to="/users/$userId"
                       params={{ userId: f.uid || f.id }}
@@ -1174,7 +1173,6 @@ function Dashboard() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
-                    <StatusBadge status={s.status || "Active"} />
                     <Link
                       to="/users/$userId"
                       params={{ userId: s.uid || s.id }}
@@ -1257,7 +1255,9 @@ function Dashboard() {
                     </div>
                     <div className="text-right shrink-0">
                       <div className="font-bold text-primary">{c.price ? `₹${Number(c.price).toLocaleString()}` : "Market"}</div>
-                      <div className="text-[10px] text-muted-foreground">{c.status || "Active"}</div>
+                      {c.status && c.status.toLowerCase() !== "active" && (
+                        <div className="text-[10px] text-muted-foreground">{c.status}</div>
+                      )}
                     </div>
                   </div>
                 );
@@ -1479,7 +1479,6 @@ function Dashboard() {
                   </div>
                   <div className="text-right">
                     <span className="font-bold text-foreground">{c.discountType === "percent" ? `${c.discountValue}% OFF` : `₹${c.discountValue} OFF`}</span>
-                    <StatusBadge status={c.active !== false ? "Active" : "Inactive"} />
                   </div>
                 </div>
               ))
@@ -1594,7 +1593,7 @@ function Dashboard() {
             </Link>
             <Link to="/marketplace/coupons" className="p-3 rounded-2xl border bg-card hover:bg-muted/30 transition-all block col-span-2 sm:col-span-1 group">
               <div className="text-xs text-muted-foreground flex items-center justify-between">
-                <span>🏷️ Active Coupons</span>
+                <span>🏷️ Coupons</span>
                 <ExternalLink className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
               </div>
               <div className="text-lg font-bold text-primary mt-0.5">{activeCouponsCount}</div>
@@ -1727,7 +1726,7 @@ function Dashboard() {
             <Link to="/vets" className="p-3.5 rounded-2xl border bg-card hover:bg-muted/40 transition-colors block group">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-foreground">🩺 Tele-Care Hub</span>
-                <span className="text-xs font-mono font-bold text-purple-600">Active</span>
+                <span className="text-xs font-mono font-bold text-primary">Connected</span>
               </div>
               <p className="text-[11px] text-muted-foreground mt-1">
                 Post-order veterinary health checks & vaccination certificates.
@@ -1772,7 +1771,7 @@ function Dashboard() {
       case "farmers":
         return `Total Registered Farmers (${farmersCount})`;
       case "verified_farmers":
-        return `Verified / Active Farmers (${verifiedFarmersCount})`;
+        return `Verified Farmers (${verifiedFarmersCount})`;
       case "farms":
         return `Registered Farms (${farmsCount})`;
       case "sellers":
@@ -1788,7 +1787,7 @@ function Dashboard() {
       case "best_sellers":
         return `Best Seller Products (${bestSellersCount})`;
       case "coupons":
-        return `Active Coupons & Offers (${activeCouponsCount})`;
+        return `Coupons & Offers (${activeCouponsCount})`;
       case "logins":
         return `User App Logins in ${periodLabel} (${activeLogins.length})`;
       case "roles":
@@ -1949,7 +1948,7 @@ function Dashboard() {
         <Kpi
           label="Total Farmers"
           value={isInitialLoading ? "…" : farmersCount.toLocaleString()}
-          delta={`${verifiedFarmersCount} Active`}
+          delta={`${verifiedFarmersCount} Verified`}
           up
           icon={Users}
           tint="bg-primary/10 text-primary"
@@ -1961,7 +1960,7 @@ function Dashboard() {
         <Kpi
           label="Registered Farms"
           value={isInitialLoading ? "…" : farmsCount.toLocaleString()}
-          delta="Active farm locations"
+          delta="Registered locations"
           up
           icon={Landmark}
           tint="bg-emerald-500/10 text-emerald-600"
@@ -2018,7 +2017,7 @@ function Dashboard() {
           }}
         />
         <Kpi
-          label="Active Coupons"
+          label="Available Coupons"
           value={isInitialLoading ? "…" : activeCouponsCount.toLocaleString()}
           delta="Live marketplace"
           up
@@ -2032,7 +2031,7 @@ function Dashboard() {
         <Kpi
           label="App Logins in Period"
           value={isInitialLoading ? "…" : activeLogins.length.toLocaleString()}
-          delta="Active users"
+          delta="User logins"
           up
           icon={LogIn}
           tint="bg-emerald-500/10 text-emerald-600"
@@ -2108,7 +2107,7 @@ function Dashboard() {
                   {allUsers.length || 308}
                 </div>
                 <div className="text-[10px] text-emerald-600 font-semibold mt-0.5 flex items-center gap-1">
-                  <CheckCheck className="h-3 w-3" /> {activeLogins.length} Active in period
+                  <CheckCheck className="h-3 w-3" /> {activeLogins.length} Logins in period
                 </div>
               </div>
             </div>
@@ -2256,7 +2255,7 @@ function Dashboard() {
                 </div>
                 <div className="flex justify-between font-medium">
                   <span className="text-muted-foreground">🩺 Tele-Care:</span>
-                  <span className="font-bold text-foreground">Active Hub</span>
+                  <span className="font-bold text-foreground">Operational</span>
                 </div>
                 <div className="flex justify-between font-medium">
                   <span className="text-muted-foreground">🧾 Invoicing:</span>

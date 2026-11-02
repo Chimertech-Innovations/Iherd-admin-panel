@@ -22,40 +22,25 @@ export function isLocalHostname(): boolean {
 
 /**
  * Resolves the fastest working backend API Base URL.
- * Never attempts localhost in production / remote browser sessions.
+ * Automatically chooses http://localhost:5000 when running in local browser/dev.
  */
 export async function getApiBaseUrl(): Promise<string> {
   if (resolvedApiBase) return resolvedApiBase;
   if (resolvingPromise) return resolvingPromise;
 
   resolvingPromise = (async () => {
-    const envUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "");
     const isLocal = isLocalHostname();
 
-    if (envUrl && (isLocal || (!envUrl.includes("localhost") && !envUrl.includes("127.0.0.1")))) {
-      resolvedApiBase = envUrl;
-      return envUrl;
+    if (isLocal) {
+      // In local development, use local backend on port 5000
+      resolvedApiBase = "http://localhost:5000";
+      return resolvedApiBase;
     }
 
-    if (isLocal) {
-      // Test if local backend on port 5000 is active with an adaptive probe
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 2000);
-        const res = await fetch("http://localhost:5000/ping", {
-          signal: controller.signal,
-          method: "GET",
-        });
-        clearTimeout(timeoutId);
-        if (res.ok) {
-          resolvedApiBase = "http://localhost:5000";
-          return resolvedApiBase;
-        }
-      } catch {
-        // Local server not ready yet, temporarily use Render without permanently locking out local
-        resolvingPromise = null;
-        return DEFAULT_RENDER_BACKEND;
-      }
+    const envUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "");
+    if (envUrl && !envUrl.includes("localhost") && !envUrl.includes("127.0.0.1")) {
+      resolvedApiBase = envUrl;
+      return envUrl;
     }
 
     // Default production Render backend
@@ -67,18 +52,22 @@ export async function getApiBaseUrl(): Promise<string> {
 }
 
 /**
- * Synchronous getter for API base URL (returns cached if known, or fallback).
+ * Synchronous getter for API base URL.
+ * On localhost, guarantees http://localhost:5000 so local changes work immediately.
  */
 export function getApiBaseUrlSync(): string {
   if (resolvedApiBase) return resolvedApiBase;
-  const envUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "");
   const isLocal = isLocalHostname();
+  if (isLocal) {
+    return "http://localhost:5000";
+  }
 
-  if (envUrl && (isLocal || (!envUrl.includes("localhost") && !envUrl.includes("127.0.0.1")))) {
+  const envUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "");
+  if (envUrl && !envUrl.includes("localhost") && !envUrl.includes("127.0.0.1")) {
     return envUrl;
   }
 
-  return isLocal ? "http://localhost:5000" : DEFAULT_RENDER_BACKEND;
+  return DEFAULT_RENDER_BACKEND;
 }
 
 /**

@@ -304,7 +304,7 @@ function VetsPage() {
         isLoading={isLoading}
         searchPlaceholder="Search doctors by name, clinic, phone, or location..."
         searchKeys={["name", "clinic", "phone", "qualification", "city", "state"]}
-        filters={["Active", "Pending Verification", "Inactive"]}
+        filters={["Pending Verification", "Inactive"]}
         statusKey="status"
         kpis={[
           { label: "Total Doctors", value: isLoading ? "…" : totalVets.toLocaleString(), change: "Registered practitioners", up: true }
@@ -373,11 +373,6 @@ function VetsPage() {
             key: "joined",
             label: "Joined Date",
             render: (row) => <span className="text-xs text-muted-foreground">{row.joined}</span>,
-          },
-          {
-            key: "status",
-            label: "Status",
-            render: (r) => <StatusBadge status={r.status || "Active"} />,
           },
         ]}
       />

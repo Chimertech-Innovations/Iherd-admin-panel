@@ -18,6 +18,7 @@ import { Route as InvoicesRouteImport } from './routes/invoices'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as MapRouteImport } from './routes/map'
 import { Route as NotificationsRouteImport } from './routes/notifications'
+import { Route as PashuprenuerRouteImport } from './routes/pashuprenuer'
 import { Route as PaymentsRouteImport } from './routes/payments'
 import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as ReportsRouteImport } from './routes/reports'
@@ -30,8 +31,10 @@ import { Route as FarmersIndexRouteImport } from './routes/farmers.index'
 import { Route as FarmersFarmerIdRouteImport } from './routes/farmers.$farmerId'
 import { Route as MarketplaceBestSellersRouteImport } from './routes/marketplace.best-sellers'
 import { Route as MarketplaceCattleRouteImport } from './routes/marketplace.cattle'
+import { Route as MarketplaceCombosRouteImport } from './routes/marketplace.combos'
 import { Route as MarketplaceCouponsRouteImport } from './routes/marketplace.coupons'
 import { Route as MarketplaceProductsRouteImport } from './routes/marketplace.products'
+import { Route as MarketplaceShippingRouteImport } from './routes/marketplace.shipping'
 import { Route as OrdersCattleRouteImport } from './routes/orders.cattle'
 import { Route as OrdersProductsRouteImport } from './routes/orders.products'
 import { Route as SellersIndexRouteImport } from './routes/sellers.index'
@@ -83,6 +86,11 @@ const MapRoute = MapRouteImport.update({
 const NotificationsRoute = NotificationsRouteImport.update({
   id: '/notifications',
   path: '/notifications',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PashuprenuerRoute = PashuprenuerRouteImport.update({
+  id: '/pashuprenuer',
+  path: '/pashuprenuer',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PaymentsRoute = PaymentsRouteImport.update({
@@ -145,6 +153,11 @@ const MarketplaceCattleRoute = MarketplaceCattleRouteImport.update({
   path: '/marketplace/cattle',
   getParentRoute: () => rootRouteImport,
 } as any)
+const MarketplaceCombosRoute = MarketplaceCombosRouteImport.update({
+  id: '/marketplace/combos',
+  path: '/marketplace/combos',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const MarketplaceCouponsRoute = MarketplaceCouponsRouteImport.update({
   id: '/marketplace/coupons',
   path: '/marketplace/coupons',
@@ -153,6 +166,11 @@ const MarketplaceCouponsRoute = MarketplaceCouponsRouteImport.update({
 const MarketplaceProductsRoute = MarketplaceProductsRouteImport.update({
   id: '/marketplace/products',
   path: '/marketplace/products',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MarketplaceShippingRoute = MarketplaceShippingRouteImport.update({
+  id: '/marketplace/shipping',
+  path: '/marketplace/shipping',
   getParentRoute: () => rootRouteImport,
 } as any)
 const OrdersCattleRoute = OrdersCattleRouteImport.update({
@@ -201,6 +219,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/map': typeof MapRoute
   '/notifications': typeof NotificationsRoute
+  '/pashuprenuer': typeof PashuprenuerRoute
   '/payments': typeof PaymentsRoute
   '/profile': typeof ProfileRoute
   '/reports': typeof ReportsRoute
@@ -212,8 +231,10 @@ export interface FileRoutesByFullPath {
   '/farmers/$farmerId': typeof FarmersFarmerIdRoute
   '/marketplace/best-sellers': typeof MarketplaceBestSellersRoute
   '/marketplace/cattle': typeof MarketplaceCattleRoute
+  '/marketplace/combos': typeof MarketplaceCombosRoute
   '/marketplace/coupons': typeof MarketplaceCouponsRoute
   '/marketplace/products': typeof MarketplaceProductsRoute
+  '/marketplace/shipping': typeof MarketplaceShippingRoute
   '/orders/cattle': typeof OrdersCattleRoute
   '/orders/products': typeof OrdersProductsRoute
   '/sellers/$sellerId': typeof SellersSellerIdRoute
@@ -233,6 +254,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/map': typeof MapRoute
   '/notifications': typeof NotificationsRoute
+  '/pashuprenuer': typeof PashuprenuerRoute
   '/payments': typeof PaymentsRoute
   '/profile': typeof ProfileRoute
   '/reports': typeof ReportsRoute
@@ -244,8 +266,10 @@ export interface FileRoutesByTo {
   '/farmers/$farmerId': typeof FarmersFarmerIdRoute
   '/marketplace/best-sellers': typeof MarketplaceBestSellersRoute
   '/marketplace/cattle': typeof MarketplaceCattleRoute
+  '/marketplace/combos': typeof MarketplaceCombosRoute
   '/marketplace/coupons': typeof MarketplaceCouponsRoute
   '/marketplace/products': typeof MarketplaceProductsRoute
+  '/marketplace/shipping': typeof MarketplaceShippingRoute
   '/orders/cattle': typeof OrdersCattleRoute
   '/orders/products': typeof OrdersProductsRoute
   '/sellers/$sellerId': typeof SellersSellerIdRoute
@@ -266,6 +290,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/map': typeof MapRoute
   '/notifications': typeof NotificationsRoute
+  '/pashuprenuer': typeof PashuprenuerRoute
   '/payments': typeof PaymentsRoute
   '/profile': typeof ProfileRoute
   '/reports': typeof ReportsRoute
@@ -277,8 +302,10 @@ export interface FileRoutesById {
   '/farmers/$farmerId': typeof FarmersFarmerIdRoute
   '/marketplace/best-sellers': typeof MarketplaceBestSellersRoute
   '/marketplace/cattle': typeof MarketplaceCattleRoute
+  '/marketplace/combos': typeof MarketplaceCombosRoute
   '/marketplace/coupons': typeof MarketplaceCouponsRoute
   '/marketplace/products': typeof MarketplaceProductsRoute
+  '/marketplace/shipping': typeof MarketplaceShippingRoute
   '/orders/cattle': typeof OrdersCattleRoute
   '/orders/products': typeof OrdersProductsRoute
   '/sellers/$sellerId': typeof SellersSellerIdRoute
@@ -300,6 +327,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/map'
     | '/notifications'
+    | '/pashuprenuer'
     | '/payments'
     | '/profile'
     | '/reports'
@@ -311,8 +339,10 @@ export interface FileRouteTypes {
     | '/farmers/$farmerId'
     | '/marketplace/best-sellers'
     | '/marketplace/cattle'
+    | '/marketplace/combos'
     | '/marketplace/coupons'
     | '/marketplace/products'
+    | '/marketplace/shipping'
     | '/orders/cattle'
     | '/orders/products'
     | '/sellers/$sellerId'
@@ -332,6 +362,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/map'
     | '/notifications'
+    | '/pashuprenuer'
     | '/payments'
     | '/profile'
     | '/reports'
@@ -343,8 +374,10 @@ export interface FileRouteTypes {
     | '/farmers/$farmerId'
     | '/marketplace/best-sellers'
     | '/marketplace/cattle'
+    | '/marketplace/combos'
     | '/marketplace/coupons'
     | '/marketplace/products'
+    | '/marketplace/shipping'
     | '/orders/cattle'
     | '/orders/products'
     | '/sellers/$sellerId'
@@ -364,6 +397,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/map'
     | '/notifications'
+    | '/pashuprenuer'
     | '/payments'
     | '/profile'
     | '/reports'
@@ -375,8 +409,10 @@ export interface FileRouteTypes {
     | '/farmers/$farmerId'
     | '/marketplace/best-sellers'
     | '/marketplace/cattle'
+    | '/marketplace/combos'
     | '/marketplace/coupons'
     | '/marketplace/products'
+    | '/marketplace/shipping'
     | '/orders/cattle'
     | '/orders/products'
     | '/sellers/$sellerId'
@@ -397,6 +433,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   MapRoute: typeof MapRoute
   NotificationsRoute: typeof NotificationsRoute
+  PashuprenuerRoute: typeof PashuprenuerRoute
   PaymentsRoute: typeof PaymentsRoute
   ProfileRoute: typeof ProfileRoute
   ReportsRoute: typeof ReportsRoute
@@ -408,8 +445,10 @@ export interface RootRouteChildren {
   FarmersFarmerIdRoute: typeof FarmersFarmerIdRoute
   MarketplaceBestSellersRoute: typeof MarketplaceBestSellersRoute
   MarketplaceCattleRoute: typeof MarketplaceCattleRoute
+  MarketplaceCombosRoute: typeof MarketplaceCombosRoute
   MarketplaceCouponsRoute: typeof MarketplaceCouponsRoute
   MarketplaceProductsRoute: typeof MarketplaceProductsRoute
+  MarketplaceShippingRoute: typeof MarketplaceShippingRoute
   OrdersCattleRoute: typeof OrdersCattleRoute
   OrdersProductsRoute: typeof OrdersProductsRoute
   SellersSellerIdRoute: typeof SellersSellerIdRoute
@@ -483,6 +522,13 @@ declare module '@tanstack/react-router' {
       path: '/notifications'
       fullPath: '/notifications'
       preLoaderRoute: typeof NotificationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/pashuprenuer': {
+      id: '/pashuprenuer'
+      path: '/pashuprenuer'
+      fullPath: '/pashuprenuer'
+      preLoaderRoute: typeof PashuprenuerRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/payments': {
@@ -569,6 +615,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MarketplaceCattleRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/marketplace/combos': {
+      id: '/marketplace/combos'
+      path: '/marketplace/combos'
+      fullPath: '/marketplace/combos'
+      preLoaderRoute: typeof MarketplaceCombosRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/marketplace/coupons': {
       id: '/marketplace/coupons'
       path: '/marketplace/coupons'
@@ -581,6 +634,13 @@ declare module '@tanstack/react-router' {
       path: '/marketplace/products'
       fullPath: '/marketplace/products'
       preLoaderRoute: typeof MarketplaceProductsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/marketplace/shipping': {
+      id: '/marketplace/shipping'
+      path: '/marketplace/shipping'
+      fullPath: '/marketplace/shipping'
+      preLoaderRoute: typeof MarketplaceShippingRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/orders/cattle': {
@@ -645,6 +705,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   MapRoute: MapRoute,
   NotificationsRoute: NotificationsRoute,
+  PashuprenuerRoute: PashuprenuerRoute,
   PaymentsRoute: PaymentsRoute,
   ProfileRoute: ProfileRoute,
   ReportsRoute: ReportsRoute,
@@ -656,8 +717,10 @@ const rootRouteChildren: RootRouteChildren = {
   FarmersFarmerIdRoute: FarmersFarmerIdRoute,
   MarketplaceBestSellersRoute: MarketplaceBestSellersRoute,
   MarketplaceCattleRoute: MarketplaceCattleRoute,
+  MarketplaceCombosRoute: MarketplaceCombosRoute,
   MarketplaceCouponsRoute: MarketplaceCouponsRoute,
   MarketplaceProductsRoute: MarketplaceProductsRoute,
+  MarketplaceShippingRoute: MarketplaceShippingRoute,
   OrdersCattleRoute: OrdersCattleRoute,
   OrdersProductsRoute: OrdersProductsRoute,
   SellersSellerIdRoute: SellersSellerIdRoute,

@@ -906,7 +906,7 @@ function UserDetail() {
                       {allUserCattle.length} Livestock Registered
                     </span>
                     <span className="inline-flex items-center gap-1.5 rounded-full bg-success/15 px-3 py-1 text-xs font-bold text-success border border-success/20">
-                      <CheckCircle2 className="h-3.5 w-3.5" /> Active Farm
+                      <CheckCircle2 className="h-3.5 w-3.5" /> Registered Farm
                     </span>
                   </div>
                 </div>

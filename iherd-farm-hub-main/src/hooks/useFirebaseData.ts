@@ -673,5 +673,678 @@ export function useAdminBanners() {
   return { ...query, banners: query.data || [], saveBanner, toggleBannerActive, deleteBanner };
 }
 
+// ==========================================
+// 1. SHIPPING CONFIG HOOK & TYPES
+// Document: product_marketplace/main/shipping_config/config
+// ==========================================
+export interface ShippingSlab {
+  min: number;
+  max: number;
+  price: number;
+}
+
+export interface ZonePricing {
+  extraPricePerKg: number;
+  slabs: ShippingSlab[];
+}
+
+export interface ShippingConfig {
+  zones: Record<string, string[]>;
+  pricing: Record<string, ZonePricing>;
+  delivery_time: Record<string, Record<string, string>>;
+  updatedAt?: any;
+}
+
+export function useShippingConfig() {
+  const queryClient = useQueryClient();
+
+  const query = useQuery<ShippingConfig>({
+    queryKey: ["shipping-config"],
+    queryFn: async () => {
+      const base = getApiBaseUrlSync();
+      // 1. Try Backend API
+      try {
+        const res = await fetch(`${base}/api/admin/shipping-config`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.config) return data.config as ShippingConfig;
+        }
+      } catch (err) {
+        console.warn("Backend shipping config fetch error, trying client SDK:", err);
+      }
+
+      // 2. Client SDK Fallback
+      try {
+        const docRef = doc(db, "product_marketplace", "main", "shipping_config", "config");
+        const snap = await getDoc(docRef);
+        if (snap.exists()) {
+          return snap.data() as ShippingConfig;
+        }
+      } catch (err) {
+        console.warn("Client SDK shipping config error:", err);
+      }
+
+      return {
+        zones: {},
+        pricing: {},
+        delivery_time: {},
+      };
+    },
+    staleTime: 60_000,
+    gcTime: 900_000,
+    refetchOnWindowFocus: false,
+  });
+
+  const updateConfig = useMutation({
+    onMutate: async (newConfig: ShippingConfig) => {
+      await queryClient.cancelQueries({ queryKey: ["shipping-config"] });
+      const previous = queryClient.getQueryData<ShippingConfig>(["shipping-config"]);
+      queryClient.setQueryData(["shipping-config"], newConfig);
+      return { previous };
+    },
+    mutationFn: async (newConfig: ShippingConfig) => {
+      const base = getApiBaseUrlSync();
+      let clientSaved = false;
+      let backendSaved = false;
+      let lastErr: any = null;
+
+      // Clean duplicate state codes in every zone
+      const cleanedZones: Record<string, string[]> = {};
+      if (newConfig.zones) {
+        Object.keys(newConfig.zones).forEach((zKey) => {
+          cleanedZones[zKey] = Array.from(new Set(newConfig.zones[zKey] || []));
+        });
+      }
+      const payload: ShippingConfig = {
+        ...newConfig,
+        zones: cleanedZones,
+        updatedAt: new Date().toISOString(),
+      };
+
+      // 1. Direct write via Client SDK (instant persistence)
+      try {
+        const docRef = doc(db, "product_marketplace", "main", "shipping_config", "config");
+        await setDoc(docRef, payload, { merge: true });
+        clientSaved = true;
+      } catch (err) {
+        lastErr = err;
+        console.warn("Client SDK shipping update error:", err);
+      }
+
+      // 2. Admin backend API (Admin SDK bypasses client permissions)
+      try {
+        const res = await fetch(`${base}/api/admin/shipping-config`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (res.ok) {
+          backendSaved = true;
+          const data = await res.json().catch(() => null);
+          return { success: true, config: data?.config || payload };
+        } else {
+          const errText = await res.text().catch(() => "");
+          lastErr = new Error(`Server returned ${res.status}: ${errText}`);
+        }
+      } catch (err) {
+        lastErr = err;
+        console.warn("Backend shipping config update error:", err);
+      }
+
+      if (!clientSaved && !backendSaved) {
+        throw lastErr || new Error("Failed to save shipping configuration to Firebase");
+      }
+
+      return { success: true, config: payload };
+    },
+    onError: (err, newConfig, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(["shipping-config"], context.previous);
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["shipping-config"] });
+    },
+  });
+
+  return { ...query, config: query.data, updateConfig };
+}
+
+// ==========================================
+// 2. COMBOS PRODUCTS HOOK & TYPES
+// Collection: product_marketplace/main/combos
+// ==========================================
+export interface ComboProduct {
+  id: string;
+  name: Record<string, string> | string;
+  price: number;
+  mrp: number;
+  gst?: number;
+  quantity: number;
+  quantityUnit?: Record<string, string> | string;
+  weight: number;
+  weightUnit?: Record<string, string> | string;
+  categoryId?: string;
+  subCategoryId?: string;
+  isActive: boolean;
+  bestSeller?: boolean;
+  thumbnailUrl?: string;
+  imageUrls?: string[];
+  specification?: { specification?: Record<string, string> } | Record<string, string> | string;
+  instructionsToUse?: Record<string, string[]> | any;
+  productIngredients?: Record<string, string[]> | any;
+  storageCondition?: Record<string, string[]> | any;
+  best_before?: Record<string, string> | string;
+  sellerName?: Record<string, string> | string;
+  sellerType?: string;
+  sellerLogo?: string;
+  createdAt?: any;
+  updatedAt?: any;
+}
+
+export function useCombos() {
+  const queryClient = useQueryClient();
+
+  const query = useQuery<ComboProduct[]>({
+    queryKey: ["marketplace-combos"],
+    queryFn: async () => {
+      const base = getApiBaseUrlSync();
+      // 1. Try Backend API
+      try {
+        const res = await fetch(`${base}/api/admin/combos`);
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data?.combos)) return data.combos as ComboProduct[];
+        }
+      } catch (err) {
+        console.warn("Backend combos fetch error, trying client SDK:", err);
+      }
+
+      // 2. Client SDK Fallback
+      try {
+        const colRef = collection(db, "product_marketplace", "main", "combos");
+        const snap = await getDocs(colRef);
+        const combos: ComboProduct[] = [];
+        snap.forEach((d) => {
+          combos.push({ id: d.id, ...d.data() } as ComboProduct);
+        });
+        return combos;
+      } catch (err) {
+        console.warn("Client SDK combos error:", err);
+        return [];
+      }
+    },
+    staleTime: 60_000,
+    gcTime: 900_000,
+    refetchOnWindowFocus: false,
+  });
+
+  const saveCombo = useMutation({
+    onMutate: async (comboData: Partial<ComboProduct>) => {
+      await queryClient.cancelQueries({ queryKey: ["marketplace-combos"] });
+      const previous = queryClient.getQueryData<ComboProduct[]>(["marketplace-combos"]) || [];
+      const comboId = comboData.id || `COMBO--${Date.now()}`;
+      const payload: ComboProduct = {
+        id: comboId,
+        name: comboData.name || "Combo Product",
+        price: Number(comboData.price) || 0,
+        mrp: Number(comboData.mrp) || Number(comboData.price) || 0,
+        gst: Number(comboData.gst) !== undefined && !isNaN(Number(comboData.gst)) ? Number(comboData.gst) : 5,
+        quantity: Number(comboData.quantity) || 1,
+        quantityUnit: comboData.quantityUnit,
+        weight: Number(comboData.weight) || 0,
+        weightUnit: comboData.weightUnit,
+        categoryId: comboData.categoryId || "cat_disease_management",
+        subCategoryId: comboData.subCategoryId,
+        thumbnailUrl: comboData.thumbnailUrl,
+        imageUrls: comboData.imageUrls,
+        isActive: comboData.isActive !== false,
+        bestSeller: Boolean(comboData.bestSeller),
+        specification: comboData.specification,
+        instructionsToUse: comboData.instructionsToUse,
+        productIngredients: comboData.productIngredients,
+        storageCondition: comboData.storageCondition,
+        best_before: comboData.best_before,
+        sellerName: comboData.sellerName,
+        sellerType: comboData.sellerType || "seller",
+        sellerLogo: comboData.sellerLogo,
+        updatedAt: new Date().toISOString(),
+      };
+
+      const existingIndex = previous.findIndex((c) => c.id === comboId);
+      let updated: ComboProduct[];
+      if (existingIndex >= 0) {
+        updated = [...previous];
+        updated[existingIndex] = { ...updated[existingIndex], ...payload };
+      } else {
+        updated = [payload, ...previous];
+      }
+      queryClient.setQueryData(["marketplace-combos"], updated);
+      return { previous };
+    },
+    mutationFn: async (comboData: Partial<ComboProduct>) => {
+      const base = getApiBaseUrlSync();
+      const comboId = comboData.id || `COMBO--${Date.now()}`;
+      const payload = {
+        ...comboData,
+        id: comboId,
+        updatedAt: new Date().toISOString(),
+      };
+
+      let clientSaved = false;
+      let backendSaved = false;
+      let lastErr: any = null;
+
+      // Direct write to Firestore
+      try {
+        const docRef = doc(db, "product_marketplace", "main", "combos", comboId);
+        await setDoc(docRef, payload, { merge: true });
+        clientSaved = true;
+      } catch (clientErr) {
+        lastErr = clientErr;
+        console.warn("Client SDK save combo failed:", clientErr);
+      }
+
+      // Sync with backend API
+      try {
+        const res = await fetch(`${base}/api/admin/combos`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (res.ok) {
+          backendSaved = true;
+          const data = await res.json().catch(() => null);
+          return { success: true, id: comboId, combo: data?.combo || payload };
+        } else {
+          const errText = await res.text().catch(() => "");
+          lastErr = new Error(`Backend combo save failed: ${res.status} ${errText}`);
+        }
+      } catch (err) {
+        lastErr = err;
+        console.warn("Backend save combo failed:", err);
+      }
+
+      if (!clientSaved && !backendSaved) {
+        throw lastErr || new Error("Failed to save combo product to Firebase");
+      }
+
+      return { success: true, id: comboId, combo: payload };
+    },
+    onError: (err, newCombo, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(["marketplace-combos"], context.previous);
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["marketplace-combos"] });
+    },
+  });
+
+  const deleteCombo = useMutation({
+    onMutate: async (id: string) => {
+      await queryClient.cancelQueries({ queryKey: ["marketplace-combos"] });
+      const previous = queryClient.getQueryData<ComboProduct[]>(["marketplace-combos"]) || [];
+      const updated = previous.filter((c) => c.id !== id);
+      queryClient.setQueryData(["marketplace-combos"], updated);
+      return { previous };
+    },
+    mutationFn: async (id: string) => {
+      const base = getApiBaseUrlSync();
+      let clientDeleted = false;
+      let backendDeleted = false;
+
+      try {
+        const docRef = doc(db, "product_marketplace", "main", "combos", id);
+        await deleteDoc(docRef);
+        clientDeleted = true;
+      } catch (clientErr) {
+        console.warn("Client SDK delete combo failed:", clientErr);
+      }
+
+      try {
+        const res = await fetch(`${base}/api/admin/combos/${id}`, { method: "DELETE" });
+        if (res.ok) backendDeleted = true;
+      } catch (err) {
+        console.warn("Backend delete combo failed:", err);
+      }
+
+      return { success: true, id };
+    },
+    onError: (err, id, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(["marketplace-combos"], context.previous);
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["marketplace-combos"] });
+    },
+  });
+
+  const toggleComboActive = useMutation({
+    onMutate: async ({ id, isActive }: { id: string; isActive: boolean }) => {
+      await queryClient.cancelQueries({ queryKey: ["marketplace-combos"] });
+      const previous = queryClient.getQueryData<ComboProduct[]>(["marketplace-combos"]) || [];
+      const updated = previous.map((c) => (c.id === id ? { ...c, isActive } : c));
+      queryClient.setQueryData(["marketplace-combos"], updated);
+      return { previous };
+    },
+    mutationFn: async ({ id, isActive }: { id: string; isActive: boolean }) => {
+      const base = getApiBaseUrlSync();
+      try {
+        const docRef = doc(db, "product_marketplace", "main", "combos", id);
+        await updateDoc(docRef, { isActive, updatedAt: new Date().toISOString() });
+      } catch (clientErr) {
+        console.warn("Client SDK toggle combo failed:", clientErr);
+      }
+
+      try {
+        await fetch(`${base}/api/admin/combos/${id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ isActive }),
+        });
+      } catch (err) {
+        console.warn("Backend toggle combo failed:", err);
+      }
+
+      return { success: true, id, isActive };
+    },
+    onError: (err, variables, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(["marketplace-combos"], context.previous);
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["marketplace-combos"] });
+    },
+  });
+
+  return {
+    ...query,
+    combos: query.data || [],
+    saveCombo,
+    deleteCombo,
+    toggleComboActive,
+  };
+}
+
+// ==========================================
+// 3. PASHUPRENEUR COURSES HOOK & TYPES
+// Collection: pashuprenuer_courses
+// ==========================================
+export interface PashuprenuerCourse {
+  id: string;
+  order: number;
+  youtubeUrl: string;
+  isActive: boolean;
+  title?: string;
+  description?: string;
+  thumbnailUrl?: string;
+  updatedAt?: any;
+}
+
+export function usePashuprenuerCourses() {
+  const queryClient = useQueryClient();
+
+  const query = useQuery<PashuprenuerCourse[]>({
+    queryKey: ["pashuprenuer-courses"],
+    queryFn: async () => {
+      const base = getApiBaseUrlSync();
+      // 1. Try Backend API (Admin privileges bypass security rules)
+      try {
+        let res = await fetch(`${base}/api/admin/pashuprenuer-courses`);
+        if (!res.ok) {
+          res = await fetch(`${base}/api/admin/pashupreneur-courses`);
+        }
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data?.courses)) return data.courses as PashuprenuerCourse[];
+        }
+      } catch (err) {
+        console.warn("Backend pashuprenuer courses fetch error, trying client SDK:", err);
+      }
+
+      // 2. Client SDK Fallback
+      try {
+        const colRef = collection(db, "pashuprenuer_courses");
+        const snap = await getDocs(colRef);
+        const courses: PashuprenuerCourse[] = [];
+        snap.forEach((d) => {
+          courses.push({ id: d.id, ...d.data() } as PashuprenuerCourse);
+        });
+        courses.sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
+        return courses;
+      } catch (err) {
+        console.warn("Client SDK pashuprenuer courses error:", err);
+        return [];
+      }
+    },
+    staleTime: 60_000,
+    gcTime: 900_000,
+    refetchOnWindowFocus: false,
+  });
+
+  const saveCourse = useMutation({
+    onMutate: async (courseData: Partial<PashuprenuerCourse>) => {
+      await queryClient.cancelQueries({ queryKey: ["pashuprenuer-courses"] });
+      const previous = queryClient.getQueryData<PashuprenuerCourse[]>(["pashuprenuer-courses"]) || [];
+      const courseId = courseData.id || `course_${Date.now()}`;
+      const payload: PashuprenuerCourse = {
+        id: courseId,
+        title: courseData.title || `Dairy Entrepreneurship Module #${courseData.order || 1}`,
+        description: courseData.description || "",
+        order: Number(courseData.order) || 1,
+        youtubeUrl: courseData.youtubeUrl || "",
+        isActive: courseData.isActive !== false,
+        updatedAt: new Date().toISOString(),
+      };
+
+      const existingIndex = previous.findIndex((c) => c.id === courseId);
+      let updated: PashuprenuerCourse[];
+      if (existingIndex >= 0) {
+        updated = [...previous];
+        updated[existingIndex] = { ...updated[existingIndex], ...payload };
+      } else {
+        updated = [...previous, payload];
+      }
+      updated.sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
+
+      queryClient.setQueryData(["pashuprenuer-courses"], updated);
+      return { previous };
+    },
+    mutationFn: async (courseData: Partial<PashuprenuerCourse>) => {
+      const base = getApiBaseUrlSync();
+      const courseId = courseData.id || `course_${Date.now()}`;
+      const payload = {
+        ...courseData,
+        id: courseId,
+        order: Number(courseData.order) || 1,
+        isActive: courseData.isActive !== false,
+        updatedAt: new Date().toISOString(),
+      };
+
+      let clientSaved = false;
+      let backendSaved = false;
+      let lastError: any = null;
+
+      // 1. Direct write to Firestore via Client SDK (instant persistence if authenticated)
+      try {
+        const docRef = doc(db, "pashuprenuer_courses", courseId);
+        await setDoc(docRef, payload, { merge: true });
+        clientSaved = true;
+      } catch (clientErr) {
+        lastError = clientErr;
+        console.warn("Client SDK save course failed, syncing to backend:", clientErr);
+      }
+
+      // 2. Write to Backend Admin API (Admin privileges bypass all client security rules)
+      try {
+        let res = await fetch(`${base}/api/admin/pashuprenuer-courses`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          res = await fetch(`${base}/api/admin/pashupreneur-courses`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+        }
+        if (res.ok) {
+          backendSaved = true;
+          const data = await res.json().catch(() => null);
+          return { success: true, id: courseId, course: data?.course || payload };
+        } else {
+          const errText = await res.text().catch(() => "");
+          lastError = new Error(`Backend response ${res.status}: ${errText}`);
+        }
+      } catch (err) {
+        lastError = err;
+        console.warn("Backend save course failed:", err);
+      }
+
+      if (!clientSaved && !backendSaved) {
+        throw lastError || new Error("Failed to save course to Firebase. Please check backend connection.");
+      }
+
+      return { success: true, id: courseId, course: payload };
+    },
+    onError: (err, newCourse, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(["pashuprenuer-courses"], context.previous);
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["pashuprenuer-courses"] });
+    },
+  });
+
+  const deleteCourse = useMutation({
+    onMutate: async (id: string) => {
+      await queryClient.cancelQueries({ queryKey: ["pashuprenuer-courses"] });
+      const previous = queryClient.getQueryData<PashuprenuerCourse[]>(["pashuprenuer-courses"]) || [];
+      const updated = previous.filter((c) => c.id !== id);
+      queryClient.setQueryData(["pashuprenuer-courses"], updated);
+      return { previous };
+    },
+    mutationFn: async (id: string) => {
+      const base = getApiBaseUrlSync();
+      let clientDeleted = false;
+      let backendDeleted = false;
+      let lastError: any = null;
+
+      try {
+        const docRef = doc(db, "pashuprenuer_courses", id);
+        await deleteDoc(docRef);
+        clientDeleted = true;
+      } catch (clientErr) {
+        lastError = clientErr;
+        console.warn("Client SDK delete course failed:", clientErr);
+      }
+
+      try {
+        let res = await fetch(`${base}/api/admin/pashuprenuer-courses/${id}`, { method: "DELETE" });
+        if (!res.ok) {
+          res = await fetch(`${base}/api/admin/pashupreneur-courses/${id}`, { method: "DELETE" });
+        }
+        if (res.ok) {
+          backendDeleted = true;
+        } else {
+          lastError = new Error(`Backend delete error: ${res.status}`);
+        }
+      } catch (err) {
+        lastError = err;
+        console.warn("Backend delete course failed:", err);
+      }
+
+      if (!clientDeleted && !backendDeleted) {
+        throw lastError || new Error("Failed to delete course from Firebase.");
+      }
+
+      return { success: true, id };
+    },
+    onError: (err, id, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(["pashuprenuer-courses"], context.previous);
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["pashuprenuer-courses"] });
+    },
+  });
+
+  const toggleCourseActive = useMutation({
+    onMutate: async ({ id, isActive }: { id: string; isActive: boolean }) => {
+      await queryClient.cancelQueries({ queryKey: ["pashuprenuer-courses"] });
+      const previous = queryClient.getQueryData<PashuprenuerCourse[]>(["pashuprenuer-courses"]) || [];
+      const updated = previous.map((c) => (c.id === id ? { ...c, isActive } : c));
+      queryClient.setQueryData(["pashuprenuer-courses"], updated);
+      return { previous };
+    },
+    mutationFn: async ({ id, isActive }: { id: string; isActive: boolean }) => {
+      const base = getApiBaseUrlSync();
+      let clientUpdated = false;
+      let backendUpdated = false;
+      let lastError: any = null;
+
+      try {
+        const docRef = doc(db, "pashuprenuer_courses", id);
+        await updateDoc(docRef, { isActive, updatedAt: new Date().toISOString() });
+        clientUpdated = true;
+      } catch (clientErr) {
+        lastError = clientErr;
+        console.warn("Client SDK toggle course failed:", clientErr);
+      }
+
+      try {
+        let res = await fetch(`${base}/api/admin/pashuprenuer-courses/${id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ isActive }),
+        });
+        if (!res.ok) {
+          res = await fetch(`${base}/api/admin/pashupreneur-courses/${id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ isActive }),
+          });
+        }
+        if (res.ok) {
+          backendUpdated = true;
+        } else {
+          lastError = new Error(`Backend toggle error: ${res.status}`);
+        }
+      } catch (err) {
+        lastError = err;
+        console.warn("Backend toggle course failed:", err);
+      }
+
+      if (!clientUpdated && !backendUpdated) {
+        throw lastError || new Error("Failed to update course status in Firebase.");
+      }
+
+      return { success: true, id, isActive };
+    },
+    onError: (err, variables, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(["pashuprenuer-courses"], context.previous);
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["pashuprenuer-courses"] });
+    },
+  });
+
+  return {
+    ...query,
+    courses: query.data || [],
+    saveCourse,
+    deleteCourse,
+    toggleCourseActive,
+  };
+}
+
 
 

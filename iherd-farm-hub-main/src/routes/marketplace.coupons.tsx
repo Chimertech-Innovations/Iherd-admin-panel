@@ -5,6 +5,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/admin/StatusBadge";
 import {
   Table,
@@ -49,6 +50,10 @@ import {
   Square,
   ShoppingBag,
   Download,
+  X,
+  Ban,
+  RefreshCw,
+  Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useCoupons, useAdminProducts, type Coupon } from "@/hooks/useFirebaseData";
@@ -201,6 +206,47 @@ function CouponsPage() {
     }
   };
 
+  // Map of all products for instant lookups
+  const productMap = useMemo(() => {
+    const map = new Map<string, any>();
+    products.forEach((p: any) => {
+      map.set(p.id, p);
+      if (p.sku) map.set(p.sku, p);
+      if (p.productCode) map.set(p.productCode, p);
+    });
+    return map;
+  }, [products]);
+
+  // Excluded product cards
+  const excludedProductObjects = useMemo(() => {
+    return excludedProductIds.map((id) => {
+      const prod = productMap.get(id);
+      return {
+        id,
+        name: prod ? getLocalizedText(prod.name || prod.title, id) : id,
+        price: prod?.sellingPrice || prod?.price || null,
+        sku: prod?.sku || prod?.productCode || id,
+        image: prod ? formatImageUrl(prod.thumbnailUrl || prod.imageUrls?.[0] || prod.images?.[0] || prod.image) : null,
+        category: prod ? getLocalizedText(prod.category, "") : "",
+      };
+    });
+  }, [excludedProductIds, productMap]);
+
+  // Included product cards
+  const includedProductObjects = useMemo(() => {
+    return includedProductIds.map((id) => {
+      const prod = productMap.get(id);
+      return {
+        id,
+        name: prod ? getLocalizedText(prod.name || prod.title, id) : id,
+        price: prod?.sellingPrice || prod?.price || null,
+        sku: prod?.sku || prod?.productCode || id,
+        image: prod ? formatImageUrl(prod.thumbnailUrl || prod.imageUrls?.[0] || prod.images?.[0] || prod.image) : null,
+        category: prod ? getLocalizedText(prod.category, "") : "",
+      };
+    });
+  }, [includedProductIds, productMap]);
+
   // Filtered products for applicability selector inside dialog
   const filteredProductsList = useMemo(() => {
     if (!productSearch.trim()) return products;
@@ -208,7 +254,8 @@ function CouponsPage() {
     return products.filter((p: any) => {
       const pName = getLocalizedText(p.name || p.title, "").toLowerCase();
       const pId = (p.id || "").toLowerCase();
-      return pName.includes(s) || pId.includes(s);
+      const pSku = String(p.sku || p.productCode || "").toLowerCase();
+      return pName.includes(s) || pId.includes(s) || pSku.includes(s);
     });
   }, [products, productSearch]);
 
@@ -245,17 +292,11 @@ function CouponsPage() {
 
   const filteredCoupons = coupons.filter((c) => {
     const codeMatch = (c.code || c.id || "").toLowerCase().includes(q.toLowerCase());
-    const matchStatus =
-      statusFilter === "all"
-        ? true
-        : statusFilter === "active"
-        ? c.active !== false
-        : c.active === false;
     const matchType =
       typeFilter === "all"
         ? true
         : (c.type || "PERCENT").toUpperCase() === typeFilter.toUpperCase();
-    return codeMatch && matchStatus && matchType;
+    return codeMatch && matchType;
   });
 
   const handleExportCoupons = () => {
@@ -323,7 +364,7 @@ function CouponsPage() {
 
         <Card className="p-4 rounded-2xl bg-card border-border relative overflow-hidden">
           <div className="flex items-center justify-between">
-            <span className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Active Coupons</span>
+            <span className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Valid Coupons</span>
             <div className="grid h-8 w-8 place-items-center rounded-xl bg-emerald-500/10 text-emerald-600">
               <CheckCircle2 className="h-4 w-4" />
             </div>
@@ -353,7 +394,6 @@ function CouponsPage() {
 
         <Card className="p-4 rounded-2xl bg-card border-border relative overflow-hidden">
           <div className="flex items-center justify-between">
-            <span className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Discount Breakdown</span>
             <div className="grid h-8 w-8 place-items-center rounded-xl bg-amber-500/10 text-amber-600">
               <Percent className="h-4 w-4" />
             </div>
@@ -389,17 +429,6 @@ function CouponsPage() {
           </div>
 
           <div className="flex items-center gap-2">
-            <Select value={statusFilter} onValueChange={setStatusFilter} disabled={isLoading}>
-              <SelectTrigger className="w-36 bg-muted/50">
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All status</SelectItem>
-                <SelectItem value="active">Active</SelectItem>
-                <SelectItem value="inactive">Inactive</SelectItem>
-              </SelectContent>
-            </Select>
-
             <Select value={typeFilter} onValueChange={setTypeFilter} disabled={isLoading}>
               <SelectTrigger className="w-36 bg-muted/50">
                 <SelectValue placeholder="Type" />
@@ -423,7 +452,6 @@ function CouponsPage() {
                 <TableHead>Min. Order</TableHead>
                 <TableHead>Max. Cap</TableHead>
                 <TableHead>Expiry</TableHead>
-                <TableHead>Status</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -516,10 +544,6 @@ function CouponsPage() {
                         </div>
                       </TableCell>
 
-                      <TableCell>
-                        <StatusBadge status={c.active !== false ? "Active" : "Suspended"} />
-                      </TableCell>
-
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1.5">
                           <Button
@@ -578,278 +602,560 @@ function CouponsPage() {
 
       {/* Create / Edit Coupon Modal Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-2xl rounded-3xl max-h-[90vh] overflow-y-auto p-6">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-lg">
-              <span className="grid h-9 w-9 place-items-center rounded-xl bg-primary/10 text-primary">
-                <Ticket className="h-4.5 w-4.5" />
-              </span>
-              {editingCoupon ? "Edit Coupon" : "Create Coupon Code"}
-            </DialogTitle>
-            <DialogDescription>
-              Set discount rates, minimum order value, validity, and applicable or excluded products.
-            </DialogDescription>
-          </DialogHeader>
-
-          <form onSubmit={handleSave} className="space-y-4 pt-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="coupon-code">Coupon Code *</Label>
-              <Input
-                id="coupon-code"
-                placeholder="e.g. FESTIVE20 or SPECIAL50"
-                value={code}
-                onChange={(e) => setCode(e.target.value.toUpperCase())}
-                required
-                className="font-mono uppercase font-semibold"
-              />
+        <DialogContent className="w-[96vw] max-w-3xl max-h-[92vh] p-0 rounded-3xl overflow-hidden flex flex-col bg-background border border-border/70 shadow-2xl">
+          {/* Modal Header */}
+          <div className="px-5 sm:px-6 py-4 border-b border-border/60 bg-muted/20 flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="h-10 w-10 rounded-2xl bg-primary/15 text-primary grid place-items-center shadow-xs shrink-0">
+                <Ticket className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <h2 className="text-base sm:text-lg font-bold text-foreground truncate">
+                  {editingCoupon ? `Edit Coupon: ${code}` : "Create New Coupon Code"}
+                </h2>
+                <p className="text-xs text-muted-foreground truncate">
+                  Configure discount percentage or flat amount, order requirements, and product restrictions
+                </p>
+              </div>
             </div>
+          </div>
 
-            <div className="grid grid-cols-2 gap-3">
+          <form onSubmit={handleSave} className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
+            {/* 1. Coupon Code & Discount Value */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-4 rounded-2xl bg-muted/20 border border-border/60">
+              <div className="space-y-1.5 sm:col-span-1">
+                <Label htmlFor="coupon-code" className="text-xs font-semibold text-foreground">
+                  Coupon Code *
+                </Label>
+                <Input
+                  id="coupon-code"
+                  placeholder="e.g. CPLADI005"
+                  value={code}
+                  onChange={(e) => setCode(e.target.value.toUpperCase())}
+                  required
+                  className="font-mono uppercase font-bold text-xs h-10 bg-background"
+                />
+                <div className="text-[11px] text-muted-foreground">Code entered by customer at checkout</div>
+              </div>
+
               <div className="space-y-1.5">
-                <Label>Discount Type</Label>
+                <Label className="text-xs font-semibold text-foreground">Discount Type</Label>
                 <Select value={discountType} onValueChange={(v: any) => setDiscountType(v)}>
-                  <SelectTrigger>
+                  <SelectTrigger className="h-10 text-xs rounded-xl bg-background">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="PERCENT">Percentage (%)</SelectItem>
-                    <SelectItem value="FIXED">Flat (₹)</SelectItem>
+                  <SelectContent className="rounded-xl">
+                    <SelectItem value="PERCENT">
+                      <div className="flex items-center gap-2">
+                        <Percent className="h-3.5 w-3.5 text-primary" />
+                        <span>Percentage (%)</span>
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="FIXED">
+                      <div className="flex items-center gap-2">
+                        <IndianRupee className="h-3.5 w-3.5 text-emerald-600" />
+                        <span>Flat Discount (₹)</span>
+                      </div>
+                    </SelectItem>
                   </SelectContent>
                 </Select>
+                <div className="text-[11px] text-muted-foreground">
+                  {discountType === "PERCENT" ? "Deducts % off eligible items" : "Deducts fixed ₹ cash discount"}
+                </div>
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="coupon-value">{discountType === "PERCENT" ? "Percentage Value (%)" : "Flat Amount (₹)"}</Label>
-                <Input
-                  id="coupon-value"
-                  type="number"
-                  placeholder="20"
-                  value={value}
-                  onChange={(e) => setValue(e.target.value)}
-                  required
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="min-order">Min Order (₹)</Label>
-                <Input
-                  id="min-order"
-                  type="number"
-                  placeholder="0"
-                  value={minOrder}
-                  onChange={(e) => setMinOrder(e.target.value)}
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="max-discount">Max Discount Cap (₹)</Label>
-                <Input
-                  id="max-discount"
-                  type="number"
-                  placeholder="1000"
-                  value={maxDiscount}
-                  onChange={(e) => setMaxDiscount(e.target.value)}
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="expiry-date">Expiry Date</Label>
-              <Input
-                id="expiry-date"
-                type="date"
-                value={expiryDate}
-                onChange={(e) => setExpiryDate(e.target.value)}
-              />
-            </div>
-
-            {/* Product Applicability Scope & Selector */}
-            <div className="space-y-3 pt-2 border-t">
-              <div className="flex items-center justify-between">
-                <Label className="font-bold text-sm text-foreground flex items-center gap-1.5">
-                  <Package className="h-4 w-4 text-primary" /> Product Applicability & Restrictions
+                <Label htmlFor="coupon-value" className="text-xs font-semibold text-foreground">
+                  {discountType === "PERCENT" ? "Discount Rate (%) *" : "Discount Amount (₹) *"}
                 </Label>
-                <span className="text-xs text-muted-foreground">
-                  {applicabilityMode === "ALL"
-                    ? "Applies to all products"
-                    : applicabilityMode === "INCLUDED"
-                    ? `${includedProductIds.length} Included Products`
-                    : `${excludedProductIds.length} Excluded Products`}
-                </span>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-bold text-xs">
+                    {discountType === "PERCENT" ? "%" : "₹"}
+                  </span>
+                  <Input
+                    id="coupon-value"
+                    type="number"
+                    placeholder="10"
+                    value={value}
+                    onChange={(e) => setValue(e.target.value)}
+                    required
+                    className="pl-7 h-10 text-xs font-bold font-mono bg-background"
+                  />
+                </div>
+                <div className="text-[11px] text-muted-foreground">e.g. 10 for 10% or ₹10</div>
+              </div>
+            </div>
+
+            {/* 2. Order Limits & Expiry */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-4 rounded-2xl bg-muted/20 border border-border/60">
+              <div className="space-y-1.5">
+                <Label htmlFor="min-order" className="text-xs font-semibold text-foreground">
+                  Min Order Value (₹)
+                </Label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs font-bold">₹</span>
+                  <Input
+                    id="min-order"
+                    type="number"
+                    placeholder="0"
+                    value={minOrder}
+                    onChange={(e) => setMinOrder(e.target.value)}
+                    className="pl-7 h-10 text-xs font-mono bg-background"
+                  />
+                </div>
+                <div className="text-[11px] text-muted-foreground">0 = No minimum purchase required</div>
               </div>
 
-              {/* Mode Switcher */}
-              <div className="grid grid-cols-3 gap-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="max-discount" className="text-xs font-semibold text-foreground">
+                  Max Discount Cap (₹)
+                </Label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs font-bold">₹</span>
+                  <Input
+                    id="max-discount"
+                    type="number"
+                    placeholder="1000"
+                    value={maxDiscount}
+                    onChange={(e) => setMaxDiscount(e.target.value)}
+                    className="pl-7 h-10 text-xs font-mono bg-background"
+                  />
+                </div>
+                <div className="text-[11px] text-muted-foreground">Maximum limit saved per transaction</div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="expiry-date" className="text-xs font-semibold text-foreground">
+                  Expiry Date
+                </Label>
+                <Input
+                  id="expiry-date"
+                  type="date"
+                  value={expiryDate}
+                  onChange={(e) => setExpiryDate(e.target.value)}
+                  className="h-10 text-xs bg-background"
+                />
+                <div className="text-[11px] text-muted-foreground">Leave empty for lifetime coupon</div>
+              </div>
+            </div>
+
+            {/* 3. Product Scope & Dedicated Excluded / Included Products Box */}
+            <div className="space-y-3 p-4 rounded-2xl bg-muted/20 border border-border/60">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+                <div>
+                  <Label className="font-bold text-xs sm:text-sm text-foreground flex items-center gap-1.5">
+                    <Package className="h-4 w-4 text-primary" /> Product Applicability & Restrictions
+                  </Label>
+                  <p className="text-[11px] text-muted-foreground">
+                    Choose whether this coupon applies storewide or excludes / includes specific items
+                  </p>
+                </div>
+
+                <Badge
+                  variant="outline"
+                  className={`text-[10px] font-bold px-2 py-0.5 rounded-full self-start sm:self-auto ${
+                    applicabilityMode === "EXCLUDED"
+                      ? "border-amber-500/40 text-amber-700 bg-amber-500/10 dark:text-amber-300"
+                      : applicabilityMode === "INCLUDED"
+                      ? "border-emerald-500/40 text-emerald-700 bg-emerald-500/10 dark:text-emerald-300"
+                      : "border-border text-muted-foreground bg-background"
+                  }`}
+                >
+                  {applicabilityMode === "ALL"
+                    ? "Storewide"
+                    : applicabilityMode === "EXCLUDED"
+                    ? `${excludedProductIds.length} Excluded`
+                    : `${includedProductIds.length} Included`}
+                </Badge>
+              </div>
+
+              {/* Mode Switcher Tabs */}
+              <div className="grid grid-cols-3 gap-2 p-1 rounded-2xl bg-background border">
                 <button
                   type="button"
                   onClick={() => setApplicabilityMode("ALL")}
-                  className={`p-2.5 rounded-xl border text-xs font-semibold text-center transition-all ${
+                  className={`py-2 px-3 rounded-xl text-xs font-semibold transition-all flex items-center justify-center gap-1.5 ${
                     applicabilityMode === "ALL"
-                      ? "bg-primary text-primary-foreground border-primary shadow-sm"
-                      : "bg-muted/40 hover:bg-muted text-muted-foreground"
+                      ? "bg-primary text-primary-foreground shadow-xs"
+                      : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  All Products
+                  <ShoppingBag className="h-3.5 w-3.5" />
+                  <span>All Products</span>
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setApplicabilityMode("INCLUDED")}
-                  className={`p-2.5 rounded-xl border text-xs font-semibold text-center transition-all ${
-                    applicabilityMode === "INCLUDED"
-                      ? "bg-emerald-600 text-white border-emerald-600 shadow-sm"
-                      : "bg-muted/40 hover:bg-muted text-muted-foreground"
-                  }`}
-                >
-                  Specific Included
-                </button>
+
                 <button
                   type="button"
                   onClick={() => setApplicabilityMode("EXCLUDED")}
-                  className={`p-2.5 rounded-xl border text-xs font-semibold text-center transition-all ${
+                  className={`py-2 px-3 rounded-xl text-xs font-semibold transition-all flex items-center justify-center gap-1.5 ${
                     applicabilityMode === "EXCLUDED"
-                      ? "bg-amber-600 text-white border-amber-600 shadow-sm"
-                      : "bg-muted/40 hover:bg-muted text-muted-foreground"
+                      ? "bg-amber-600 text-white shadow-xs"
+                      : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  Exclude Specific
+                  <Ban className="h-3.5 w-3.5" />
+                  <span>Exclude Specific ({excludedProductIds.length})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setApplicabilityMode("INCLUDED")}
+                  className={`py-2 px-3 rounded-xl text-xs font-semibold transition-all flex items-center justify-center gap-1.5 ${
+                    applicabilityMode === "INCLUDED"
+                      ? "bg-emerald-600 text-white shadow-xs"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  <span>Specific Only ({includedProductIds.length})</span>
                 </button>
               </div>
 
-              {/* Searchable Product Multi-Select Box */}
-              {applicabilityMode !== "ALL" && (
-                <div className="space-y-2 p-3 rounded-2xl bg-muted/20 border">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="relative flex-1">
-                      <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              {/* EXCLUDED PRODUCTS SECTION */}
+              {applicabilityMode === "EXCLUDED" && (
+                <div className="space-y-3 pt-1">
+                  {/* Dedicated Excluded Products Container */}
+                  <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 dark:bg-amber-500/10 p-3.5 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
+                        <span className="text-xs font-bold text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
+                          <span>Excluded Products in this Box</span>
+                          <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-800 dark:text-amber-300 text-[10px]">
+                            {excludedProductObjects.length} items
+                          </span>
+                        </span>
+                      </div>
+
+                      {excludedProductObjects.length > 0 && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setExcludedProductIds([])}
+                          className="h-6 text-[11px] px-2 text-destructive hover:text-destructive hover:bg-destructive/10 rounded-lg"
+                        >
+                          Clear All Exclusions
+                        </Button>
+                      )}
+                    </div>
+
+                    {excludedProductObjects.length === 0 ? (
+                      <div className="p-4 rounded-xl border border-dashed border-amber-500/30 bg-background/50 text-center text-xs text-muted-foreground">
+                        No products excluded yet. Select products from the search list below to exclude them.
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
+                        {excludedProductObjects.map((prod) => (
+                          <div
+                            key={prod.id}
+                            className="p-2.5 rounded-xl bg-background border border-amber-500/30 flex items-center justify-between gap-2.5 shadow-2xs hover:border-amber-500/50 transition-all"
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              {prod.image ? (
+                                <img
+                                  src={prod.image}
+                                  alt=""
+                                  className="h-10 w-10 rounded-lg object-cover border shrink-0 bg-muted"
+                                />
+                              ) : (
+                                <div className="h-10 w-10 rounded-lg bg-amber-500/10 text-amber-700 flex items-center justify-center font-bold text-xs shrink-0">
+                                  📦
+                                </div>
+                              )}
+                              <div className="min-w-0">
+                                <div className="text-xs font-bold text-foreground truncate">{prod.name}</div>
+                                <div className="text-[10px] text-muted-foreground font-mono truncate flex items-center gap-1.5">
+                                  <span>{prod.sku}</span>
+                                  {prod.price && (
+                                    <span className="text-emerald-600 font-bold">₹{prod.price}</span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => setExcludedProductIds((prev) => prev.filter((id) => id !== prod.id))}
+                              className="h-7 w-7 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 grid place-items-center transition-colors shrink-0"
+                              title="Remove exclusion"
+                            >
+                              <X className="h-4 w-4" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Add More Products to Exclude List */}
+                  <div className="space-y-2 p-3 rounded-2xl bg-background border border-border/60">
+                    <div className="flex items-center justify-between text-xs font-semibold text-foreground">
+                      <span className="flex items-center gap-1.5">
+                        <Plus className="h-3.5 w-3.5 text-primary" />
+                        <span>Search & Add More Products to Exclusion</span>
+                      </span>
+                      <span className="text-[11px] text-muted-foreground font-normal">
+                        Click on any product to exclude it
+                      </span>
+                    </div>
+
+                    <div className="relative">
+                      <Search className="h-3.5 w-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
                       <Input
                         value={productSearch}
                         onChange={(e) => setProductSearch(e.target.value)}
-                        placeholder="Search products by name or ID..."
-                        className="pl-8 h-8 text-xs bg-background"
+                        placeholder="Filter products by title, SKU (e.g. VDD1), or ID..."
+                        className="h-8 pl-8 text-xs bg-muted/30 rounded-xl"
                       />
                     </div>
-                    <div className="flex items-center gap-1">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={selectAllFiltered}
-                        className="h-8 text-[11px] px-2"
-                      >
-                        Select All
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={clearSelection}
-                        className="h-8 text-[11px] px-2 text-muted-foreground hover:text-foreground"
-                      >
-                        Clear
-                      </Button>
-                    </div>
-                  </div>
 
-                  {/* Scrollable Product Items List */}
-                  <div className="max-h-52 overflow-y-auto space-y-1 divide-y divide-border/40 pr-1">
-                    {filteredProductsList.length === 0 ? (
-                      <div className="text-center py-6 text-xs text-muted-foreground">
-                        No products match your search.
-                      </div>
-                    ) : (
-                      filteredProductsList.map((p: any) => {
-                        const rawImg = p.thumbnailUrl || p.imageUrls?.[0] || p.images?.[0] || p.image;
-                        const img = formatImageUrl(rawImg);
-                        const pName = getLocalizedText(p.name || p.title, p.id);
-                        const isSelected =
-                          applicabilityMode === "INCLUDED"
-                            ? includedProductIds.includes(p.id)
-                            : excludedProductIds.includes(p.id);
+                    <div className="max-h-40 overflow-y-auto space-y-1 divide-y divide-border/20 pr-1">
+                      {filteredProductsList.length === 0 ? (
+                        <div className="text-center py-4 text-xs text-muted-foreground">
+                          No products found matching your search.
+                        </div>
+                      ) : (
+                        filteredProductsList.map((p: any) => {
+                          const rawImg = p.thumbnailUrl || p.imageUrls?.[0] || p.images?.[0] || p.image;
+                          const img = formatImageUrl(rawImg);
+                          const pName = getLocalizedText(p.name || p.title, p.id);
+                          const isExcluded = excludedProductIds.includes(p.id);
 
-                        return (
-                          <div
-                            key={p.id}
-                            onClick={() => toggleProductSelection(p.id)}
-                            className={`pt-1.5 flex items-center justify-between gap-2 p-1.5 rounded-xl cursor-pointer transition-colors ${
-                              isSelected ? "bg-primary/10 border border-primary/20" : "hover:bg-muted/50"
-                            }`}
-                          >
-                            <div className="flex items-center gap-2.5 min-w-0">
-                              <input
-                                type="checkbox"
-                                checked={isSelected}
-                                onChange={() => {}} // Handled by container click
-                                className="h-4 w-4 rounded border-gray-300 text-primary pointer-events-none"
-                              />
-                              <div className="h-8 w-8 rounded-lg bg-muted overflow-hidden flex items-center justify-center shrink-0 border">
+                          return (
+                            <div
+                              key={p.id}
+                              onClick={() => toggleProductSelection(p.id)}
+                              className={`pt-1 p-2 rounded-xl flex items-center justify-between gap-2.5 cursor-pointer transition-all ${
+                                isExcluded
+                                  ? "bg-amber-500/10 border border-amber-500/30"
+                                  : "hover:bg-muted/40 border border-transparent"
+                              }`}
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
                                 {img ? (
-                                  <img
-                                    src={img}
-                                    alt=""
-                                    className="h-full w-full object-cover"
-                                    referrerPolicy="no-referrer"
-                                    crossOrigin="anonymous"
-                                    onError={(e) => {
-                                      (e.target as HTMLElement).style.display = "none";
-                                    }}
-                                  />
+                                  <img src={img} alt="" className="h-7 w-7 rounded-md object-cover border shrink-0 bg-muted" />
                                 ) : (
-                                  <Package className="h-4 w-4 text-muted-foreground" />
+                                  <div className="h-7 w-7 rounded-md bg-muted text-muted-foreground flex items-center justify-center text-xs shrink-0">
+                                    📦
+                                  </div>
+                                )}
+                                <div className="min-w-0">
+                                  <div className="text-xs font-semibold text-foreground truncate">{pName}</div>
+                                  <div className="text-[10px] text-muted-foreground font-mono truncate">
+                                    {p.sku || p.id}
+                                    {p.price && <span className="text-emerald-600 font-bold ml-1.5">₹{p.price}</span>}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="shrink-0">
+                                {isExcluded ? (
+                                  <Badge className="bg-amber-600 text-white text-[10px] px-2 py-0.5 gap-1">
+                                    <Ban className="h-2.5 w-2.5" /> Excluded
+                                  </Badge>
+                                ) : (
+                                  <Button size="sm" variant="outline" className="h-6 text-[10px] px-2 rounded-lg">
+                                    + Exclude
+                                  </Button>
                                 )}
                               </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* INCLUDED PRODUCTS SECTION */}
+              {applicabilityMode === "INCLUDED" && (
+                <div className="space-y-3 pt-1">
+                  {/* Dedicated Included Products Container */}
+                  <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 dark:bg-emerald-500/10 p-3.5 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                        <span className="text-xs font-bold text-emerald-900 dark:text-emerald-200 flex items-center gap-1.5">
+                          <span>Included Products in this Box</span>
+                          <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 text-[10px]">
+                            {includedProductObjects.length} items
+                          </span>
+                        </span>
+                      </div>
+
+                      {includedProductObjects.length > 0 && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setIncludedProductIds([])}
+                          className="h-6 text-[11px] px-2 text-destructive hover:text-destructive hover:bg-destructive/10 rounded-lg"
+                        >
+                          Clear All
+                        </Button>
+                      )}
+                    </div>
+
+                    {includedProductObjects.length === 0 ? (
+                      <div className="p-4 rounded-xl border border-dashed border-emerald-500/30 bg-background/50 text-center text-xs text-muted-foreground">
+                        No products added to this coupon yet. Select products from the search list below to include them.
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
+                        {includedProductObjects.map((prod) => (
+                          <div
+                            key={prod.id}
+                            className="p-2.5 rounded-xl bg-background border border-emerald-500/30 flex items-center justify-between gap-2.5 shadow-2xs hover:border-emerald-500/50 transition-all"
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              {prod.image ? (
+                                <img
+                                  src={prod.image}
+                                  alt=""
+                                  className="h-10 w-10 rounded-lg object-cover border shrink-0 bg-muted"
+                                />
+                              ) : (
+                                <div className="h-10 w-10 rounded-lg bg-emerald-500/10 text-emerald-700 flex items-center justify-center font-bold text-xs shrink-0">
+                                  📦
+                                </div>
+                              )}
                               <div className="min-w-0">
-                                <div className="font-semibold text-xs text-foreground truncate">{pName}</div>
-                                <div className="text-[10px] text-muted-foreground font-mono truncate">{p.id}</div>
+                                <div className="text-xs font-bold text-foreground truncate">{prod.name}</div>
+                                <div className="text-[10px] text-muted-foreground font-mono truncate flex items-center gap-1.5">
+                                  <span>{prod.sku}</span>
+                                  {prod.price && (
+                                    <span className="text-emerald-600 font-bold">₹{prod.price}</span>
+                                  )}
+                                </div>
                               </div>
                             </div>
-                            <span className="text-xs font-bold text-foreground shrink-0">
-                              ₹{Number(p.price || 0).toLocaleString()}
-                            </span>
+
+                            <button
+                              type="button"
+                              onClick={() => setIncludedProductIds((prev) => prev.filter((id) => id !== prod.id))}
+                              className="h-7 w-7 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 grid place-items-center transition-colors shrink-0"
+                              title="Remove inclusion"
+                            >
+                              <X className="h-4 w-4" />
+                            </button>
                           </div>
-                        );
-                      })
+                        ))}
+                      </div>
                     )}
+                  </div>
+
+                  {/* Add More Products to Included List */}
+                  <div className="space-y-2 p-3 rounded-2xl bg-background border border-border/60">
+                    <div className="flex items-center justify-between text-xs font-semibold text-foreground">
+                      <span className="flex items-center gap-1.5">
+                        <Plus className="h-3.5 w-3.5 text-primary" />
+                        <span>Search & Add More Products</span>
+                      </span>
+                    </div>
+
+                    <div className="relative">
+                      <Search className="h-3.5 w-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        value={productSearch}
+                        onChange={(e) => setProductSearch(e.target.value)}
+                        placeholder="Filter products by title, SKU, or ID..."
+                        className="h-8 pl-8 text-xs bg-muted/30 rounded-xl"
+                      />
+                    </div>
+
+                    <div className="max-h-40 overflow-y-auto space-y-1 divide-y divide-border/20 pr-1">
+                      {filteredProductsList.length === 0 ? (
+                        <div className="text-center py-4 text-xs text-muted-foreground">
+                          No products found matching your search.
+                        </div>
+                      ) : (
+                        filteredProductsList.map((p: any) => {
+                          const rawImg = p.thumbnailUrl || p.imageUrls?.[0] || p.images?.[0] || p.image;
+                          const img = formatImageUrl(rawImg);
+                          const pName = getLocalizedText(p.name || p.title, p.id);
+                          const isIncluded = includedProductIds.includes(p.id);
+
+                          return (
+                            <div
+                              key={p.id}
+                              onClick={() => toggleProductSelection(p.id)}
+                              className={`pt-1 p-2 rounded-xl flex items-center justify-between gap-2.5 cursor-pointer transition-all ${
+                                isIncluded
+                                  ? "bg-emerald-500/10 border border-emerald-500/30"
+                                  : "hover:bg-muted/40 border border-transparent"
+                              }`}
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                {img ? (
+                                  <img src={img} alt="" className="h-7 w-7 rounded-md object-cover border shrink-0 bg-muted" />
+                                ) : (
+                                  <div className="h-7 w-7 rounded-md bg-muted text-muted-foreground flex items-center justify-center text-xs shrink-0">
+                                    📦
+                                  </div>
+                                )}
+                                <div className="min-w-0">
+                                  <div className="text-xs font-semibold text-foreground truncate">{pName}</div>
+                                  <div className="text-[10px] text-muted-foreground font-mono truncate">
+                                    {p.sku || p.id}
+                                    {p.price && <span className="text-emerald-600 font-bold ml-1.5">₹{p.price}</span>}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="shrink-0">
+                                {isIncluded ? (
+                                  <Badge className="bg-emerald-600 text-white text-[10px] px-2 py-0.5 gap-1">
+                                    <Check className="h-2.5 w-2.5" /> Added
+                                  </Badge>
+                                ) : (
+                                  <Button size="sm" variant="outline" className="h-6 text-[10px] px-2 rounded-lg">
+                                    + Add
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
                   </div>
                 </div>
               )}
             </div>
 
-            <div className="space-y-2 pt-2 border-t">
-              <div className="flex items-center gap-2">
+            {/* 4. Customer Usage Restriction */}
+            <div className="p-3.5 rounded-2xl bg-muted/20 border border-border/60">
+              <label className="flex items-center gap-2.5 cursor-pointer select-none">
                 <input
                   type="checkbox"
                   id="coupon-track-users"
                   checked={trackUserIds}
                   onChange={(e) => setTrackUserIds(e.target.checked)}
-                  className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary cursor-pointer"
+                  className="h-4 w-4 rounded border-border text-primary focus:ring-primary cursor-pointer"
                 />
-                <Label htmlFor="coupon-track-users" className="cursor-pointer font-normal text-xs text-muted-foreground hover:text-foreground">
-                  One time use per User
-                </Label>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="coupon-active"
-                  checked={active}
-                  onChange={(e) => setActive(e.target.checked)}
-                  className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary cursor-pointer"
-                />
-                <Label htmlFor="coupon-active" className="cursor-pointer font-normal text-xs">
-                  Coupon is active and available for customer redemption
-                </Label>
-              </div>
+                <span className="text-xs font-medium text-foreground">
+                  Limit to One Time Use per Customer (Prevents duplicate redemption by the same user account)
+                </span>
+              </label>
             </div>
 
-            <DialogFooter className="pt-3">
-              <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
+            {/* Modal Sticky Footer */}
+            <DialogFooter className="pt-3 border-t border-border/60 flex flex-col-reverse sm:flex-row items-center justify-end gap-2.5">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setDialogOpen(false)}
+                className="w-full sm:w-auto rounded-xl text-xs h-10 px-5"
+              >
                 Cancel
               </Button>
-              <Button type="submit" className="bg-gradient-to-br from-primary to-primary-glow">
-                {editingCoupon ? "Update coupon" : "Save coupon"}
+              <Button
+                type="submit"
+                className="w-full sm:w-auto rounded-xl text-xs h-10 px-6 font-bold"
+              >
+                {editingCoupon ? "Save Changes" : "Create Coupon Code"}
               </Button>
             </DialogFooter>
           </form>

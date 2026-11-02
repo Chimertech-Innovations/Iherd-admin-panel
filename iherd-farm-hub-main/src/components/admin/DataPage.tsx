@@ -372,33 +372,48 @@ export function DataPage<T extends Record<string, any>>({
           "village", "district", "city", "state", "location", "address"
         ];
 
-        matchQ = searchFields.some((field) => {
-          const val = row[field];
-          if (val === undefined || val === null) return false;
-          const strVal = getLocalizedText(val).toLowerCase();
-          if (strVal.includes(queryClean)) return true;
+        const isEmailQuery = queryClean.includes("@");
+        const isPurePhoneQuery = !isEmailQuery && queryDigits.length >= 3 && queryClean.replace(/[^0-9+ -]/g, "").length === queryClean.length;
 
-          // Digit matching for phone numbers (e.g. searching 9787 matching +919787000187)
-          if (queryDigits.length >= 3) {
-            const valDigits = strVal.replace(/[^0-9]/g, "");
-            if (valDigits.includes(queryDigits)) return true;
-          }
-          return false;
-        });
-
-        // Also check explicit searchKeys if provided
-        if (!matchQ && searchKeys && searchKeys.length > 0) {
-          matchQ = searchKeys.some((k) => {
-            const val = row[k];
+        if (isEmailQuery) {
+          // Dedicated email search: ONLY search email properties to avoid false-positive matches
+          const emailFields = [
+            "email", "userEmail", "authEmail", "farmerEmail", "sellerEmail", "vetEmail", "emailAddress", "mail"
+          ];
+          matchQ = emailFields.some((field) => {
+            const val = row[field];
             if (!val) return false;
+            return String(val).toLowerCase().trim().includes(queryClean);
+          });
+        } else {
+          matchQ = searchFields.some((field) => {
+            const val = row[field];
+            if (val === undefined || val === null) return false;
             const strVal = getLocalizedText(val).toLowerCase();
             if (strVal.includes(queryClean)) return true;
-            if (queryDigits.length >= 3) {
+
+            // Digit matching for phone numbers only when searching numeric/phone strings
+            if (isPurePhoneQuery && (field.toLowerCase().includes("phone") || field === "tagNo" || field === "rfid")) {
               const valDigits = strVal.replace(/[^0-9]/g, "");
               if (valDigits.includes(queryDigits)) return true;
             }
             return false;
           });
+
+          // Also check explicit searchKeys if provided
+          if (!matchQ && searchKeys && searchKeys.length > 0) {
+            matchQ = searchKeys.some((k) => {
+              const val = row[k];
+              if (!val) return false;
+              const strVal = getLocalizedText(val).toLowerCase();
+              if (strVal.includes(queryClean)) return true;
+              if (isPurePhoneQuery && (k.toLowerCase().includes("phone") || k === "tagNo" || k === "rfid")) {
+                const valDigits = strVal.replace(/[^0-9]/g, "");
+                if (valDigits.includes(queryDigits)) return true;
+              }
+              return false;
+            });
+          }
         }
       }
 

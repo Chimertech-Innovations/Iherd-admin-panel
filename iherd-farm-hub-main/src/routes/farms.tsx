@@ -415,9 +415,9 @@ function FarmsPage() {
             up: true,
           },
           {
-            label: "Active Operations",
+            label: "Operational Farms",
             value: isLoading ? "…" : String(activeFarmsCount),
-            change: "Verified active",
+            change: "Registered facilities",
             up: true,
           },
         ]}
@@ -540,11 +540,6 @@ function FarmsPage() {
                 </div>
               </div>
             ),
-          },
-          {
-            key: "status",
-            label: "Status",
-            render: (r) => <StatusBadge status={r.status} />,
           },
           {
             key: "actions",

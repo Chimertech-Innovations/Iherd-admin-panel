@@ -22,6 +22,9 @@ import {
   Flame,
   Coins,
   MapPin,
+  Boxes,
+  Truck,
+  GraduationCap,
 } from "lucide-react";
 
 import {
@@ -53,9 +56,11 @@ const people = [
 ];
 const marketplace = [
   { title: "Product Marketplace", url: "/marketplace/products", icon: ShoppingBag },
+  { title: "Combo Products", url: "/marketplace/combos", icon: Boxes },
   { title: "Cattle Marketplace", url: "/marketplace/cattle", icon: ShoppingBag },
   { title: "Best Sellers", url: "/marketplace/best-sellers", icon: Flame },
   { title: "Coupon Codes", url: "/marketplace/coupons", icon: Ticket },
+  { title: "Shipping Fees & Zones", url: "/marketplace/shipping", icon: Truck },
 ];
 const orders = [
   { title: "Product Orders", url: "/orders/products", icon: Package },
@@ -65,6 +70,7 @@ const orders = [
 const ops = [
   { title: "Payments", url: "/payments", icon: Wallet },
   { title: "Token Advance", url: "/token-advance", icon: Coins },
+  { title: "Pashupreneur Courses", url: "/pashuprenuer", icon: GraduationCap },
   { title: "Banners & Ads", url: "/banners", icon: Megaphone },
   { title: "Customer Issues", url: "/support", icon: LifeBuoy },
 ];

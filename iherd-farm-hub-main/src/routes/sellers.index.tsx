@@ -404,7 +404,7 @@ function SellersPage() {
         searchKeys={["name", "ownerName", "phone", "category", "city", "state"]}
         kpis={[
           { label: "Total Sellers", value: isLoading ? "…" : totalSellers.toLocaleString(), change: "Registered vendors", up: true },
-          { label: "Verified & Active", value: isLoading ? "…" : verifiedSellers.toLocaleString(), change: "Active in marketplace", up: true },
+          { label: "Verified Sellers", value: isLoading ? "…" : verifiedSellers.toLocaleString(), change: "Verified vendors", up: true },
           { label: "Products Listed", value: isLoading ? "…" : totalListedProducts.toLocaleString(), change: "Catalog items", up: true },
         ]}
         data={sellers}
@@ -481,11 +481,6 @@ function SellersPage() {
             key: "joined",
             label: "Joined Date",
             render: (row) => <span className="text-xs text-muted-foreground">{row.joined}</span>,
-          },
-          {
-            key: "status",
-            label: "Status",
-            render: (r) => <StatusBadge status={r.status || "Active"} />,
           },
         ]}
       />

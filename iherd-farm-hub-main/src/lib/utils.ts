@@ -1,5 +1,6 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { getApiBaseUrlSync } from "./apiClient";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -47,7 +48,8 @@ export function getLocalizedText(val: any, fallback = "—"): string {
 }
 
 /**
- * Formats image URLs, converting Google Drive sharing/preview URLs to direct CDN image stream URLs.
+ * Formats image URLs, converting Google Drive sharing/preview URLs to direct image streams
+ * via the backend proxy or high-speed CDN.
  */
 export function formatImageUrl(url: any): string {
   if (!url) return "";
@@ -60,14 +62,17 @@ export function formatImageUrl(url: any): string {
   const trimmed = url.trim();
   if (!trimmed) return "";
 
-  // 1. Convert Google Drive Links to direct high-speed Google CDN
-  const driveFileMatch = trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
-  if (driveFileMatch && driveFileMatch[1]) {
-    return `https://lh3.googleusercontent.com/d/${driveFileMatch[1]}`;
+  // Convert Google Drive Links via our backend proxy so browsers on localhost/production
+  // are never blocked by Google Drive CORS, 429 hotlinking or third-party cookie restrictions
+  if (trimmed.includes("drive.google.com") || trimmed.includes("docs.google.com")) {
+    const base = getApiBaseUrlSync();
+    return `${base}/api/admin/proxy-image?url=${encodeURIComponent(trimmed)}`;
   }
-  const driveIdMatch = trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
-  if (trimmed.includes("drive.google.com") && driveIdMatch && driveIdMatch[1]) {
-    return `https://lh3.googleusercontent.com/d/${driveIdMatch[1]}`;
+
+  // Also proxy lh3 CDN links if they originated from drive
+  if (trimmed.includes("lh3.googleusercontent.com/d/")) {
+    const base = getApiBaseUrlSync();
+    return `${base}/api/admin/proxy-image?url=${encodeURIComponent(trimmed)}`;
   }
 
   return trimmed;

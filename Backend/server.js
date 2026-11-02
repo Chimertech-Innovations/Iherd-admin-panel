@@ -3508,19 +3508,21 @@ app.get("/api/admin/products", async (req, res) => {
 });
 
 const normalizeToMultiLangMap = (val) => {
-  if (!val) return { en: "", hi: "", kn: "", mr: "", pa: "", ta: "" };
+  if (!val) return { en: "", hi: "", kn: "", mr: "", pa: "", ta: "", id: "" };
   if (typeof val === "object" && !Array.isArray(val)) {
+    const base = val.en || val.hi || Object.values(val)[0] || "";
     return {
-      en: val.en || val.hi || Object.values(val)[0] || "",
-      hi: val.hi || val.en || Object.values(val)[0] || "",
-      kn: val.kn || val.en || val.hi || "",
-      mr: val.mr || val.en || val.hi || "",
-      pa: val.pa || val.en || val.hi || "",
-      ta: val.ta || val.en || val.hi || "",
+      en: val.en || base,
+      hi: val.hi || base,
+      kn: val.kn || base,
+      mr: val.mr || base,
+      pa: val.pa || base,
+      ta: val.ta || base,
+      id: val.id || base,
     };
   }
   const str = String(val);
-  return { en: str, hi: str, kn: str, mr: str, pa: str, ta: str };
+  return { en: str, hi: str, kn: str, mr: str, pa: str, ta: str, id: str };
 };
 
 app.post("/api/admin/products", async (req, res) => {
@@ -3622,6 +3624,43 @@ app.put("/api/admin/products/:id", async (req, res) => {
   } catch (error) {
     console.error(`Error in /api/admin/products/${req.params.id} PUT:`, error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// Quick Price Only Update for Marketplace Products
+app.patch("/api/admin/products/:id/price", async (req, res) => {
+  try {
+    const db = getFirestore();
+    const { id } = req.params;
+    const { price, mrp } = req.body;
+    if (!id || price === undefined) {
+      return res.status(400).json({ error: "Missing product ID or price" });
+    }
+    const prodRef = db.collection("product_marketplace").doc("main").collection("products").doc(id);
+    const existing = await prodRef.get();
+    if (!existing.exists) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+    const update = {
+      price: Number(price),
+      updatedAt: new Date().toISOString(),
+    };
+    if (mrp !== undefined && !isNaN(Number(mrp))) update.mrp = Number(mrp);
+
+    await prodRef.set(update, { merge: true });
+
+    // Also sync price in best_seller collection if it is featured
+    const bsRef = db.collection("product_marketplace").doc("main").collection("best_seller").doc(id);
+    const bsSnap = await bsRef.get();
+    if (bsSnap.exists) {
+      await bsRef.set(update, { merge: true });
+    }
+
+    clearCache();
+    res.json({ success: true, message: "Product price updated successfully", id, price: Number(price), mrp: update.mrp });
+  } catch (err) {
+    console.error("Error updating product price:", err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -3883,19 +3922,403 @@ app.post("/api/admin/upload-banner-image", async (req, res) => {
   }
 });
 
+// 6. Universal Upload Image for Products, Combos, and Media
+app.post("/api/admin/upload-image", async (req, res) => {
+  try {
+    const {
+      base64,
+      filename = "image.png",
+      contentType = "image/png",
+      folder = "combos/images",
+    } = req.body;
+
+    if (!base64) {
+      return res.status(400).json({ error: "base64 image data is required" });
+    }
+
+    const cleanBase64 = base64.replace(/^data:image\/\w+;base64,/, "");
+    const buffer = Buffer.from(cleanBase64, "base64");
+
+    const defaultBucketName = process.env.VITE_FIREBASE_STORAGE_BUCKET || "auth-b404a.appspot.com";
+    const storage = getStorage();
+    const bucket = storage.bucket(defaultBucketName);
+
+    const safeFilename = `${Date.now()}_${filename.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+    const cleanFolder = (folder || "marketplace").replace(/^\/+|\/+$/g, "");
+    const storagePath = `${cleanFolder}/${safeFilename}`;
+    const file = bucket.file(storagePath);
+
+    const uuid = require("crypto").randomUUID();
+    await file.save(buffer, {
+      metadata: {
+        contentType,
+        metadata: {
+          firebaseStorageDownloadTokens: uuid,
+        },
+      },
+    });
+
+    const bucketName = bucket.name || defaultBucketName;
+    const downloadUrl = `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodeURIComponent(storagePath)}?alt=media&token=${uuid}`;
+
+    console.log(`[Upload Image] Successfully saved to ${storagePath} -> ${downloadUrl}`);
+    res.json({
+      success: true,
+      url: downloadUrl,
+      storagePath,
+      filename: safeFilename,
+    });
+  } catch (err) {
+    console.error("Error in /api/admin/upload-image:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==========================================
+// 1. SHIPPING CONFIG API
+// Document: product_marketplace/main/shipping_config/config
+// ==========================================
+app.get("/api/admin/shipping-config", async (req, res) => {
+  try {
+    const db = getFirestore();
+    const docRef = db.doc("product_marketplace/main/shipping_config/config");
+    const snap = await docRef.get();
+    if (!snap.exists) {
+      return res.status(404).json({ error: "Shipping configuration document not found", config: null });
+    }
+    res.json({ success: true, config: snap.data() });
+  } catch (err) {
+    console.error("Error fetching shipping config:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post(["/api/admin/shipping-config", "/api/admin/shipping-config/update"], async (req, res) => {
+  try {
+    const db = getFirestore();
+    const { zones, pricing, delivery_time } = req.body;
+    if (!zones || !pricing) {
+      return res.status(400).json({ error: "Invalid payload: zones and pricing are required" });
+    }
+    const docRef = db.doc("product_marketplace/main/shipping_config/config");
+    const updatePayload = {
+      zones,
+      pricing,
+      delivery_time: delivery_time || {},
+      updatedAt: new Date().toISOString(),
+    };
+    await docRef.set(updatePayload, { merge: true });
+    clearCache();
+    res.json({ success: true, message: "Shipping configuration updated successfully", config: updatePayload });
+  } catch (err) {
+    console.error("Error updating shipping config:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==========================================
+// 2. COMBOS PRODUCTS API
+// Collection: product_marketplace/main/combos
+// ==========================================
+app.get("/api/admin/combos", async (req, res) => {
+  try {
+    const db = getFirestore();
+    const snap = await db.collection("product_marketplace").doc("main").collection("combos").get();
+    const combos = [];
+    snap.forEach((doc) => {
+      combos.push({ id: doc.id, ...doc.data() });
+    });
+    res.json({ success: true, combos, total: combos.length });
+  } catch (err) {
+    console.error("Error fetching combos:", err);
+    res.status(500).json({ error: err.message, combos: [] });
+  }
+});
+
+app.post("/api/admin/combos", async (req, res) => {
+  try {
+    const db = getFirestore();
+    const data = req.body;
+    if (!data) return res.status(400).json({ error: "Missing combo data payload" });
+
+    const comboId = data.id || `COMBO--${Date.now()}`;
+    const payload = {
+      ...data,
+      id: comboId,
+      name: typeof data.name === "object" ? data.name : normalizeToMultiLangMap(data.name),
+      price: Number(data.price) || 0,
+      mrp: Number(data.mrp) || Number(data.price) || 0,
+      gst: Number(data.gst) !== undefined && !isNaN(Number(data.gst)) ? Number(data.gst) : 5,
+      quantity: Number(data.quantity) || 1,
+      quantityUnit: typeof data.quantityUnit === "object" ? data.quantityUnit : normalizeToMultiLangMap(data.quantityUnit || "Unit"),
+      weight: Number(data.weight) || 0,
+      weightUnit: typeof data.weightUnit === "object" ? data.weightUnit : normalizeToMultiLangMap(data.weightUnit || "g"),
+      categoryId: data.categoryId || "cat_disease_management",
+      subCategoryId: data.subCategoryId || "subcat_disease_detection",
+      isActive: data.isActive !== false,
+      bestSeller: Boolean(data.bestSeller),
+      thumbnailUrl: data.thumbnailUrl || (Array.isArray(data.imageUrls) ? data.imageUrls[0] : "") || "",
+      imageUrls: Array.isArray(data.imageUrls) ? data.imageUrls.filter(Boolean) : (data.thumbnailUrl ? [data.thumbnailUrl] : []),
+      sellerType: data.sellerType || "seller",
+      sellerLogo: data.sellerLogo || "",
+      sellerName: typeof data.sellerName === "object" ? data.sellerName : normalizeToMultiLangMap(data.sellerName || "iHerd Official"),
+      best_before: typeof data.best_before === "object" ? data.best_before : normalizeToMultiLangMap(data.best_before || "2 Years"),
+      description: typeof data.description === "object" ? data.description : normalizeToMultiLangMap(data.description || ""),
+      specification: typeof data.specification === "object" ? data.specification : { specification: normalizeToMultiLangMap(data.specification || "") },
+      instructionsToUse: typeof data.instructionsToUse === "object" ? data.instructionsToUse : { en: [String(data.instructionsToUse || "")] },
+      productIngredients: typeof data.productIngredients === "object" ? data.productIngredients : { en: [String(data.productIngredients || "")] },
+      storageCondition: typeof data.storageCondition === "object" ? data.storageCondition : { en: ["Room Temperature [25°C]"] },
+      createdAt: data.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    await db.collection("product_marketplace").doc("main").collection("combos").doc(comboId).set(payload, { merge: true });
+    clearCache();
+    res.json({ success: true, message: "Combo product created successfully", id: comboId, combo: payload });
+  } catch (err) {
+    console.error("Error creating combo product:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put("/api/admin/combos/:id", async (req, res) => {
+  try {
+    const db = getFirestore();
+    const { id } = req.params;
+    const data = req.body;
+    if (!id || !data) return res.status(400).json({ error: "Missing combo ID or update data" });
+
+    const docRef = db.collection("product_marketplace").doc("main").collection("combos").doc(id);
+    const existing = await docRef.get();
+    if (!existing.exists) {
+      return res.status(404).json({ error: "Combo product not found" });
+    }
+
+    const payload = {
+      ...data,
+      id,
+      updatedAt: new Date().toISOString(),
+    };
+    if (data.price !== undefined) payload.price = Number(data.price);
+    if (data.mrp !== undefined) payload.mrp = Number(data.mrp);
+    if (data.gst !== undefined) payload.gst = Number(data.gst);
+    if (data.weight !== undefined) payload.weight = Number(data.weight);
+    if (data.quantity !== undefined) payload.quantity = Number(data.quantity);
+    if (data.isActive !== undefined) payload.isActive = Boolean(data.isActive);
+    if (data.bestSeller !== undefined) payload.bestSeller = Boolean(data.bestSeller);
+    if (data.name && typeof data.name === "object") payload.name = data.name;
+    if (data.description && typeof data.description === "object") payload.description = data.description;
+    if (data.best_before && typeof data.best_before === "object") payload.best_before = data.best_before;
+    if (data.instructionsToUse && typeof data.instructionsToUse === "object") payload.instructionsToUse = data.instructionsToUse;
+    if (data.productIngredients && typeof data.productIngredients === "object") payload.productIngredients = data.productIngredients;
+    if (data.storageCondition && typeof data.storageCondition === "object") payload.storageCondition = data.storageCondition;
+    if (data.specification && typeof data.specification === "object") payload.specification = data.specification;
+    if (data.sellerName && typeof data.sellerName === "object") payload.sellerName = data.sellerName;
+    if (data.quantityUnit && typeof data.quantityUnit === "object") payload.quantityUnit = data.quantityUnit;
+    if (data.weightUnit && typeof data.weightUnit === "object") payload.weightUnit = data.weightUnit;
+    if (Array.isArray(data.imageUrls)) payload.imageUrls = data.imageUrls;
+
+    await docRef.set(payload, { merge: true });
+    clearCache();
+    res.json({ success: true, message: "Combo product updated successfully", id, combo: payload });
+  } catch (err) {
+    console.error("Error updating combo product:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Quick Price Only Update for Combo Products
+app.patch("/api/admin/combos/:id/price", async (req, res) => {
+  try {
+    const db = getFirestore();
+    const { id } = req.params;
+    const { price, mrp } = req.body;
+    if (!id || price === undefined) {
+      return res.status(400).json({ error: "Missing combo ID or price" });
+    }
+    const docRef = db.collection("product_marketplace").doc("main").collection("combos").doc(id);
+    const existing = await docRef.get();
+    if (!existing.exists) {
+      return res.status(404).json({ error: "Combo product not found" });
+    }
+    const update = {
+      price: Number(price),
+      updatedAt: new Date().toISOString(),
+    };
+    if (mrp !== undefined && !isNaN(Number(mrp))) update.mrp = Number(mrp);
+
+    await docRef.set(update, { merge: true });
+    clearCache();
+    res.json({ success: true, message: "Combo price updated successfully", id, price: Number(price), mrp: update.mrp });
+  } catch (err) {
+    console.error("Error updating combo price:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/api/admin/combos/:id", async (req, res) => {
+  try {
+    const db = getFirestore();
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ error: "Missing combo ID" });
+
+    await db.collection("product_marketplace").doc("main").collection("combos").doc(id).delete();
+    clearCache();
+    res.json({ success: true, message: "Combo product deleted successfully", id });
+  } catch (err) {
+    console.error("Error deleting combo product:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==========================================
+// 3. PASHUPRENEUR COURSES API
+// Collection: pashuprenuer_courses (with pashupreneur_courses alias)
+// ==========================================
+const PASHUPRENEUR_ROUTES = [
+  "/api/admin/pashuprenuer-courses",
+  "/api/admin/pashupreneur-courses",
+];
+const PASHUPRENEUR_ID_ROUTES = [
+  "/api/admin/pashuprenuer-courses/:id",
+  "/api/admin/pashupreneur-courses/:id",
+];
+
+app.get(PASHUPRENEUR_ROUTES, async (req, res) => {
+  try {
+    const db = getFirestore();
+    const snap = await db.collection("pashuprenuer_courses").get();
+    const courses = [];
+    snap.forEach((doc) => {
+      courses.push({ id: doc.id, ...doc.data() });
+    });
+    // Sort by order ascending
+    courses.sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
+    res.json({ success: true, courses, total: courses.length });
+  } catch (err) {
+    console.error("Error fetching pashuprenuer courses:", err);
+    res.status(500).json({ error: err.message, courses: [] });
+  }
+});
+
+app.post(PASHUPRENEUR_ROUTES, async (req, res) => {
+  try {
+    const db = getFirestore();
+    const data = req.body;
+    if (!data) return res.status(400).json({ error: "Missing course data payload" });
+
+    const courseId = data.id || `course_${Date.now()}`;
+    const payload = {
+      ...data,
+      id: courseId,
+      order: Number(data.order) || 1,
+      youtubeUrl: data.youtubeUrl || "",
+      isActive: data.isActive !== false,
+      title: data.title || "",
+      description: data.description || "",
+      updatedAt: new Date().toISOString(),
+    };
+
+    // Save directly to Firestore using Firebase Admin SDK (full permissions)
+    await db.collection("pashuprenuer_courses").doc(courseId).set(payload, { merge: true });
+    clearCache();
+    console.log(`[Pashupreneur] Successfully saved course "${courseId}" to Firestore`);
+    res.json({ success: true, message: "Pashupreneur course created successfully", id: courseId, course: payload });
+  } catch (err) {
+    console.error("Error creating pashuprenuer course:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put(PASHUPRENEUR_ID_ROUTES, async (req, res) => {
+  try {
+    const db = getFirestore();
+    const { id } = req.params;
+    const data = req.body;
+    if (!id || !data) return res.status(400).json({ error: "Missing course ID or update payload" });
+
+    const docRef = db.collection("pashuprenuer_courses").doc(id);
+    const payload = {
+      ...data,
+      id,
+      updatedAt: new Date().toISOString(),
+    };
+    if (data.order !== undefined) payload.order = Number(data.order);
+    if (data.isActive !== undefined) payload.isActive = Boolean(data.isActive);
+    if (data.title !== undefined) payload.title = String(data.title);
+    if (data.description !== undefined) payload.description = String(data.description);
+    if (data.youtubeUrl !== undefined) payload.youtubeUrl = String(data.youtubeUrl);
+
+    await docRef.set(payload, { merge: true });
+    clearCache();
+    console.log(`[Pashupreneur] Successfully updated course "${id}" in Firestore`);
+    res.json({ success: true, message: "Pashupreneur course saved successfully", id, course: payload });
+  } catch (err) {
+    console.error("Error updating pashuprenuer course:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete(PASHUPRENEUR_ID_ROUTES, async (req, res) => {
+  try {
+    const db = getFirestore();
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ error: "Missing course ID" });
+
+    await db.collection("pashuprenuer_courses").doc(id).delete();
+    clearCache();
+    console.log(`[Pashupreneur] Successfully deleted course "${id}" from Firestore`);
+    res.json({ success: true, message: "Pashupreneur course deleted successfully", id });
+  } catch (err) {
+    console.error("Error deleting pashuprenuer course:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// High-Speed Image Proxy (handles Google Drive thumbnail CDN requests cleanly)
+app.get("/api/admin/proxy-image", (req, res) => {
+  const { url } = req.query;
+  if (!url) return res.status(400).send("Missing url query param");
+
+  let targetUrl = String(url).trim();
+  const driveMatch =
+    targetUrl.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) ||
+    targetUrl.match(/[?&]id=([a-zA-Z0-9_-]+)/) ||
+    targetUrl.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  if (driveMatch && driveMatch[1]) {
+    targetUrl = `https://lh3.googleusercontent.com/d/${driveMatch[1]}=s800`;
+  }
+
+  const https = require("https");
+  const http = require("http");
+  const client = targetUrl.startsWith("https") ? https : http;
+
+  client.get(targetUrl, { headers: { "User-Agent": "Mozilla/5.0" } }, (proxyRes) => {
+    if (proxyRes.statusCode >= 300 && proxyRes.statusCode < 400 && proxyRes.headers.location) {
+      return https.get(proxyRes.headers.location, { headers: { "User-Agent": "Mozilla/5.0" } }, (redirRes) => {
+        res.setHeader("Content-Type", redirRes.headers["content-type"] || "image/png");
+        res.setHeader("Cache-Control", "public, max-age=86400");
+        redirRes.pipe(res);
+      }).on("error", (err) => res.status(502).send(err.message));
+    }
+    res.setHeader("Content-Type", proxyRes.headers["content-type"] || "image/png");
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    proxyRes.pipe(res);
+  }).on("error", (err) => {
+    res.status(502).send(err.message);
+  });
+});
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Backend server running on http://127.0.0.1:${PORT}`);
   
-  // Pre-warm the cache immediately so requests are served instantly
-  fetchAndProcessAdminUsers(true)
-    .then((users) => console.log(`[Cache Pre-warm] Loaded ${users.length} admin users into memory cache`))
-    .catch((err) => console.warn(`[Cache Pre-warm] Initial load error:`, err.message));
-
-  // Keep cache warm periodically every 3 minutes
-  setInterval(() => {
-    fetchAndProcessAdminUsers(true).catch(() => {});
-  }, 3 * 60 * 1000);
+  // Safe initial pre-warm without memory leak interval
+  setTimeout(() => {
+    fetchAndProcessAdminUsers(false)
+      .then((users) => console.log(`[Cache] Ready with ${users.length} users`))
+      .catch((err) => console.warn(`[Cache] Pre-load note:`, err.message));
+  }, 1000);
 });
 
 

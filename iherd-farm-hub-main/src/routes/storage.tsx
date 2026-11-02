@@ -387,6 +387,7 @@ function StoragePage() {
     { id: "offerBanners", label: "Offer Banners", value: data?.offerBanners?.length ?? totals.offerBanners ?? 0, icon: ImageIcon, tint: "bg-amber-500/10 text-amber-600" },
     { id: "otherBanners", label: "Other Banners", value: data?.otherBanners?.length ?? totals.otherBanners ?? 0, icon: ImageIcon, tint: "bg-indigo-500/10 text-indigo-600" },
     { id: "cattleMarketplace", label: "Cattle Media", value: totals.cattleMarketplace, icon: ImageIcon, tint: "bg-success/10 text-success" },
+    
     { id: "invoices", label: "Invoices", value: totals.invoices, icon: FileText, tint: "bg-info/10 text-info" },
   ];
 

@@ -26,8 +26,11 @@ const styles: Record<string, string> = {
 };
 
 export function StatusBadge({ status }: { status?: any }) {
-  const label = getLocalizedText(status, "Active");
+  if (status === undefined || status === null || status === true) return null;
+  const label = getLocalizedText(status, "");
+  if (!label) return null;
   const key = label.toLowerCase().replace(/[\s_-]+/g, "");
+  if (key === "active" || key === "isactive" || key === "true" || key === "enabled" || key.includes("active")) return null;
   return (
     <span
       className={cn(

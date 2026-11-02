@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/admin/PageHeader";
 import {
   Plus,
@@ -42,6 +43,8 @@ import {
   Code2,
   Search,
   Package,
+  Link as LinkIcon,
+  HelpCircle,
 } from "lucide-react";
 import {
   Dialog,
@@ -69,6 +72,12 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
+import {
   Table,
   TableBody,
   TableCell,
@@ -87,6 +96,12 @@ import {
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage } from "@/lib/firebase";
 import { formatImageUrl, getLocalizedText } from "@/lib/utils";
+import {
+  PRODUCT_CATEGORIES,
+  getSubcategoriesForCategory,
+  getCategoryName,
+  getSubcategoryName,
+} from "@/lib/categories";
 import { useAdminProducts } from "@/hooks/useFirebaseData";
 import { toast } from "sonner";
 import { exportToCsv } from "@/lib/csvExport";
@@ -122,6 +137,12 @@ const ACTION_TYPE_OPTIONS = [
   { value: "url", label: "Direct URL", icon: ExternalLink },
   { value: "none", label: "Informational (No Action)", icon: Eye },
 ];
+
+export function getActionTypeLabel(type: string): string {
+  const match = ACTION_TYPE_OPTIONS.find((o) => o.value === type);
+  if (match) return match.label.split(" (")[0];
+  return type ? type.charAt(0).toUpperCase() + type.slice(1) : "App Screen";
+}
 
 const COMMON_SCREEN_SUGGESTIONS = [
   { label: "Cattle Marketplace", value: "cattleMarketplace" },
@@ -167,9 +188,13 @@ function BannersPage() {
   const [isActive, setIsActive] = useState(true);
   const [selectedProfiles, setSelectedProfiles] = useState<string[]>(["farmer", "vet", "seller"]);
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [imageTab, setImageTab] = useState<"upload" | "url">("upload");
   const [imagePreview, setImagePreview] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [productSearch, setProductSearch] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState<string>("cat_disease_management");
+  const [selectedSubCategory, setSelectedSubCategory] = useState<string>("subcat_disease_detection");
 
   // Live Products for Offer Banner selector
   const { data: marketplaceProducts = [] } = useAdminProducts();
@@ -448,7 +473,10 @@ function BannersPage() {
     setImageUrl("");
     setImagePreview("");
     setSelectedFile(null);
+    setImageTab("upload");
     setProductSearch("");
+    setSelectedCategory("cat_disease_management");
+    setSelectedSubCategory("subcat_disease_detection");
     if (type === "offer_banners") {
       setActionType("product");
       setActionValue(marketplaceProducts[0]?.sku || marketplaceProducts[0]?.id || "VDD1-101-C01-500M");
@@ -470,8 +498,10 @@ function BannersPage() {
     setImageUrl(banner.imageUrl || "");
     setImagePreview(banner.imageUrl || "");
     setSelectedFile(null);
+    setImageTab(banner.imageUrl ? "upload" : "upload");
     setProductSearch("");
-    setActionType(banner.actionType || (banner.bannerType === "offer_banners" ? "product" : "screen"));
+    const resolvedActionType = banner.actionType || (banner.bannerType === "offer_banners" ? "product" : "screen");
+    setActionType(resolvedActionType);
     setActionValue(banner.actionValue || "");
     setPriority(Number(banner.priority) || 1);
     setIsActive(banner.isActive !== undefined ? Boolean(banner.isActive) : true);
@@ -480,6 +510,26 @@ function BannersPage() {
         ? banner.profiles
         : ["farmer", "vet", "seller"]
     );
+
+    // Initialize category / subcategory if editing a category action
+    if (resolvedActionType === "category") {
+      const val = banner.actionValue || "";
+      if (val.startsWith("subcat_")) {
+        const found = PRODUCT_CATEGORIES.find((c) => c.subcategories.some((s) => s.id === val));
+        if (found) {
+          setSelectedCategory(found.id);
+          setSelectedSubCategory(val);
+        }
+      } else if (val.startsWith("cat_")) {
+        setSelectedCategory(val);
+        const subs = getSubcategoriesForCategory(val);
+        if (subs.length > 0) setSelectedSubCategory(subs[0].id);
+      }
+    } else {
+      setSelectedCategory("cat_disease_management");
+      setSelectedSubCategory("subcat_disease_detection");
+    }
+
     if (viewingDetailBanner) setViewingDetailBanner(null);
     setIsModalOpen(true);
   };
@@ -537,6 +587,7 @@ function BannersPage() {
       ...docData,
     };
 
+    setSubmitting(true);
     try {
       // 1. Try Backend API
       try {
@@ -575,33 +626,81 @@ function BannersPage() {
     } catch (err: any) {
       console.error("Error saving banner:", err);
       toast.error("Failed to save banner: " + (err?.message || "Unknown error"));
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  // Toggle Banner Active Status
+  // Toggle Banner Active Status (Instant 0ms Optimistic Update)
   const handleToggle = async (banner: BannerItem) => {
     const newStatus = !banner.isActive;
+    const prevStatus = banner.isActive;
+
+    // 1. Immediately update TanStack React Query cache (0ms instant visual switch)
+    queryClient.setQueryData<any>(["app_banners"], (old: any) => {
+      if (!old) return old;
+      const updateList = (list: BannerItem[]) =>
+        (list || []).map((item) =>
+          item.id === banner.id && item.bannerType === banner.bannerType
+            ? { ...item, isActive: newStatus, updatedAt: new Date().toISOString() }
+            : item
+        );
+
+      return {
+        ...old,
+        all: updateList(old.all),
+        ads_banners: updateList(old.ads_banners),
+        offer_banners: updateList(old.offer_banners),
+      };
+    });
+
+    if (viewingDetailBanner && viewingDetailBanner.id === banner.id && viewingDetailBanner.bannerType === banner.bannerType) {
+      setViewingDetailBanner({ ...viewingDetailBanner, isActive: newStatus });
+    }
+
+    toast.success(`Banner "${banner.id}" visibility updated`);
+
+    // 2. Perform network operations asynchronously in parallel without blocking UI
     try {
-      // Try Backend API
-      try {
-        await fetch(`${API_BASE}/api/admin/banners/${banner.bannerType}/${banner.id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ isActive: newStatus }),
-        });
-      } catch {}
-
-      // Client Firestore SDK
       const bannerRef = doc(db, "banners", banner.bannerType, "items", banner.id);
-      await setDoc(bannerRef, { isActive: newStatus, updatedAt: new Date().toISOString() }, { merge: true });
 
-      toast.success(`Banner "${banner.id}" is now ${newStatus ? "Active" : "Paused"}`);
-      if (viewingDetailBanner && viewingDetailBanner.id === banner.id) {
-        setViewingDetailBanner({ ...viewingDetailBanner, isActive: newStatus });
-      }
-      queryClient.invalidateQueries({ queryKey: ["app_banners"] });
-      refetch();
+      const backendPromise = fetch(`${API_BASE}/api/admin/banners/${banner.bannerType}/${banner.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isActive: newStatus }),
+      }).catch((e) => console.warn("Backend toggle error (fallback to Firestore SDK):", e));
+
+      const firestorePromise = setDoc(
+        bannerRef,
+        { isActive: newStatus, updatedAt: new Date().toISOString() },
+        { merge: true }
+      );
+
+      await Promise.allSettled([backendPromise, firestorePromise]);
     } catch (err: any) {
+      // Revert cache if error occurs
+      console.error("Failed to update banner status:", err);
+      queryClient.setQueryData<any>(["app_banners"], (old: any) => {
+        if (!old) return old;
+        const revertList = (list: BannerItem[]) =>
+          (list || []).map((item) =>
+            item.id === banner.id && item.bannerType === banner.bannerType
+              ? { ...item, isActive: prevStatus }
+              : item
+          );
+
+        return {
+          ...old,
+          all: revertList(old.all),
+          ads_banners: revertList(old.ads_banners),
+          offer_banners: revertList(old.offer_banners),
+        };
+      });
+
+      if (viewingDetailBanner && viewingDetailBanner.id === banner.id && viewingDetailBanner.bannerType === banner.bannerType) {
+        setViewingDetailBanner({ ...viewingDetailBanner, isActive: prevStatus });
+      }
+
       toast.error("Failed to update status: " + (err?.message || "Unknown error"));
     }
   };
@@ -738,13 +837,13 @@ function BannersPage() {
         <Card className="rounded-3xl border bg-card/60 backdrop-blur-md shadow-sm">
           <CardContent className="p-4 flex items-center justify-between">
             <div>
-              <div className="text-xs text-muted-foreground font-medium">Active & Live</div>
-              <div className="text-2xl font-black text-emerald-600 mt-0.5">
+              <div className="text-xs text-muted-foreground font-medium">Published in App</div>
+              <div className="text-2xl font-black text-primary mt-0.5">
                 {isLoading ? <span className="inline-block h-7 w-12 bg-muted/70 rounded-lg animate-pulse" /> : activeCount}
               </div>
-              <div className="text-[10px] text-emerald-600 font-semibold mt-0.5">Published on App</div>
+              <div className="text-[10px] text-muted-foreground font-semibold mt-0.5">Carousel banners</div>
             </div>
-            <div className="h-11 w-11 rounded-2xl bg-emerald-500/10 text-emerald-600 grid place-items-center">
+            <div className="h-11 w-11 rounded-2xl bg-primary/10 text-primary grid place-items-center">
               <CheckCircle2 className="h-5 w-5" />
             </div>
           </CardContent>
@@ -986,23 +1085,18 @@ function BannersPage() {
                       onClick={() => setViewingDetailBanner(banner)}
                     >
                       <span>{banner.id}</span>
-                      {banner.isActive ? (
-                        <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" title="Active on App" />
-                      ) : (
-                        <span className="inline-block h-2 w-2 rounded-full bg-slate-400" title="Paused" />
-                      )}
                     </div>
                     <div className="text-[11px] text-muted-foreground font-mono mt-0.5 truncate max-w-[220px]" title={`/banners/${banner.bannerType}/items/${banner.id}`}>
                       /banners/{banner.bannerType}/items/{banner.id}
                     </div>
                   </div>
 
-                  {/* Active Switch Toggle */}
+                  {/* Visibility Switch Toggle */}
                   <div className="flex items-center gap-2">
                     <Switch
                       checked={banner.isActive}
                       onCheckedChange={() => handleToggle(banner)}
-                      title={banner.isActive ? "Pause this banner" : "Activate this banner"}
+                      title={banner.isActive ? "Hide from carousel" : "Show in carousel"}
                     />
                   </div>
                 </div>
@@ -1011,13 +1105,15 @@ function BannersPage() {
                 <div className="p-2.5 rounded-2xl bg-muted/40 border border-border/50 text-xs space-y-1">
                   <div className="flex items-center justify-between text-muted-foreground text-[11px]">
                     <span className="flex items-center gap-1 font-medium">
-                      <Smartphone className="h-3 w-3 text-primary" /> actionType:
+                      <Smartphone className="h-3 w-3 text-primary" /> Action Type:
                     </span>
-                    <strong className="text-foreground capitalize font-semibold">{banner.actionType || "screen"}</strong>
+                    <strong className="text-foreground capitalize font-semibold">
+                      {getActionTypeLabel(banner.actionType)}
+                    </strong>
                   </div>
                   {banner.actionValue && (
                     <div className="flex items-center justify-between text-muted-foreground text-[11px]">
-                      <span className="font-medium">actionValue:</span>
+                      <span className="font-medium">Target:</span>
                       <strong className="text-primary font-mono truncate max-w-[150px]" title={banner.actionValue}>
                         {banner.actionValue}
                       </strong>
@@ -1095,11 +1191,11 @@ function BannersPage() {
               <TableRow>
                 <TableHead className="w-16">Preview</TableHead>
                 <TableHead>Document ID & Path</TableHead>
-                <TableHead>actionType</TableHead>
-                <TableHead>actionValue</TableHead>
+                <TableHead>Action Type</TableHead>
+                <TableHead>Target Value</TableHead>
                 <TableHead className="text-center">Priority</TableHead>
                 <TableHead>profiles</TableHead>
-                <TableHead className="text-center">Status</TableHead>
+                <TableHead className="text-center">Visibility</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -1130,8 +1226,8 @@ function BannersPage() {
                   </TableCell>
 
                   <TableCell>
-                    <span className="px-2 py-0.5 rounded-lg bg-muted text-[11px] font-mono font-medium">
-                      {banner.actionType || "screen"}
+                    <span className="px-2.5 py-1 rounded-xl bg-primary/10 text-primary text-[11px] font-semibold inline-flex items-center gap-1.5">
+                      {getActionTypeLabel(banner.actionType)}
                     </span>
                   </TableCell>
 
@@ -1204,122 +1300,102 @@ function BannersPage() {
 
       {/* FULL BANNER DETAIL MODAL */}
       <Dialog open={!!viewingDetailBanner} onOpenChange={(open) => !open && setViewingDetailBanner(null)}>
-        <DialogContent className="max-w-2xl p-6 rounded-3xl max-h-[92vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="text-lg font-bold flex items-center justify-between flex-wrap gap-2">
-              <div className="flex items-center gap-2">
-                <div className="h-8 w-8 rounded-xl bg-primary/15 text-primary grid place-items-center">
-                  <Smartphone className="h-4 w-4" />
-                </div>
-                <span>Banner Details: {viewingDetailBanner?.id}</span>
+        <DialogContent className="w-[96vw] max-w-2xl p-5 sm:p-6 rounded-3xl max-h-[92vh] overflow-y-auto">
+          <DialogHeader className="space-y-1">
+            <DialogTitle className="text-base sm:text-lg font-bold flex items-center gap-2">
+              <div className="h-8 w-8 rounded-xl bg-primary/15 text-primary grid place-items-center shrink-0">
+                <ImageIcon className="h-4 w-4" />
               </div>
-              <span
-                className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
-                  viewingDetailBanner?.isActive
-                    ? "bg-emerald-500/15 text-emerald-600 border border-emerald-500/30"
-                    : "bg-muted text-muted-foreground border border-border"
-                }`}
-              >
-                {viewingDetailBanner?.isActive ? "Active / Published" : "Paused / Draft"}
-              </span>
+              <span className="truncate">Banner Details: {viewingDetailBanner?.id}</span>
             </DialogTitle>
-            <DialogDescription className="text-xs font-mono text-primary">
+            <DialogDescription className="text-xs font-mono text-muted-foreground truncate">
               /banners/{viewingDetailBanner?.bannerType}/items/{viewingDetailBanner?.id}
             </DialogDescription>
           </DialogHeader>
 
           {viewingDetailBanner && (
-            <div className="space-y-5 pt-2">
+            <div className="space-y-4 pt-1">
               {/* High Quality Banner Image View */}
               <div
-                className="relative h-56 w-full rounded-2xl overflow-hidden border bg-muted cursor-pointer shadow-sm group"
+                className="relative h-48 sm:h-56 w-full rounded-2xl overflow-hidden border bg-muted/40 cursor-pointer shadow-xs group flex items-center justify-center p-2"
                 onClick={() => setZoomImage({ url: viewingDetailBanner.imageUrl, title: viewingDetailBanner.id })}
               >
                 <img
                   src={formatImageUrl(viewingDetailBanner.imageUrl)}
                   alt={viewingDetailBanner.id}
-                  className="h-full w-full object-contain bg-black/90"
+                  className="max-h-full max-w-full object-contain rounded-xl shadow-xs"
                 />
-                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white gap-1.5 text-xs font-semibold">
+                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white gap-1.5 text-xs font-semibold rounded-2xl">
                   <Maximize2 className="h-4 w-4" /> Click to View Full Size
                 </div>
               </div>
 
-              {/* Exact Field Specifications Grid */}
-              <div className="grid sm:grid-cols-2 gap-3">
-                <div className="p-3.5 rounded-2xl border bg-muted/20 space-y-1.5">
+              {/* Specifications Info Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="p-3 rounded-2xl border bg-muted/20 space-y-1">
                   <div className="text-[11px] text-muted-foreground font-semibold uppercase tracking-wider">
-                    actionType (string)
+                    Action Type
                   </div>
-                  <div className="text-sm font-bold text-foreground capitalize flex items-center gap-1.5">
-                    <Smartphone className="h-4 w-4 text-primary" />
-                    <span>"{viewingDetailBanner.actionType}"</span>
+                  <div className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                    <Smartphone className="h-3.5 w-3.5 text-primary shrink-0" />
+                    <span className="truncate">{getActionTypeLabel(viewingDetailBanner.actionType)}</span>
                   </div>
                 </div>
 
-                <div className="p-3.5 rounded-2xl border bg-muted/20 space-y-1.5">
+                <div className="p-3 rounded-2xl border bg-muted/20 space-y-1 sm:col-span-2">
                   <div className="text-[11px] text-muted-foreground font-semibold uppercase tracking-wider">
-                    actionValue (string)
+                    Target Destination
                   </div>
-                  <div className="text-sm font-bold font-mono text-primary truncate" title={viewingDetailBanner.actionValue}>
-                    "{viewingDetailBanner.actionValue || "—"}"
-                  </div>
-                </div>
-
-                <div className="p-3.5 rounded-2xl border bg-muted/20 space-y-1.5">
-                  <div className="text-[11px] text-muted-foreground font-semibold uppercase tracking-wider">
-                    priority (int64)
-                  </div>
-                  <div className="text-sm font-bold font-mono text-foreground">
-                    {viewingDetailBanner.priority}
-                  </div>
-                </div>
-
-                <div className="p-3.5 rounded-2xl border bg-muted/20 space-y-1.5">
-                  <div className="text-[11px] text-muted-foreground font-semibold uppercase tracking-wider">
-                    isActive (boolean)
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-bold font-mono text-foreground">
-                      {String(viewingDetailBanner.isActive)}
-                    </span>
-                    <Switch
-                      checked={viewingDetailBanner.isActive}
-                      onCheckedChange={() => handleToggle(viewingDetailBanner)}
-                    />
+                  <div className="text-xs font-bold font-mono text-primary truncate" title={viewingDetailBanner.actionValue}>
+                    {viewingDetailBanner.actionValue || "—"}
                   </div>
                 </div>
               </div>
 
-              {/* Profiles Array */}
-              <div className="p-3.5 rounded-2xl border bg-muted/20 space-y-2">
-                <div className="text-[11px] text-muted-foreground font-semibold uppercase tracking-wider">
-                  profiles (array of string roles)
+              {/* Priority & Audience Roles */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="p-3 rounded-2xl border bg-muted/20 space-y-1">
+                  <div className="text-[11px] text-muted-foreground font-semibold uppercase tracking-wider">
+                    Display Priority
+                  </div>
+                  <div className="text-xs font-bold font-mono text-foreground flex items-center gap-1">
+                    <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary">
+                      #{viewingDetailBanner.priority}
+                    </span>
+                    <span className="text-[11px] text-muted-foreground font-normal">in carousel</span>
+                  </div>
                 </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {Array.isArray(viewingDetailBanner.profiles) && viewingDetailBanner.profiles.length > 0 ? (
-                    viewingDetailBanner.profiles.map((p, idx) => (
-                      <span
-                        key={idx}
-                        className="px-3 py-1 rounded-xl bg-background border text-xs font-semibold font-mono text-foreground flex items-center gap-1.5 shadow-xs"
-                      >
-                        <span className="text-primary font-bold">[{idx}]</span> "{p}"
-                      </span>
-                    ))
-                  ) : (
-                    <span className="text-xs text-muted-foreground">All profiles</span>
-                  )}
+
+                <div className="p-3 rounded-2xl border bg-muted/20 space-y-1 sm:col-span-2">
+                  <div className="text-[11px] text-muted-foreground font-semibold uppercase tracking-wider">
+                    Target Profiles
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 pt-0.5">
+                    {Array.isArray(viewingDetailBanner.profiles) && viewingDetailBanner.profiles.length > 0 ? (
+                      viewingDetailBanner.profiles.map((p, idx) => (
+                        <span
+                          key={idx}
+                          className="px-2.5 py-0.5 rounded-lg bg-background border text-[11px] font-semibold text-foreground flex items-center gap-1 shadow-xs"
+                        >
+                          <Users className="h-3 w-3 text-primary" />
+                          <span className="capitalize">{p}</span>
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-xs text-muted-foreground">All profiles</span>
+                    )}
+                  </div>
                 </div>
               </div>
 
               {/* Image URL with Copy */}
-              <div className="p-3.5 rounded-2xl border bg-muted/20 space-y-1.5">
+              <div className="p-3 rounded-2xl border bg-muted/20 space-y-1.5">
                 <div className="text-[11px] text-muted-foreground font-semibold uppercase tracking-wider flex items-center justify-between">
-                  <span>imageUrl (Firebase Storage)</span>
+                  <span>Banner Image URL</span>
                   <Button
                     size="sm"
                     variant="ghost"
-                    className="h-6 px-2 text-[11px] gap-1 rounded-lg"
+                    className="h-6 px-2 text-[11px] gap-1 rounded-lg text-primary hover:text-primary"
                     onClick={() => {
                       navigator.clipboard.writeText(viewingDetailBanner.imageUrl);
                       toast.success("Image URL copied to clipboard!");
@@ -1334,7 +1410,7 @@ function BannersPage() {
               </div>
 
               {/* Action Buttons */}
-              <DialogFooter className="pt-2 flex items-center justify-between sm:justify-between gap-2 border-t">
+              <DialogFooter className="pt-3 flex flex-row items-center justify-between gap-2 border-t">
                 <Button
                   type="button"
                   variant="destructive"
@@ -1374,314 +1450,621 @@ function BannersPage() {
 
       {/* CREATE & EDIT BANNER MODAL */}
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
-        <DialogContent className="max-w-2xl p-6 rounded-3xl max-h-[92vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="text-lg font-bold flex items-center gap-2">
-              <div className="h-8 w-8 rounded-xl bg-primary/15 text-primary grid place-items-center">
-                <ImageIcon className="h-4 w-4" />
+        <DialogContent className="w-[96vw] max-w-3xl max-h-[92vh] p-0 rounded-3xl overflow-hidden flex flex-col bg-background border border-border/70 shadow-2xl">
+          {/* Modal Header */}
+          <div className="px-5 sm:px-6 py-4 border-b border-border/60 bg-muted/20 flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-3 min-w-0">
+              <div
+                className={`h-10 w-10 rounded-2xl grid place-items-center shadow-xs shrink-0 ${
+                  formBannerType === "offer_banners"
+                    ? "bg-amber-500/15 text-amber-600"
+                    : "bg-primary/15 text-primary"
+                }`}
+              >
+                {formBannerType === "offer_banners" ? (
+                  <Tag className="h-5 w-5" />
+                ) : (
+                  <ImageIcon className="h-5 w-5" />
+                )}
               </div>
-              <span>{editingBanner ? `Edit Banner: ${docId}` : "Create New App Banner"}</span>
-            </DialogTitle>
-            <DialogDescription className="text-xs">
-              Upload banner image to Firebase Storage and configure target navigation screens, priority, and target profiles.
-            </DialogDescription>
-          </DialogHeader>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-base sm:text-lg font-bold text-foreground truncate">
+                    {editingBanner ? `Edit Banner: ${docId}` : "Create New App Banner"}
+                  </h2>
+                  <Badge
+                    variant="outline"
+                    className={`text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full shrink-0 ${
+                      formBannerType === "offer_banners"
+                        ? "border-amber-500/30 text-amber-700 bg-amber-500/10 dark:text-amber-300"
+                        : "border-primary/30 text-primary bg-primary/10"
+                    }`}
+                  >
+                    {formBannerType === "offer_banners" ? "Offer Banner" : "Ads Banner"}
+                  </Badge>
+                </div>
+                <p className="text-xs text-muted-foreground truncate">
+                  {formBannerType === "offer_banners"
+                    ? "Marketplace product deal banner linking to a specific item"
+                    : "Main app carousel banner for promotions, screens, or links"}
+                </p>
+              </div>
+            </div>
+          </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4 pt-2">
-            {/* Banner Category Selector */}
-            <div className="grid sm:grid-cols-2 gap-4">
+          {/* Modal Scrollable Form Body */}
+          <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5">
+            {/* 1. Category & Document ID */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-muted/20 p-4 rounded-2xl border border-border/60">
               <div className="space-y-1.5">
-                <Label className="text-xs font-semibold">Banner Section / Category</Label>
+                <Label className="text-xs font-semibold text-foreground flex items-center justify-between">
+                  <span>Banner Category</span>
+                  {editingBanner && (
+                    <span className="text-[10px] text-muted-foreground font-normal">(Locked on edit)</span>
+                  )}
+                </Label>
                 <Select
                   value={formBannerType}
-                  onValueChange={(val: BannerType) => setFormBannerType(val)}
+                  onValueChange={(val: BannerType) => {
+                    setFormBannerType(val);
+                    if (val === "offer_banners") {
+                      setActionType("product");
+                      if (!actionValue || actionValue === "cattleMarketplace") {
+                        setActionValue(marketplaceProducts[0]?.sku || marketplaceProducts[0]?.id || "VDD1-101-C01-500M");
+                      }
+                    } else if (actionType === "product") {
+                      setActionType("screen");
+                      setActionValue("cattleMarketplace");
+                    }
+                  }}
                   disabled={!!editingBanner}
                 >
-                  <SelectTrigger className="h-10 text-xs rounded-xl">
+                  <SelectTrigger className="h-10 text-xs rounded-xl bg-background border-border">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent className="rounded-xl">
-                    <SelectItem value="ads_banners">Ads Banners (/banners/ads_banners/items)</SelectItem>
-                    <SelectItem value="offer_banners">Offer Banners (/banners/offer_banners/items)</SelectItem>
+                    <SelectItem value="ads_banners">
+                      <div className="flex items-center gap-2">
+                        <ImageIcon className="h-3.5 w-3.5 text-primary" />
+                        <span>Ads Banners (/banners/ads_banners/items)</span>
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="offer_banners">
+                      <div className="flex items-center gap-2">
+                        <Tag className="h-3.5 w-3.5 text-amber-600" />
+                        <span>Offer Banners (/banners/offer_banners/items)</span>
+                      </div>
+                    </SelectItem>
                   </SelectContent>
                 </Select>
+                <div className="text-[11px] text-muted-foreground">
+                  {formBannerType === "offer_banners"
+                    ? "Directs users to specific marketplace discounts"
+                    : "Displayed in the main app banner carousel"}
+                </div>
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-xs font-semibold">Document ID (Firebase Key)</Label>
+                <Label className="text-xs font-semibold text-foreground flex items-center justify-between">
+                  <span>Banner Document ID</span>
+                  <span className="text-[10px] font-mono text-muted-foreground">Key</span>
+                </Label>
                 <Input
                   value={docId}
                   onChange={(e) => setDocId(e.target.value)}
-                  placeholder="e.g. banner1, banner2"
+                  placeholder="e.g. banner1, banner-festive"
                   disabled={!!editingBanner}
-                  className="h-10 text-xs font-mono rounded-xl"
+                  className="h-10 text-xs font-mono rounded-xl bg-background border-border"
                   required
                 />
-              </div>
-            </div>
-
-            {/* Direct Image File Upload Card */}
-            <div className="space-y-2">
-              <Label className="text-xs font-semibold flex items-center justify-between">
-                <span>Banner Image Upload (Firebase Storage)</span>
-                {uploadingImage && (
-                  <span className="text-[11px] text-primary flex items-center gap-1">
-                    <RefreshCw className="h-3 w-3 animate-spin" /> Uploading to Storage...
-                  </span>
-                )}
-              </Label>
-
-              <div
-                className="border-2 border-dashed border-border/80 hover:border-primary/60 transition-colors rounded-2xl p-4 bg-muted/20 text-center cursor-pointer relative overflow-hidden group"
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  onChange={handleFileUpload}
-                  className="hidden"
-                />
-
-                {imagePreview || imageUrl ? (
-                  <div className="relative h-36 w-full rounded-xl overflow-hidden bg-black/10 flex items-center justify-center">
-                    <img
-                      src={imagePreview || formatImageUrl(imageUrl)}
-                      alt="Banner Preview"
-                      className="max-h-full max-w-full object-contain rounded-lg"
-                    />
-                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white gap-1.5 text-xs font-semibold">
-                      <Upload className="h-4 w-4" /> Click to Change Image File
-                    </div>
-                  </div>
-                ) : (
-                  <div className="py-4 space-y-2">
-                    <div className="h-10 w-10 rounded-2xl bg-primary/10 text-primary grid place-items-center mx-auto">
-                      <Upload className="h-5 w-5" />
-                    </div>
-                    <div className="text-xs font-semibold text-foreground">Click to upload banner image file</div>
-                    <div className="text-[11px] text-muted-foreground">PNG, JPG, WebP (Automatically saved to Firebase Storage)</div>
-                  </div>
-                )}
-              </div>
-
-              {/* Direct Image URL input (Optional if file is uploaded) */}
-              <div className="space-y-1 pt-1">
-                <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                  <span>Image URL (or upload image file above):</span>
-                  {imageUrl ? (
-                    <span className="text-emerald-600 font-semibold flex items-center gap-1">
-                      <CheckCircle2 className="h-3 w-3" /> Image Ready
-                    </span>
-                  ) : imagePreview ? (
-                    <span className="text-amber-600 font-medium flex items-center gap-1">
-                      <Sparkles className="h-3 w-3" /> Image File Attached (Auto-uploading)
-                    </span>
-                  ) : null}
+                <div className="text-[11px] text-muted-foreground">
+                  Unique identifier in Firestore database collection
                 </div>
-                <Input
-                  value={imageUrl}
-                  onChange={(e) => {
-                    setImageUrl(e.target.value);
-                    setImagePreview(e.target.value);
-                  }}
-                  placeholder="Upload image above or paste https://firebasestorage... URL here"
-                  className="h-9 text-xs font-mono rounded-xl bg-background/60"
-                />
               </div>
             </div>
 
-            {/* Action Type & Target Value */}
-            <div className="grid sm:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label className="text-xs font-semibold">
-                  actionType (string)
-                  {formBannerType === "offer_banners" && (
-                    <span className="ml-1 text-[10px] text-amber-600 font-semibold font-mono">(offer: "product")</span>
-                  )}
-                </Label>
-                <Select value={actionType} onValueChange={setActionType}>
-                  <SelectTrigger className="h-10 text-xs rounded-xl">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="rounded-xl">
-                    {ACTION_TYPE_OPTIONS.map((opt) => {
-                      const Icon = opt.icon;
-                      return (
-                        <SelectItem key={opt.value} value={opt.value}>
-                          <div className="flex items-center gap-2">
-                            <Icon className="h-3.5 w-3.5 text-primary" />
-                            <span>{opt.label}</span>
-                          </div>
-                        </SelectItem>
-                      );
-                    })}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-xs font-semibold">
-                  {formBannerType === "offer_banners" ? "actionValue (Product SKU / Product ID)" : "actionValue (Target Screen / URL)"}
-                </Label>
-                <Input
-                  value={actionValue}
-                  onChange={(e) => setActionValue(e.target.value)}
-                  placeholder={formBannerType === "offer_banners" ? "e.g. VDD1-101-C01-500M" : "e.g. cattleMarketplace, openPashu, cattle"}
-                  className="h-10 text-xs font-mono rounded-xl"
-                  required
-                />
-              </div>
-            </div>
-
-            {/* Searchable Product Selector for Offer Banners & Product Actions */}
-            {(formBannerType === "offer_banners" || actionType === "product") ? (
-              <div className="space-y-2 bg-amber-500/5 p-3 rounded-2xl border border-amber-500/20">
-                <div className="flex items-center justify-between">
+            {/* 2. Banner Artwork & Media Upload */}
+            <div className="bg-muted/20 p-4 rounded-2xl border border-border/60 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
                   <Label className="text-xs font-bold text-foreground flex items-center gap-1.5">
-                    <Package className="h-4 w-4 text-amber-600" />
-                    <span>Search & Select Marketplace Product</span>
+                    <ImageIcon className="h-4 w-4 text-primary" />
+                    <span>Banner Artwork</span>
                   </Label>
-                  <span className="text-[10px] font-semibold text-amber-700 dark:text-amber-400">
-                    {marketplaceProducts.length} available
-                  </span>
+                  <p className="text-[11px] text-muted-foreground">
+                    Upload image file to Firebase Storage or enter image URL
+                  </p>
                 </div>
+                <div className="flex items-center rounded-xl bg-background border p-0.5 text-xs font-medium">
+                  <button
+                    type="button"
+                    onClick={() => setImageTab("upload")}
+                    className={`px-3 py-1 rounded-lg transition-all ${
+                      imageTab === "upload"
+                        ? "bg-primary text-primary-foreground shadow-xs"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    Upload File
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setImageTab("url")}
+                    className={`px-3 py-1 rounded-lg transition-all ${
+                      imageTab === "url"
+                        ? "bg-primary text-primary-foreground shadow-xs"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    Image URL
+                  </button>
+                </div>
+              </div>
 
-                {/* Product Search Input */}
-                <div className="relative">
-                  <Search className="h-3.5 w-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    placeholder="Search product by title, SKU (e.g. VDD1), category..."
-                    value={productSearch}
-                    onChange={(e) => setProductSearch(e.target.value)}
-                    className="h-8 pl-8 text-xs rounded-xl bg-background"
+              {imageTab === "upload" ? (
+                <div>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleFileUpload}
+                    className="hidden"
                   />
-                </div>
-
-                {/* Filtered Product Selection Cards */}
-                <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1 divide-y divide-border/20 rounded-xl border bg-background/60 p-1.5">
-                  {filteredProducts.length === 0 ? (
-                    <div className="p-3 text-center text-xs text-muted-foreground">
-                      No matching products found. You can type the SKU directly above.
+                  {imagePreview || imageUrl ? (
+                    <div className="relative rounded-2xl overflow-hidden border border-border/80 bg-black/10 group">
+                      <div className="w-full h-44 sm:h-48 flex items-center justify-center p-2 bg-muted/40">
+                        <img
+                          src={imagePreview || formatImageUrl(imageUrl)}
+                          alt="Banner Preview"
+                          className="max-h-full max-w-full object-contain rounded-xl shadow-xs"
+                        />
+                      </div>
+                      <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => fileInputRef.current?.click()}
+                          className="rounded-xl text-xs gap-1.5 bg-white/90 text-black hover:bg-white"
+                        >
+                          <Upload className="h-3.5 w-3.5" /> Replace Image
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="destructive"
+                          onClick={() => {
+                            setSelectedFile(null);
+                            setImagePreview("");
+                            setImageUrl("");
+                          }}
+                          className="rounded-xl text-xs gap-1.5"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" /> Remove
+                        </Button>
+                      </div>
+                      <div className="p-2.5 bg-background/95 border-t flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-1.5 text-emerald-600 font-medium text-[11px]">
+                          {uploadingImage ? (
+                            <>
+                              <RefreshCw className="h-3.5 w-3.5 animate-spin text-primary" />
+                              <span className="text-primary font-semibold">Uploading to Firebase Storage...</span>
+                            </>
+                          ) : (
+                            <>
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                              <span>Banner image attached and ready</span>
+                            </>
+                          )}
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => fileInputRef.current?.click()}
+                          className="h-6 text-[11px] px-2 text-primary hover:text-primary"
+                        >
+                          Change File
+                        </Button>
+                      </div>
                     </div>
                   ) : (
-                    filteredProducts.map((prod: any) => {
-                      const sku = prod.sku || prod.productCode || prod.id || "";
-                      const isSelected = actionValue === sku || actionValue === prod.id;
-                      const img = prod.images?.[0] || prod.imageUrl || prod.image || null;
-                      const name = getLocalizedText(prod.name || prod.title || "Product");
-                      const price = prod.sellingPrice || prod.price || null;
-
-                      return (
-                        <div
-                          key={prod.id}
-                          onClick={() => {
-                            setActionType("product");
-                            setActionValue(sku);
-                          }}
-                          className={`p-2 rounded-xl flex items-center justify-between gap-3 cursor-pointer transition-all ${
-                            isSelected
-                              ? "bg-amber-500/20 border border-amber-500/40 text-foreground font-semibold"
-                              : "hover:bg-muted/40 text-foreground"
-                          }`}
-                        >
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            {img ? (
-                              <img
-                                src={formatImageUrl(img)}
-                                alt={name}
-                                className="h-9 w-9 rounded-lg object-cover border shrink-0 bg-muted"
-                              />
-                            ) : (
-                              <div className="h-9 w-9 rounded-lg bg-amber-500/10 text-amber-600 flex items-center justify-center font-bold text-xs shrink-0">
-                                📦
-                              </div>
-                            )}
-                            <div className="min-w-0">
-                              <div className="text-xs font-semibold truncate flex items-center gap-1.5">
-                                <span>{name}</span>
-                                {price && <span className="text-[11px] text-emerald-600 font-bold">₹{price}</span>}
-                              </div>
-                              <div className="text-[10px] text-muted-foreground font-mono truncate">
-                                SKU: <span className="text-foreground font-semibold">{sku}</span>
-                                {prod.category && <span> • {getLocalizedText(prod.category)}</span>}
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="shrink-0">
-                            {isSelected ? (
-                              <span className="px-2 py-0.5 rounded-full text-[10px] bg-amber-500 text-white font-semibold flex items-center gap-1">
-                                <Check className="h-3 w-3" /> Selected
-                              </span>
-                            ) : (
-                              <Button size="sm" variant="ghost" className="h-7 px-2 text-[11px] rounded-lg">
-                                Select
-                              </Button>
-                            )}
-                          </div>
+                    <div
+                      onClick={() => fileInputRef.current?.click()}
+                      className="border-2 border-dashed border-border/90 hover:border-primary/70 transition-all rounded-2xl p-6 bg-background/50 hover:bg-background text-center cursor-pointer group space-y-2"
+                    >
+                      <div className="h-12 w-12 rounded-2xl bg-primary/10 text-primary grid place-items-center mx-auto group-hover:scale-105 transition-transform">
+                        <Upload className="h-6 w-6" />
+                      </div>
+                      <div>
+                        <div className="text-xs sm:text-sm font-semibold text-foreground">
+                          Click to browse banner image file
                         </div>
-                      );
-                    })
+                        <div className="text-[11px] text-muted-foreground mt-0.5">
+                          PNG, JPG, WebP supported. File is auto-compressed and uploaded to Firebase Storage.
+                        </div>
+                      </div>
+                    </div>
                   )}
                 </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="relative">
+                    <LinkIcon className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      value={imageUrl}
+                      onChange={(e) => {
+                        setImageUrl(e.target.value);
+                        setImagePreview(e.target.value);
+                      }}
+                      placeholder="Paste https://firebasestorage.googleapis.com/... or CDN image URL"
+                      className="h-10 pl-9 text-xs font-mono rounded-xl bg-background border-border"
+                    />
+                  </div>
+                  {(imagePreview || imageUrl) && (
+                    <div className="relative rounded-2xl overflow-hidden border bg-muted/40 h-40 flex items-center justify-center p-2">
+                      <img
+                        src={imagePreview || formatImageUrl(imageUrl)}
+                        alt="Banner Preview"
+                        className="max-h-full max-w-full object-contain rounded-xl"
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* 3. Action Type & Navigation Target */}
+            <div className="bg-muted/20 p-4 rounded-2xl border border-border/60 space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold text-foreground flex items-center justify-between">
+                    <span>Action Type (Tap Behavior)</span>
+                    {formBannerType === "offer_banners" && (
+                      <span className="text-[10px] text-amber-600 font-bold">product required</span>
+                    )}
+                  </Label>
+                  <Select
+                    value={actionType}
+                    onValueChange={(val) => {
+                      setActionType(val);
+                      if (val === "product" && (!actionValue || actionValue === "cattleMarketplace")) {
+                        setActionValue(marketplaceProducts[0]?.sku || marketplaceProducts[0]?.id || "VDD1-101-C01-500M");
+                      } else if (val === "category") {
+                        setActionValue(selectedCategory || "cat_disease_management");
+                      } else if (val === "screen" && (actionValue.startsWith("VDD") || actionValue.includes("COMBO") || actionValue.startsWith("cat_") || actionValue.startsWith("subcat_"))) {
+                        setActionValue("cattleMarketplace");
+                      }
+                    }}
+                    disabled={formBannerType === "offer_banners"}
+                  >
+                    <SelectTrigger className="h-10 text-xs rounded-xl bg-background border-border">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="rounded-xl">
+                      {ACTION_TYPE_OPTIONS.map((opt) => {
+                        const Icon = opt.icon;
+                        return (
+                          <SelectItem key={opt.value} value={opt.value}>
+                            <div className="flex items-center gap-2">
+                              <Icon className="h-3.5 w-3.5 text-primary" />
+                              <span>{opt.label}</span>
+                            </div>
+                          </SelectItem>
+                        );
+                      })}
+                    </SelectContent>
+                  </Select>
+                  <div className="text-[11px] text-muted-foreground">
+                    Action executed when a customer taps this banner
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold text-foreground flex items-center justify-between">
+                    <span>Target Destination Value</span>
+                    <span className="text-[10px] font-mono text-muted-foreground">actionValue</span>
+                  </Label>
+                  <Input
+                    value={actionValue}
+                    onChange={(e) => setActionValue(e.target.value)}
+                    placeholder={
+                      actionType === "product" || formBannerType === "offer_banners"
+                        ? "e.g. VDD1-101-C01-500M"
+                        : "e.g. cattleMarketplace, openPashu"
+                    }
+                    className="h-10 text-xs font-mono rounded-xl bg-background border-border"
+                    required
+                  />
+                  <div className="text-[11px] text-muted-foreground">
+                    {actionType === "product" || formBannerType === "offer_banners"
+                      ? "Product SKU or ID to open directly"
+                      : "Screen route name or URL"}
+                  </div>
+                </div>
               </div>
-            ) : actionType === "screen" ? (
-              <div className="space-y-1 bg-muted/30 p-2.5 rounded-2xl border">
-                <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block">
-                  Quick Screen Shortcuts:
-                </span>
-                <div className="flex flex-wrap gap-1.5 pt-0.5">
-                  {COMMON_SCREEN_SUGGESTIONS.map((sug) => (
+
+              {/* Product Selector for Offer Banners and 'product' actions */}
+              {(formBannerType === "offer_banners" || actionType === "product") && (
+                <div className="space-y-2.5 pt-1">
+                  <div className="flex items-center justify-between text-xs font-bold text-foreground">
+                    <span className="flex items-center gap-1.5">
+                      <Package className="h-4 w-4 text-amber-600" />
+                      <span>Select Target Product from Marketplace</span>
+                    </span>
+                    <Badge variant="outline" className="text-[10px] bg-background">
+                      {filteredProducts.length} items
+                    </Badge>
+                  </div>
+
+                  <div className="relative">
+                    <Search className="h-3.5 w-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      placeholder="Filter product by name, SKU, or category..."
+                      value={productSearch}
+                      onChange={(e) => setProductSearch(e.target.value)}
+                      className="h-9 pl-8 text-xs rounded-xl bg-background"
+                    />
+                  </div>
+
+                  <div className="max-h-44 overflow-y-auto space-y-1 rounded-xl border border-border/60 bg-background/80 p-1.5">
+                    {filteredProducts.length === 0 ? (
+                      <div className="p-3 text-center text-xs text-muted-foreground">
+                        No products found matching your search.
+                      </div>
+                    ) : (
+                      filteredProducts.map((prod: any) => {
+                        const sku = prod.sku || prod.productCode || prod.id || "";
+                        const isSelected = actionValue === sku || actionValue === prod.id;
+                        const img = prod.images?.[0] || prod.imageUrl || prod.image || null;
+                        const name = getLocalizedText(prod.name || prod.title || "Product");
+                        const price = prod.sellingPrice || prod.price || null;
+
+                        return (
+                          <div
+                            key={prod.id}
+                            onClick={() => {
+                              setActionType("product");
+                              setActionValue(sku);
+                            }}
+                            className={`p-2 rounded-xl flex items-center justify-between gap-3 cursor-pointer transition-all ${
+                              isSelected
+                                ? "bg-amber-500/15 border border-amber-500/40 text-foreground font-semibold shadow-xs"
+                                : "hover:bg-muted/50 text-foreground border border-transparent"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              {img ? (
+                                <img
+                                  src={formatImageUrl(img)}
+                                  alt={name}
+                                  className="h-8 w-8 rounded-lg object-cover border shrink-0 bg-muted"
+                                />
+                              ) : (
+                                <div className="h-8 w-8 rounded-lg bg-amber-500/10 text-amber-600 flex items-center justify-center font-bold text-xs shrink-0">
+                                  📦
+                                </div>
+                              )}
+                              <div className="min-w-0">
+                                <div className="text-xs truncate flex items-center gap-1.5">
+                                  <span className="truncate">{name}</span>
+                                  {price && <span className="text-[11px] text-emerald-600 font-bold shrink-0">₹{price}</span>}
+                                </div>
+                                <div className="text-[10px] text-muted-foreground font-mono truncate">
+                                  SKU: <span className="text-foreground font-semibold">{sku}</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="shrink-0">
+                              {isSelected ? (
+                                <Badge className="bg-amber-500 text-white font-semibold text-[10px] px-2 py-0.5 gap-1">
+                                  <Check className="h-3 w-3" /> Selected
+                                </Badge>
+                              ) : (
+                                <span className="text-[11px] text-muted-foreground hover:text-foreground">
+                                  Select
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Screen Shortcuts for 'screen' actions */}
+              {actionType === "screen" && formBannerType !== "offer_banners" && (
+                <div className="space-y-1.5 pt-1">
+                  <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                    Quick Screen Shortcuts:
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {COMMON_SCREEN_SUGGESTIONS.map((sug) => (
+                      <button
+                        key={sug.value}
+                        type="button"
+                        onClick={() => setActionValue(sug.value)}
+                        className={`px-2.5 py-1 rounded-xl text-xs font-mono transition-all border ${
+                          actionValue === sug.value
+                            ? "bg-primary text-primary-foreground border-primary shadow-xs font-semibold"
+                            : "bg-background text-foreground border-border hover:bg-muted"
+                        }`}
+                      >
+                        {sug.value}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Category & Subcategory Selectors for 'category' actions */}
+              {actionType === "category" && formBannerType !== "offer_banners" && (
+                <div className="space-y-3 p-3.5 rounded-2xl bg-primary/5 border border-primary/20">
+                  <div className="text-xs font-bold text-foreground flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <Layers className="h-4 w-4 text-primary" />
+                      <span>Select Target Marketplace Category & Subcategory</span>
+                    </span>
+                    <Badge variant="outline" className="text-[10px] bg-background">
+                      {PRODUCT_CATEGORIES.length} Categories
+                    </Badge>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-semibold">Product Category</Label>
+                      <Select
+                        value={selectedCategory}
+                        onValueChange={(val) => {
+                          setSelectedCategory(val);
+                          setActionValue(val);
+                          const subs = getSubcategoriesForCategory(val);
+                          if (subs.length > 0) {
+                            setSelectedSubCategory(subs[0].id);
+                          }
+                        }}
+                      >
+                        <SelectTrigger className="h-10 text-xs rounded-xl bg-background">
+                          <SelectValue placeholder="Select Category" />
+                        </SelectTrigger>
+                        <SelectContent className="rounded-xl">
+                          {PRODUCT_CATEGORIES.map((c) => (
+                            <SelectItem key={c.id} value={c.id}>
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-semibold">{c.name}</span>
+                                <span className="text-[10px] text-muted-foreground font-mono">({c.id})</span>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-semibold">Subcategory Target (Optional)</Label>
+                      <Select
+                        value={selectedSubCategory}
+                        onValueChange={(val) => {
+                          setSelectedSubCategory(val);
+                          setActionValue(val);
+                        }}
+                      >
+                        <SelectTrigger className="h-10 text-xs rounded-xl bg-background">
+                          <SelectValue placeholder="Select Subcategory" />
+                        </SelectTrigger>
+                        <SelectContent className="rounded-xl">
+                          {getSubcategoriesForCategory(selectedCategory).map((s) => (
+                            <SelectItem key={s.id} value={s.id}>
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-semibold">{s.name}</span>
+                                <span className="text-[10px] text-muted-foreground font-mono">({s.id})</span>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-0.5">
+                    <span>Active Target Value: <code className="font-mono text-primary font-bold">{actionValue}</code></span>
                     <button
-                      key={sug.value}
                       type="button"
-                      onClick={() => setActionValue(sug.value)}
-                      className={`px-2.5 py-1 rounded-xl text-xs font-mono transition-colors border ${
-                        actionValue === sug.value
-                          ? "bg-primary text-primary-foreground border-primary"
-                          : "bg-background text-foreground border-border hover:bg-muted"
-                      }`}
+                      onClick={() => setActionValue(selectedCategory)}
+                      className="text-xs text-primary hover:underline font-semibold"
                     >
-                      {sug.value}
+                      Target Whole Category
                     </button>
-                  ))}
+                  </div>
                 </div>
-              </div>
-            ) : null}
+              )}
+            </div>
 
-            {/* Priority & Status Switch */}
-            <div className="grid sm:grid-cols-2 gap-4 items-center">
+            {/* 4. Display Priority & Active Status */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-muted/20 p-4 rounded-2xl border border-border/60 items-center">
               <div className="space-y-1.5">
-                <Label className="text-xs font-semibold">priority (int64 / Sort Order)</Label>
-                <Input
-                  type="number"
-                  min={1}
-                  max={999}
-                  value={priority}
-                  onChange={(e) => setPriority(parseInt(e.target.value, 10) || 1)}
-                  className="h-10 text-xs rounded-xl font-mono"
-                  required
-                />
-                <div className="text-[10px] text-muted-foreground">e.g. 1 = appears first in app slider</div>
+                <Label className="text-xs font-semibold text-foreground flex items-center justify-between">
+                  <span>Display Priority</span>
+                  <span className="text-[10px] text-muted-foreground font-mono">1 = First</span>
+                </Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    min={1}
+                    max={999}
+                    value={priority}
+                    onChange={(e) => setPriority(parseInt(e.target.value, 10) || 1)}
+                    className="h-10 text-xs rounded-xl font-mono bg-background border-border"
+                    required
+                  />
+                  <div className="flex items-center gap-1 shrink-0">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPriority(Math.max(1, priority - 1))}
+                      className="h-10 w-9 p-0 rounded-xl"
+                    >
+                      -
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPriority(priority + 1)}
+                      className="h-10 w-9 p-0 rounded-xl"
+                    >
+                      +
+                    </Button>
+                  </div>
+                </div>
+                <div className="text-[11px] text-muted-foreground">
+                  Controls slide order in the mobile app carousel
+                </div>
               </div>
 
-              <div className="flex items-center justify-between p-3 rounded-2xl border bg-muted/20">
+              <div
+                onClick={() => setIsActive(!isActive)}
+                className={`flex items-center justify-between p-3 rounded-2xl border cursor-pointer transition-all ${
+                  isActive
+                    ? "bg-primary/10 border-primary/30 text-foreground"
+                    : "bg-background border-border text-muted-foreground"
+                }`}
+              >
                 <div className="space-y-0.5">
-                  <div className="text-xs font-semibold text-foreground">isActive (boolean)</div>
-                  <div className="text-[10px] text-muted-foreground">Toggle to publish (true) or pause (false)</div>
+                  <div className="text-xs font-bold flex items-center gap-1.5">
+                    <span>{isActive ? "Visible in Mobile App" : "Hidden from Mobile App"}</span>
+                  </div>
+                  <div className="text-[11px] opacity-80">
+                    {isActive ? "Slide displays in user carousel" : "Hidden from user carousel"}
+                  </div>
                 </div>
-                <Switch checked={isActive} onCheckedChange={setIsActive} />
+                <Switch
+                  checked={isActive}
+                  onCheckedChange={setIsActive}
+                  onClick={(e) => e.stopPropagation()}
+                />
               </div>
             </div>
 
-            {/* Target Profile Roles Selection (Only for Ads Banners) */}
+            {/* 5. Target Audience Profiles (Ads Banners only) */}
             {formBannerType === "ads_banners" ? (
-              <div className="space-y-2 pt-1">
-                <Label className="text-xs font-semibold flex items-center gap-1.5">
-                  <Users className="h-3.5 w-3.5 text-primary" /> profiles (array of user roles)
-                </Label>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <div className="bg-muted/20 p-4 rounded-2xl border border-border/60 space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                    <Users className="h-4 w-4 text-primary" />
+                    <span>Target Audience Profiles</span>
+                  </Label>
+                  <span className="text-[11px] text-muted-foreground">
+                    {selectedProfiles.length === TARGET_PROFILES.length
+                      ? "All Users"
+                      : `${selectedProfiles.length} roles selected`}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
                   {TARGET_PROFILES.map((tp) => {
                     const isChecked = selectedProfiles.includes(tp.id);
                     return (
@@ -1697,38 +2080,58 @@ function BannersPage() {
                         className={`p-2.5 rounded-2xl border text-xs font-semibold flex items-center justify-between cursor-pointer transition-all ${
                           isChecked
                             ? `${tp.color} border-current shadow-xs`
-                            : "bg-muted/30 text-muted-foreground border-border hover:bg-muted/60"
+                            : "bg-background text-muted-foreground border-border hover:bg-muted/60"
                         }`}
                       >
-                        <span>"{tp.id}"</span>
-                        {isChecked ? <Check className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5 opacity-40" />}
+                        <span className="truncate">{tp.label}</span>
+                        {isChecked ? (
+                          <Check className="h-3.5 w-3.5 shrink-0" />
+                        ) : (
+                          <Plus className="h-3.5 w-3.5 opacity-40 shrink-0" />
+                        )}
                       </div>
                     );
                   })}
                 </div>
               </div>
-            ) : (
-              <div className="p-3 rounded-2xl bg-muted/20 border text-xs text-muted-foreground flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-amber-500 shrink-0" />
-                <span>
-                  Offer banners target all marketplace shoppers with <strong>actionType: "product"</strong> and <strong>actionValue: "{actionValue || "product-sku"}"</strong>.
-                </span>
-              </div>
-            )}
+            ) : null}
 
-            {/* Firestore Path Hint */}
-            <div className="p-3 rounded-2xl bg-muted/40 border text-[11px] text-muted-foreground font-mono">
-              Target Firestore Path: <strong className="text-primary">/banners/{formBannerType}/items/{docId || "new_id"}</strong>
+            {/* Path Hint */}
+            <div className="px-3 py-2 rounded-xl bg-muted/40 border border-border/50 text-[11px] text-muted-foreground font-mono flex items-center justify-between">
+              <span>Target Firestore Path:</span>
+              <span className="text-primary font-semibold truncate ml-2">
+                /banners/{formBannerType}/items/{docId || "new_id"}
+              </span>
             </div>
 
-            <DialogFooter className="pt-3 gap-2">
-              <Button type="button" variant="outline" onClick={() => setIsModalOpen(false)} className="rounded-xl text-xs">
+            {/* Modal Sticky Footer */}
+            <div className="pt-3 border-t border-border/60 flex flex-col-reverse sm:flex-row items-center justify-end gap-2.5">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsModalOpen(false)}
+                className="w-full sm:w-auto rounded-xl text-xs h-10 px-5"
+              >
                 Cancel
               </Button>
-              <Button type="submit" disabled={uploadingImage} className="rounded-xl text-xs gap-1.5">
-                <Check className="h-4 w-4" /> {editingBanner ? "Save Changes" : "Create Banner"}
+              <Button
+                type="submit"
+                disabled={uploadingImage || submitting}
+                className="w-full sm:w-auto rounded-xl text-xs h-10 px-6 gap-1.5 font-bold"
+              >
+                {submitting || uploadingImage ? (
+                  <>
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                    <span>Saving Banner...</span>
+                  </>
+                ) : (
+                  <>
+                    <Check className="h-4 w-4" />
+                    <span>{editingBanner ? "Save Changes" : "Create Banner"}</span>
+                  </>
+                )}
               </Button>
-            </DialogFooter>
+            </div>
           </form>
         </DialogContent>
       </Dialog>

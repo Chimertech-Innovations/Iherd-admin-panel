@@ -614,7 +614,7 @@ function CattleDetailsPage() {
           "village",
           "farmName",
         ]}
-        filters={["Insured", "High Yield (>12L)", "Active"]}
+        filters={["Insured", "High Yield (>12L)"]}
         statusKey="statusFilter"
         isLoading={isLoading}
         kpis={[
@@ -757,11 +757,6 @@ function CattleDetailsPage() {
                 </div>
               </div>
             ),
-          },
-          {
-            key: "status",
-            label: "Status",
-            render: (r) => <StatusBadge status={r.status || "Active"} />,
           },
           {
             key: "actions",
@@ -949,10 +944,12 @@ function CattleDetailsPage() {
                       {selectedCattleDetail.price > 0 ? `₹${Number(selectedCattleDetail.price).toLocaleString()}` : "Market Listed"}
                     </strong>
                   </div>
-                  <div>
-                    <span className="text-muted-foreground block text-[11px]">Registry Status:</span>
-                    <strong className="text-foreground">{selectedCattleDetail.status || "Active"}</strong>
-                  </div>
+                  {selectedCattleDetail.status && selectedCattleDetail.status.toLowerCase() !== "active" && (
+                    <div>
+                      <span className="text-muted-foreground block text-[11px]">Registry Status:</span>
+                      <strong className="text-foreground">{selectedCattleDetail.status}</strong>
+                    </div>
+                  )}
                   <div>
                     <span className="text-muted-foreground block text-[11px]">Registration Date:</span>
                     <strong className="text-foreground">{formatDate(selectedCattleDetail.createdAt)}</strong>

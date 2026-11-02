@@ -66,10 +66,31 @@ import {
   Download,
   X,
   MapPin,
+  Upload,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAdminProducts, useFirebaseCollection, useBestSellers } from "@/hooks/useFirebaseData";
 import { getLocalizedText, formatImageUrl } from "@/lib/utils";
+import { getApiBaseUrlSync } from "@/lib/apiClient";
+
+function convertToDirectImageUrl(raw: string): string {
+  if (!raw) return "";
+  const trimmed = raw.trim();
+  const driveMatch =
+    trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) ||
+    trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/) ||
+    trimmed.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  if (driveMatch && driveMatch[1]) {
+    return `https://lh3.googleusercontent.com/d/${driveMatch[1]}=s800`;
+  }
+  return trimmed;
+}
+import {
+  PRODUCT_CATEGORIES,
+  getSubcategoriesForCategory,
+  getCategoryName,
+  getSubcategoryName,
+} from "@/lib/categories";
 
 const INDIAN_STATES = [
   { name: "Andhra Pradesh", code: "AP" },
@@ -295,6 +316,129 @@ function ProductsMarketplacePage() {
   const [stateSearchQuery, setStateSearchQuery] = useState("");
 
   const [status, setStatus] = useState("Approved");
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+
+  // Field Validation Errors State (Highlights empty fields in red and shows alerts)
+  const [fieldErrors, setFieldErrors] = useState<Record<string, boolean>>({});
+
+  const clearFieldError = (f: string) => {
+    setFieldErrors((prev) => {
+      if (!prev[f]) return prev;
+      const next = { ...prev };
+      delete next[f];
+      return next;
+    });
+  };
+
+  // Quick Price Edit Dialog State
+  const [quickPriceOpen, setQuickPriceOpen] = useState(false);
+  const [quickProduct, setQuickProduct] = useState<any | null>(null);
+  const [quickPriceVal, setQuickPriceVal] = useState("");
+  const [quickMrpVal, setQuickMrpVal] = useState("");
+  const [isUpdatingPrice, setIsUpdatingPrice] = useState(false);
+
+  // Image File Upload handler - Uploads to Firebase Storage via backend service account
+  // Supports uploading one or multiple images simultaneously
+  const handleImageFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setIsUploadingImage(true);
+    let successCount = 0;
+    const newUrls: string[] = [];
+
+    try {
+      const base = getApiBaseUrlSync();
+
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        if (!file.type.startsWith("image/")) continue;
+
+        const reader = new FileReader();
+        const base64Promise = new Promise<string>((resolve, reject) => {
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+        const base64 = await base64Promise;
+
+        const res = await fetch(`${base}/api/admin/upload-image`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            base64,
+            filename: file.name,
+            contentType: file.type || "image/jpeg",
+            folder: "marketplace/products",
+          }),
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.url) {
+            newUrls.push(data.url);
+            successCount++;
+          }
+        }
+      }
+
+      if (newUrls.length > 0) {
+        if (!thumbnailUrl.trim()) {
+          setThumbnailUrl(newUrls[0]);
+          if (newUrls.length > 1) {
+            const extra = newUrls.slice(1).join("\n");
+            setImageUrlsText((prev) => (prev ? `${prev}\n${extra}` : extra));
+          }
+        } else {
+          const extra = newUrls.join("\n");
+          setImageUrlsText((prev) => (prev ? `${prev}\n${extra}` : extra));
+        }
+        clearFieldError("images");
+        toast.success(`Successfully uploaded ${successCount} product image(s) to Firebase Storage!`);
+      } else {
+        toast.error("Failed to upload image(s). Please verify the server connection.");
+      }
+    } catch (err: any) {
+      console.error("Upload error:", err);
+      toast.error("Upload failed: " + (err.message || "Unknown error"));
+    } finally {
+      setIsUploadingImage(false);
+      e.target.value = "";
+    }
+  };
+
+  const openQuickPriceDialog = (p: any) => {
+    setQuickProduct(p);
+    setQuickPriceVal(String(p.price || 0));
+    setQuickMrpVal(String(p.mrp || p.price || 0));
+    setQuickPriceOpen(true);
+  };
+
+  const handleSaveQuickPrice = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!quickProduct) return;
+    const p = Number(quickPriceVal);
+    const m = Number(quickMrpVal) || p;
+    if (isNaN(p) || p < 0) {
+      toast.error("Please enter a valid price");
+      return;
+    }
+    setIsUpdatingPrice(true);
+    try {
+      await saveProduct.mutateAsync({
+        ...quickProduct,
+        price: p,
+        mrp: m,
+        updatedAt: new Date().toISOString(),
+      });
+      setQuickPriceOpen(false);
+      toast.success(`Price for "${getLocalizedText(quickProduct.name)}" updated to ₹${p.toLocaleString()}! Balance data preserved.`);
+    } catch (err: any) {
+      toast.error(`Failed to update price: ${err.message}`);
+    } finally {
+      setIsUpdatingPrice(false);
+    }
+  };
 
   // Category mapping
   const categoryMap = useMemo(() => {
@@ -306,6 +450,7 @@ function ProductsMarketplacePage() {
   }, [categories]);
 
   const openAddModal = () => {
+    setFieldErrors({});
     setEditingProduct(null);
     setProductId(`PRD-${Date.now().toString().slice(-6)}`);
     setNameEn("");
@@ -410,25 +555,27 @@ function ProductsMarketplacePage() {
   };
 
   const openEditModal = (p: any) => {
+    setFieldErrors({});
     setEditingProduct(p);
     setProductId(p.id || "");
 
     // Name Map (en, hi, kn, mr, pa, ta)
     if (typeof p.name === "object" && p.name !== null) {
-      setNameEn(p.name.en || "");
-      setNameHi(p.name.hi || "");
-      setNameKn(p.name.kn || "");
-      setNameMr(p.name.mr || "");
-      setNamePa(p.name.pa || "");
-      setNameTa(p.name.ta || "");
+      const en = p.name.en || Object.values(p.name)[0] || "";
+      setNameEn(en);
+      setNameHi(p.name.hi || en);
+      setNameKn(p.name.kn || en);
+      setNameMr(p.name.mr || en);
+      setNamePa(p.name.pa || en);
+      setNameTa(p.name.ta || en);
     } else {
       const s = String(p.name || p.title || "");
       setNameEn(s);
-      setNameHi("");
-      setNameKn("");
-      setNameMr("");
-      setNamePa("");
-      setNameTa("");
+      setNameHi(s);
+      setNameKn(s);
+      setNameMr(s);
+      setNamePa(s);
+      setNameTa(s);
     }
 
     setCategoryId(p.categoryId || "cat_breeding");
@@ -444,49 +591,52 @@ function ProductsMarketplacePage() {
     // Quantity & Quantity Unit Map
     setQuantity(String(p.quantity !== undefined ? p.quantity : (p.stock !== undefined ? p.stock : 1000)));
     if (typeof p.quantityUnit === "object" && p.quantityUnit !== null) {
-      setQuantityUnitEn(p.quantityUnit.en || "Unit");
-      setQuantityUnitHi(p.quantityUnit.hi || "इकाई");
-      setQuantityUnitKn(p.quantityUnit.kn || "ಘಟಕ");
-      setQuantityUnitMr(p.quantityUnit.mr || "युनिट");
-      setQuantityUnitPa(p.quantityUnit.pa || "ਯੂਨਿਟ");
-      setQuantityUnitTa(p.quantityUnit.ta || "அலகு");
+      const quEn = p.quantityUnit.en || "Unit";
+      setQuantityUnitEn(quEn);
+      setQuantityUnitHi(p.quantityUnit.hi || quEn);
+      setQuantityUnitKn(p.quantityUnit.kn || quEn);
+      setQuantityUnitMr(p.quantityUnit.mr || quEn);
+      setQuantityUnitPa(p.quantityUnit.pa || quEn);
+      setQuantityUnitTa(p.quantityUnit.ta || quEn);
     } else {
       const s = String(p.quantityUnit || "Unit");
       setQuantityUnitEn(s);
-      setQuantityUnitHi("इकाई");
-      setQuantityUnitKn("ಘಟಕ");
-      setQuantityUnitMr("युनिट");
-      setQuantityUnitPa("ਯੂਨਿਟ");
-      setQuantityUnitTa("அலகு");
+      setQuantityUnitHi(s);
+      setQuantityUnitKn(s);
+      setQuantityUnitMr(s);
+      setQuantityUnitPa(s);
+      setQuantityUnitTa(s);
     }
 
     // Weight & Weight Unit Map
     setWeight(String(p.weight || 0));
     if (typeof p.weightUnit === "object" && p.weightUnit !== null) {
-      setWeightUnitEn(p.weightUnit.en || p.weightUnit.key || "g");
-      setWeightUnitHi(p.weightUnit.hi || "ग्राम");
-      setWeightUnitKn(p.weightUnit.kn || "g");
-      setWeightUnitMr(p.weightUnit.mr || "g");
-      setWeightUnitPa(p.weightUnit.pa || "ਗ੍ਰਾਮ");
-      setWeightUnitTa(p.weightUnit.ta || "g");
+      const wuEn = p.weightUnit.en || p.weightUnit.key || "g";
+      setWeightUnitEn(wuEn);
+      setWeightUnitHi(p.weightUnit.hi || wuEn);
+      setWeightUnitKn(p.weightUnit.kn || wuEn);
+      setWeightUnitMr(p.weightUnit.mr || wuEn);
+      setWeightUnitPa(p.weightUnit.pa || wuEn);
+      setWeightUnitTa(p.weightUnit.ta || wuEn);
     } else {
       const s = String(p.weightUnit || "g");
       setWeightUnitEn(s);
-      setWeightUnitHi("ग्राम");
-      setWeightUnitKn("g");
-      setWeightUnitMr("g");
-      setWeightUnitPa("ਗ੍ਰਾਮ");
-      setWeightUnitTa("g");
+      setWeightUnitHi(s);
+      setWeightUnitKn(s);
+      setWeightUnitMr(s);
+      setWeightUnitPa(s);
+      setWeightUnitTa(s);
     }
 
     // Seller Profile Map
     if (typeof p.sellerName === "object" && p.sellerName !== null) {
-      setSellerNameEn(p.sellerName.en || "");
-      setSellerNameHi(p.sellerName.hi || "");
-      setSellerNameKn(p.sellerName.kn || "");
-      setSellerNameMr(p.sellerName.mr || "");
-      setSellerNamePa(p.sellerName.pa || "");
-      setSellerNameTa(p.sellerName.ta || "");
+      const sEn = p.sellerName.en || Object.values(p.sellerName)[0] || "Chimertech";
+      setSellerNameEn(sEn);
+      setSellerNameHi(p.sellerName.hi || sEn);
+      setSellerNameKn(p.sellerName.kn || sEn);
+      setSellerNameMr(p.sellerName.mr || sEn);
+      setSellerNamePa(p.sellerName.pa || sEn);
+      setSellerNameTa(p.sellerName.ta || sEn);
     } else {
       const s = String(p.sellerName || "Chimertech");
       setSellerNameEn(s);
@@ -509,112 +659,122 @@ function ProductsMarketplacePage() {
 
     // Description Map
     if (typeof p.description === "object" && p.description !== null) {
-      setDescriptionEn(p.description.en || "");
-      setDescriptionHi(p.description.hi || "");
-      setDescriptionKn(p.description.kn || "");
-      setDescriptionMr(p.description.mr || "");
-      setDescriptionPa(p.description.pa || "");
-      setDescriptionTa(p.description.ta || "");
+      const dEn = p.description.en || Object.values(p.description)[0] || "";
+      setDescriptionEn(dEn);
+      setDescriptionHi(p.description.hi || dEn);
+      setDescriptionKn(p.description.kn || dEn);
+      setDescriptionMr(p.description.mr || dEn);
+      setDescriptionPa(p.description.pa || dEn);
+      setDescriptionTa(p.description.ta || dEn);
     } else {
       const s = String(p.description || "");
       setDescriptionEn(s);
-      setDescriptionHi("");
-      setDescriptionKn("");
-      setDescriptionMr("");
-      setDescriptionPa("");
-      setDescriptionTa("");
+      setDescriptionHi(s);
+      setDescriptionKn(s);
+      setDescriptionMr(s);
+      setDescriptionPa(s);
+      setDescriptionTa(s);
     }
 
     // Specification Map
     if (typeof p.specification === "object" && p.specification !== null) {
-      setSpecificationEn(p.specification.en || "");
-      setSpecificationHi(p.specification.hi || "");
-      setSpecificationKn(p.specification.kn || "");
-      setSpecificationMr(p.specification.mr || "");
-      setSpecificationPa(p.specification.pa || "");
-      setSpecificationTa(p.specification.ta || "");
+      const spEn = p.specification.en || Object.values(p.specification)[0] || "";
+      setSpecificationEn(spEn);
+      setSpecificationHi(p.specification.hi || spEn);
+      setSpecificationKn(p.specification.kn || spEn);
+      setSpecificationMr(p.specification.mr || spEn);
+      setSpecificationPa(p.specification.pa || spEn);
+      setSpecificationTa(p.specification.ta || spEn);
     } else {
       const s = String(p.specification || "");
       setSpecificationEn(s);
-      setSpecificationHi("");
-      setSpecificationKn("");
-      setSpecificationMr("");
-      setSpecificationPa("");
-      setSpecificationTa("");
+      setSpecificationHi(s);
+      setSpecificationKn(s);
+      setSpecificationMr(s);
+      setSpecificationPa(s);
+      setSpecificationTa(s);
     }
 
     // Product Ingredients Map
+    const getVal = (val: any) => Array.isArray(val) ? val.join(", ") : (val || "");
     if (typeof p.productIngredients === "object" && p.productIngredients !== null) {
-      setProductIngredientsEn(Array.isArray(p.productIngredients.en) ? p.productIngredients.en.join(", ") : (p.productIngredients.en || ""));
-      setProductIngredientsHi(Array.isArray(p.productIngredients.hi) ? p.productIngredients.hi.join(", ") : (p.productIngredients.hi || ""));
-      setProductIngredientsKn(Array.isArray(p.productIngredients.kn) ? p.productIngredients.kn.join(", ") : (p.productIngredients.kn || ""));
-      setProductIngredientsMr(Array.isArray(p.productIngredients.mr) ? p.productIngredients.mr.join(", ") : (p.productIngredients.mr || ""));
-      setProductIngredientsPa(Array.isArray(p.productIngredients.pa) ? p.productIngredients.pa.join(", ") : (p.productIngredients.pa || ""));
-      setProductIngredientsTa(Array.isArray(p.productIngredients.ta) ? p.productIngredients.ta.join(", ") : (p.productIngredients.ta || ""));
+      const ingEn = getVal(p.productIngredients.en) || getVal(Object.values(p.productIngredients)[0]) || "";
+      setProductIngredientsEn(ingEn);
+      setProductIngredientsHi(getVal(p.productIngredients.hi) || ingEn);
+      setProductIngredientsKn(getVal(p.productIngredients.kn) || ingEn);
+      setProductIngredientsMr(getVal(p.productIngredients.mr) || ingEn);
+      setProductIngredientsPa(getVal(p.productIngredients.pa) || ingEn);
+      setProductIngredientsTa(getVal(p.productIngredients.ta) || ingEn);
     } else {
       const s = String(p.productIngredients || "");
       setProductIngredientsEn(s);
-      setProductIngredientsHi("");
-      setProductIngredientsKn("");
-      setProductIngredientsMr("");
-      setProductIngredientsPa("");
-      setProductIngredientsTa("");
+      setProductIngredientsHi(s);
+      setProductIngredientsKn(s);
+      setProductIngredientsMr(s);
+      setProductIngredientsPa(s);
+      setProductIngredientsTa(s);
     }
 
     // Usage Map
     if (typeof p.usage === "object" && p.usage !== null) {
-      setUsageEn(p.usage.en || "");
-      setUsageHi(p.usage.hi || "");
+      const uEn = p.usage.en || Object.values(p.usage)[0] || "";
+      setUsageEn(uEn);
+      setUsageHi(p.usage.hi || uEn);
     } else {
-      setUsageEn(String(p.usage || ""));
-      setUsageHi("");
+      const s = String(p.usage || "");
+      setUsageEn(s);
+      setUsageHi(s);
     }
 
     // Instructions to Use Map
+    const getLines = (val: any) => Array.isArray(val) ? val.join("\n") : (val || "");
     if (typeof p.instructionsToUse === "object" && p.instructionsToUse !== null) {
-      setInstructionsToUseEn(Array.isArray(p.instructionsToUse.en) ? p.instructionsToUse.en.join("\n") : (p.instructionsToUse.en || ""));
-      setInstructionsToUseHi(Array.isArray(p.instructionsToUse.hi) ? p.instructionsToUse.hi.join("\n") : (p.instructionsToUse.hi || ""));
-      setInstructionsToUseKn(Array.isArray(p.instructionsToUse.kn) ? p.instructionsToUse.kn.join("\n") : (p.instructionsToUse.kn || ""));
-      setInstructionsToUseMr(Array.isArray(p.instructionsToUse.mr) ? p.instructionsToUse.mr.join("\n") : (p.instructionsToUse.mr || ""));
-      setInstructionsToUsePa(Array.isArray(p.instructionsToUse.pa) ? p.instructionsToUse.pa.join("\n") : (p.instructionsToUse.pa || ""));
-      setInstructionsToUseTa(Array.isArray(p.instructionsToUse.ta) ? p.instructionsToUse.ta.join("\n") : (p.instructionsToUse.ta || ""));
+      const instEn = getLines(p.instructionsToUse.en) || getLines(Object.values(p.instructionsToUse)[0]) || "";
+      setInstructionsToUseEn(instEn);
+      setInstructionsToUseHi(getLines(p.instructionsToUse.hi) || instEn);
+      setInstructionsToUseKn(getLines(p.instructionsToUse.kn) || instEn);
+      setInstructionsToUseMr(getLines(p.instructionsToUse.mr) || instEn);
+      setInstructionsToUsePa(getLines(p.instructionsToUse.pa) || instEn);
+      setInstructionsToUseTa(getLines(p.instructionsToUse.ta) || instEn);
     } else {
       const s = String(p.instructionsToUse || "");
       setInstructionsToUseEn(s);
-      setInstructionsToUseHi("");
-      setInstructionsToUseKn("");
-      setInstructionsToUseMr("");
-      setInstructionsToUsePa("");
-      setInstructionsToUseTa("");
+      setInstructionsToUseHi(s);
+      setInstructionsToUseKn(s);
+      setInstructionsToUseMr(s);
+      setInstructionsToUsePa(s);
+      setInstructionsToUseTa(s);
     }
 
     // Storage Condition Map
     if (typeof p.storageCondition === "object" && p.storageCondition !== null) {
-      setStorageConditionEn(Array.isArray(p.storageCondition.en) ? p.storageCondition.en.join(", ") : (p.storageCondition.en || ""));
-      setStorageConditionHi(Array.isArray(p.storageCondition.hi) ? p.storageCondition.hi.join(", ") : (p.storageCondition.hi || ""));
-      setStorageConditionKn(Array.isArray(p.storageCondition.kn) ? p.storageCondition.kn.join(", ") : (p.storageCondition.kn || ""));
-      setStorageConditionMr(Array.isArray(p.storageCondition.mr) ? p.storageCondition.mr.join(", ") : (p.storageCondition.mr || ""));
-      setStorageConditionPa(Array.isArray(p.storageCondition.pa) ? p.storageCondition.pa.join(", ") : (p.storageCondition.pa || ""));
-      setStorageConditionTa(Array.isArray(p.storageCondition.ta) ? p.storageCondition.ta.join(", ") : (p.storageCondition.ta || ""));
+      const scEn = getVal(p.storageCondition.en) || getVal(Object.values(p.storageCondition)[0]) || "°C to 15°C";
+      setStorageConditionEn(scEn);
+      setStorageConditionHi(getVal(p.storageCondition.hi) || scEn);
+      setStorageConditionKn(getVal(p.storageCondition.kn) || scEn);
+      setStorageConditionMr(getVal(p.storageCondition.mr) || scEn);
+      setStorageConditionPa(getVal(p.storageCondition.pa) || scEn);
+      setStorageConditionTa(getVal(p.storageCondition.ta) || scEn);
     } else {
-      const s = String(p.storageCondition || "");
+      const s = String(p.storageCondition || "°C to 15°C");
       setStorageConditionEn(s);
-      setStorageConditionHi("");
-      setStorageConditionKn("");
-      setStorageConditionMr("");
-      setStorageConditionPa("");
-      setStorageConditionTa("");
+      setStorageConditionHi("°C से 15°C तक");
+      setStorageConditionKn("°C ರಿಂದ 15°C ವರೆಗೆ");
+      setStorageConditionMr("°C ते १५°C");
+      setStorageConditionPa("°C ਤੋਂ 15°C ਤੱਕ");
+      setStorageConditionTa("°C முதல் 15°C வரை");
     }
 
     // Best Before Map
     const bb = p.bestBefore || p.best_before;
     if (typeof bb === "object" && bb !== null) {
-      setBestBeforeEn(bb.en || "1 Year");
-      setBestBeforeHi(bb.hi || "1 वर्ष");
-      setBestBeforeKn(bb.kn || "1 ವರ್ಷ");
-      setBestBeforeMr(bb.mr || "१ वर्ष");
-      setBestBeforePa(bb.pa || "1 ਸਾਲ");
-      setBestBeforeTa(bb.ta || "1 ஆண்டு");
+      const bbEn = bb.en || Object.values(bb)[0] || "1 Year";
+      setBestBeforeEn(bbEn);
+      setBestBeforeHi(bb.hi || bbEn);
+      setBestBeforeKn(bb.kn || bbEn);
+      setBestBeforeMr(bb.mr || bbEn);
+      setBestBeforePa(bb.pa || bbEn);
+      setBestBeforeTa(bb.ta || bbEn);
     } else {
       const s = String(bb || "1 Year");
       setBestBeforeEn(s);
@@ -648,14 +808,179 @@ function ProductsMarketplacePage() {
     return String(val).trim();
   };
 
+  const handleCopyEnglishToAllLanguages = () => {
+    if (!toStr(nameEn) && !toStr(descriptionEn) && !toStr(specificationEn) && !toStr(instructionsToUseEn) && !toStr(productIngredientsEn)) {
+      toast.error("Please fill in English fields first before copying to other languages.");
+      return;
+    }
+    if (toStr(nameEn)) {
+      if (!nameHi) setNameHi(nameEn);
+      if (!nameKn) setNameKn(nameEn);
+      if (!nameMr) setNameMr(nameEn);
+      if (!namePa) setNamePa(nameEn);
+      if (!nameTa) setNameTa(nameEn);
+    }
+    if (toStr(descriptionEn)) {
+      if (!descriptionHi) setDescriptionHi(descriptionEn);
+      if (!descriptionKn) setDescriptionKn(descriptionEn);
+      if (!descriptionMr) setDescriptionMr(descriptionEn);
+      if (!descriptionPa) setDescriptionPa(descriptionPa ? descriptionPa : descriptionEn);
+      if (!descriptionTa) setDescriptionTa(descriptionEn);
+    }
+    if (toStr(specificationEn)) {
+      if (!specificationHi) setSpecificationHi(specificationEn);
+      if (!specificationKn) setSpecificationKn(specificationEn);
+      if (!specificationMr) setSpecificationMr(specificationEn);
+      if (!specificationPa) setSpecificationPa(specificationEn);
+      if (!specificationTa) setSpecificationTa(specificationEn);
+    }
+    if (toStr(instructionsToUseEn)) {
+      if (!instructionsToUseHi) setInstructionsToUseHi(instructionsToUseEn);
+      if (!instructionsToUseKn) setInstructionsToUseKn(instructionsToUseEn);
+      if (!instructionsToUseMr) setInstructionsToUseMr(instructionsToUseEn);
+      if (!instructionsToUsePa) setInstructionsToUsePa(instructionsToUseEn);
+      if (!instructionsToUseTa) setInstructionsToUseTa(instructionsToUseEn);
+    }
+    if (toStr(productIngredientsEn)) {
+      if (!productIngredientsHi) setProductIngredientsHi(productIngredientsEn);
+      if (!productIngredientsKn) setProductIngredientsKn(productIngredientsEn);
+      if (!productIngredientsMr) setProductIngredientsMr(productIngredientsEn);
+      if (!productIngredientsPa) setProductIngredientsPa(productIngredientsEn);
+      if (!productIngredientsTa) setProductIngredientsTa(productIngredientsEn);
+    }
+    setFieldErrors({});
+    toast.success("English content copied to all regional languages (Hindi, Kannada, Marathi, Punjabi, Tamil)!");
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanNameEn = toStr(nameEn);
-    const cleanNameHi = toStr(nameHi);
 
-    if (!cleanNameEn && !cleanNameHi) {
-      toast.error("Please provide at least an English or Hindi product name");
+    // 1. Strict Validation across ALL 6 languages
+    setFieldErrors({});
+
+    const PRODUCT_LANGS = [
+      { code: "en", label: "English" },
+      { code: "hi", label: "Hindi" },
+      { code: "kn", label: "Kannada" },
+      { code: "mr", label: "Marathi" },
+      { code: "pa", label: "Punjabi" },
+      { code: "ta", label: "Tamil" },
+    ];
+
+    const nameMapState: Record<string, string> = {
+      en: nameEn,
+      hi: nameHi,
+      kn: nameKn,
+      mr: nameMr,
+      pa: namePa,
+      ta: nameTa,
+    };
+    for (const lang of PRODUCT_LANGS) {
+      if (!toStr(nameMapState[lang.code])) {
+        setFieldErrors({ [`name_${lang.code}`]: true, name: true });
+        setModalTab("general");
+        toast.error(`Required field missing: Product Name in ${lang.label} (${lang.code.toUpperCase()}). All 6 languages must be filled before saving!`);
+        return;
+      }
+    }
+
+    const numPrice = Number(price);
+    if (!price || isNaN(numPrice) || numPrice <= 0) {
+      setFieldErrors({ price: true });
+      setModalTab("general");
+      toast.error("Required field missing: Selling Price. Please enter a valid price greater than ₹0.");
       return;
+    }
+
+    const numMrp = Number(mrp);
+    if (!mrp || isNaN(numMrp) || numMrp <= 0) {
+      setFieldErrors({ mrp: true });
+      setModalTab("general");
+      toast.error("Required field missing: MRP Price. Please enter a valid MRP greater than ₹0.");
+      return;
+    }
+
+    if (!categoryId) {
+      setFieldErrors({ categoryId: true });
+      setModalTab("general");
+      toast.error("Required field missing: Product Category. Please select a category from the dropdown.");
+      return;
+    }
+
+    const numWeight = Number(weight);
+    if (!weight || isNaN(numWeight) || numWeight <= 0) {
+      setFieldErrors({ weight: true });
+      setModalTab("units");
+      toast.error("Required field missing: Product Weight. Please enter a valid weight greater than 0.");
+      return;
+    }
+
+    const descMapState: Record<string, string> = {
+      en: descriptionEn,
+      hi: descriptionHi,
+      kn: descriptionKn,
+      mr: descriptionMr,
+      pa: descriptionPa,
+      ta: descriptionTa,
+    };
+    for (const lang of PRODUCT_LANGS) {
+      if (!toStr(descMapState[lang.code])) {
+        setFieldErrors({ [`description_${lang.code}`]: true, description: true });
+        setModalTab("specs");
+        toast.error(`Required field missing: Product Description in ${lang.label} (${lang.code.toUpperCase()}). All 6 languages must be filled before saving!`);
+        return;
+      }
+    }
+
+    const specMapState: Record<string, string> = {
+      en: specificationEn,
+      hi: specificationHi,
+      kn: specificationKn,
+      mr: specificationMr,
+      pa: specificationPa,
+      ta: specificationTa,
+    };
+    for (const lang of PRODUCT_LANGS) {
+      if (!toStr(specMapState[lang.code])) {
+        setFieldErrors({ [`specification_${lang.code}`]: true, specification: true });
+        setModalTab("specs");
+        toast.error(`Required field missing: Product Specification in ${lang.label} (${lang.code.toUpperCase()}). All 6 languages must be filled before saving!`);
+        return;
+      }
+    }
+
+    const instMapState: Record<string, string> = {
+      en: instructionsToUseEn,
+      hi: instructionsToUseHi,
+      kn: instructionsToUseKn,
+      mr: instructionsToUseMr,
+      pa: instructionsToUsePa,
+      ta: instructionsToUseTa,
+    };
+    for (const lang of PRODUCT_LANGS) {
+      if (!toStr(instMapState[lang.code])) {
+        setFieldErrors({ [`instructions_${lang.code}`]: true, instructions: true });
+        setModalTab("specs");
+        toast.error(`Required field missing: Usage Instructions in ${lang.label} (${lang.code.toUpperCase()}). All 6 languages must be filled before saving!`);
+        return;
+      }
+    }
+
+    const ingMapState: Record<string, string> = {
+      en: productIngredientsEn,
+      hi: productIngredientsHi,
+      kn: productIngredientsKn,
+      mr: productIngredientsMr,
+      pa: productIngredientsPa,
+      ta: productIngredientsTa,
+    };
+    for (const lang of PRODUCT_LANGS) {
+      if (!toStr(ingMapState[lang.code])) {
+        setFieldErrors({ [`ingredients_${lang.code}`]: true, ingredients: true });
+        setModalTab("specs");
+        toast.error(`Required field missing: Product Ingredients in ${lang.label} (${lang.code.toUpperCase()}). All 6 languages must be filled before saving!`);
+        return;
+      }
     }
 
     // Parse image URLs list
@@ -664,52 +989,65 @@ function ProductsMarketplacePage() {
       .map((s) => s.trim())
       .filter((s) => s.length > 0);
 
-    const finalThumbnail = toStr(thumbnailUrl) || (rawImages.length > 0 ? rawImages[0] : "");
-    const finalImageUrls = Array.from(new Set([finalThumbnail, ...rawImages].filter(Boolean)));
+    const rawThumb = toStr(thumbnailUrl) || (rawImages.length > 0 ? rawImages[0] : "");
+    const finalThumbnail = convertToDirectImageUrl(rawThumb);
+    const finalImageUrls = Array.from(
+      new Set([finalThumbnail, ...rawImages.map((u) => convertToDirectImageUrl(u))].filter(Boolean))
+    );
+
+    if (finalImageUrls.length === 0) {
+      setFieldErrors({ images: true });
+      setModalTab("media");
+      toast.error("Required field missing: Product Image. Please upload or provide at least one product image.");
+      return;
+    }
 
     const selectedCategoryObj = categories.find((c) => c.id === categoryId);
     const categoryNameEn = selectedCategoryObj ? getLocalizedText(selectedCategoryObj.name, categoryId) : "Breeding";
     const subCategoryNameEn = toStr(subCategoryId).replace(/^subcat_/, "").replace(/_/g, " ");
 
-    const makeMultiLang = (enVal: string, hiVal: string, knVal: string, mrVal: string, paVal: string, taVal: string, fallback = "") => {
+    const makeMultiLang = (enVal: string, hiVal: string, knVal: string, mrVal: string, paVal: string, taVal: string, fallback = "", ex?: any) => {
       const e = toStr(enVal) || toStr(hiVal) || fallback;
+      const exObj = ex && typeof ex === "object" ? ex : {};
       return {
         en: e,
-        hi: toStr(hiVal) || e,
-        kn: toStr(knVal) || e,
-        mr: toStr(mrVal) || e,
-        pa: toStr(paVal) || e,
-        ta: toStr(taVal) || e,
+        hi: toStr(hiVal) || exObj.hi || e,
+        kn: toStr(knVal) || exObj.kn || e,
+        mr: toStr(mrVal) || exObj.mr || e,
+        pa: toStr(paVal) || exObj.pa || e,
+        ta: toStr(taVal) || exObj.ta || e,
       };
     };
 
     // EXACT 100% Match for Flutter `ProductListingEntity` Model & Types with all 6 regional languages
+    // Preserves ALL existing balance data from editingProduct
     const payload: any = {
-      id: toStr(productId) || `PRD-${Date.now()}`,
+      ...(editingProduct || {}),
+      id: toStr(productId) || editingProduct?.id || `PRD-${Date.now()}`,
       
       // Map<String, dynamic> name (en, hi, kn, mr, pa, ta)
-      name: makeMultiLang(nameEn, nameHi, nameKn, nameMr, namePa, nameTa, "Product"),
+      name: makeMultiLang(nameEn, nameHi, nameKn, nameMr, namePa, nameTa, "Product", editingProduct?.name),
 
       // Map<String, dynamic> sellerName (en, hi, kn, mr, pa, ta)
-      sellerName: makeMultiLang(sellerNameEn, sellerNameHi, sellerNameKn, sellerNameMr, sellerNamePa, sellerNameTa, "Chimertech"),
+      sellerName: makeMultiLang(sellerNameEn, sellerNameHi, sellerNameKn, sellerNameMr, sellerNamePa, sellerNameTa, "Chimertech", editingProduct?.sellerName),
 
       // String sellerLogo
-      sellerLogo: toStr(sellerLogo),
+      sellerLogo: toStr(sellerLogo) || editingProduct?.sellerLogo || "",
 
       // String? postedByRole
-      postedByRole: toStr(postedByRole) || "admin",
+      postedByRole: toStr(postedByRole) || editingProduct?.postedByRole || "admin",
 
       // String? postedByUid
-      postedByUid: toStr(postedByUid) || "admin-root",
+      postedByUid: toStr(postedByUid) || editingProduct?.postedByUid || "admin-root",
 
       // List<String> imageUrls
-      imageUrls: finalImageUrls,
+      imageUrls: finalImageUrls.length > 0 ? finalImageUrls : (editingProduct?.imageUrls || []),
 
       // String thumbnailUrl
-      thumbnailUrl: finalThumbnail,
+      thumbnailUrl: finalThumbnail || editingProduct?.thumbnailUrl || "",
 
       // Map<String, dynamic> description (en, hi, kn, mr, pa, ta)
-      description: makeMultiLang(descriptionEn, descriptionHi, descriptionKn, descriptionMr, descriptionPa, descriptionTa, ""),
+      description: makeMultiLang(descriptionEn, descriptionHi, descriptionKn, descriptionMr, descriptionPa, descriptionTa, "", editingProduct?.description),
 
       // double price
       price: Number(price) || 0.0,
@@ -727,28 +1065,28 @@ function ProductsMarketplacePage() {
       weight: Number(weight) || 0.0,
 
       // Map<String, dynamic> weightUnit (en, hi, kn, mr, pa, ta)
-      weightUnit: makeMultiLang(weightUnitEn, weightUnitHi, weightUnitKn, weightUnitMr, weightUnitPa, weightUnitTa, "g"),
+      weightUnit: makeMultiLang(weightUnitEn, weightUnitHi, weightUnitKn, weightUnitMr, weightUnitPa, weightUnitTa, "g", editingProduct?.weightUnit),
 
       // Map<String, dynamic> quantityUnit (en, hi, kn, mr, pa, ta)
-      quantityUnit: makeMultiLang(quantityUnitEn, quantityUnitHi, quantityUnitKn, quantityUnitMr, quantityUnitPa, quantityUnitTa, "Unit"),
+      quantityUnit: makeMultiLang(quantityUnitEn, quantityUnitHi, quantityUnitKn, quantityUnitMr, quantityUnitPa, quantityUnitTa, "Unit", editingProduct?.quantityUnit),
 
       // Map<String, dynamic>? usage
       usage: toStr(usageEn) || toStr(usageHi) ? {
         en: toStr(usageEn) || toStr(usageHi),
         ...(toStr(usageHi) ? { hi: toStr(usageHi) } : {}),
-      } : null,
+      } : (editingProduct?.usage ?? null),
 
       // Map<String, dynamic>? storageCondition (en, hi, kn, mr, pa, ta)
-      storageCondition: makeMultiLang(storageConditionEn, storageConditionHi, storageConditionKn, storageConditionMr, storageConditionPa, storageConditionTa, "°C to 15°C"),
+      storageCondition: makeMultiLang(storageConditionEn, storageConditionHi, storageConditionKn, storageConditionMr, storageConditionPa, storageConditionTa, "°C to 15°C", editingProduct?.storageCondition),
 
       // Map<String, dynamic>? specification (en, hi, kn, mr, pa, ta)
-      specification: makeMultiLang(specificationEn, specificationHi, specificationKn, specificationMr, specificationPa, specificationTa, ""),
+      specification: makeMultiLang(specificationEn, specificationHi, specificationKn, specificationMr, specificationPa, specificationTa, "", editingProduct?.specification),
 
       // Map<String, dynamic>? instructionsToUse (en, hi, kn, mr, pa, ta)
-      instructionsToUse: makeMultiLang(instructionsToUseEn, instructionsToUseHi, instructionsToUseKn, instructionsToUseMr, instructionsToUsePa, instructionsToUseTa, ""),
+      instructionsToUse: makeMultiLang(instructionsToUseEn, instructionsToUseHi, instructionsToUseKn, instructionsToUseMr, instructionsToUsePa, instructionsToUseTa, "", editingProduct?.instructionsToUse),
 
       // Map<String, dynamic>? productIngredients (en, hi, kn, mr, pa, ta)
-      productIngredients: makeMultiLang(productIngredientsEn, productIngredientsHi, productIngredientsKn, productIngredientsMr, productIngredientsPa, productIngredientsTa, ""),
+      productIngredients: makeMultiLang(productIngredientsEn, productIngredientsHi, productIngredientsKn, productIngredientsMr, productIngredientsPa, productIngredientsTa, "", editingProduct?.productIngredients),
 
       // String categoryId
       categoryId: toStr(categoryId),
@@ -757,20 +1095,20 @@ function ProductsMarketplacePage() {
       subCategoryId: toStr(subCategoryId),
 
       // Map<String, String>? category (en, hi, kn, mr, pa, ta)
-      category: makeMultiLang(categoryNameEn, selectedCategoryObj?.name?.hi || categoryNameEn, selectedCategoryObj?.name?.kn || categoryNameEn, selectedCategoryObj?.name?.mr || categoryNameEn, selectedCategoryObj?.name?.pa || categoryNameEn, selectedCategoryObj?.name?.ta || categoryNameEn, "Breeding"),
+      category: makeMultiLang(categoryNameEn, selectedCategoryObj?.name?.hi || categoryNameEn, selectedCategoryObj?.name?.kn || categoryNameEn, selectedCategoryObj?.name?.mr || categoryNameEn, selectedCategoryObj?.name?.pa || categoryNameEn, selectedCategoryObj?.name?.ta || categoryNameEn, "Breeding", editingProduct?.category),
 
       // Map<String, String>? subCategory (en, hi, kn, mr, pa, ta)
-      subCategory: makeMultiLang(subCategoryNameEn, subCategoryNameEn, subCategoryNameEn, subCategoryNameEn, subCategoryNameEn, subCategoryNameEn, "breeding detection"),
+      subCategory: makeMultiLang(subCategoryNameEn, subCategoryNameEn, subCategoryNameEn, subCategoryNameEn, subCategoryNameEn, subCategoryNameEn, "breeding detection", editingProduct?.subCategory),
 
       // String sellerType
-      sellerType: toStr(sellerType) || "seller",
+      sellerType: toStr(sellerType) || editingProduct?.sellerType || "seller",
 
       // double gst
       gst: Number(gst) || 5.0,
 
       // Map<String, dynamic>? bestBefore & best_before (en, hi, kn, mr, pa, ta)
-      bestBefore: makeMultiLang(bestBeforeEn, bestBeforeHi, bestBeforeKn, bestBeforeMr, bestBeforePa, bestBeforeTa, "1 Year"),
-      best_before: makeMultiLang(bestBeforeEn, bestBeforeHi, bestBeforeKn, bestBeforeMr, bestBeforePa, bestBeforeTa, "1 Year"),
+      bestBefore: makeMultiLang(bestBeforeEn, bestBeforeHi, bestBeforeKn, bestBeforeMr, bestBeforePa, bestBeforeTa, "1 Year", editingProduct?.bestBefore),
+      best_before: makeMultiLang(bestBeforeEn, bestBeforeHi, bestBeforeKn, bestBeforeMr, bestBeforePa, bestBeforeTa, "1 Year", editingProduct?.best_before),
 
       // bool? cartAddded
       cartAddded: Boolean(cartAddded),
@@ -784,6 +1122,7 @@ function ProductsMarketplacePage() {
         type: deliveryType,
         states: deliveryStates,
       },
+      updatedAt: new Date().toISOString(),
     };
 
     try {
@@ -948,7 +1287,7 @@ function ProductsMarketplacePage() {
         <Card className="p-4 rounded-3xl border shadow-sm">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-xs text-muted-foreground font-medium">Approved / Active</p>
+              <p className="text-xs text-muted-foreground font-medium">Approved Products</p>
               {isLoading ? (
                 <div className="h-8 w-20 bg-muted/70 rounded-lg animate-pulse mt-1" />
               ) : (
@@ -1133,17 +1472,23 @@ function ProductsMarketplacePage() {
 
                       {/* Pricing */}
                       <TableCell>
-                        <div className="space-y-0.5">
-                          <div className="font-bold text-primary text-sm flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => openQuickPriceDialog(p)}
+                          className="space-y-0.5 text-left group hover:bg-primary/5 p-1.5 -m-1.5 rounded-xl transition-all"
+                          title="Click to quickly update price only"
+                        >
+                          <div className="font-bold text-primary text-sm flex items-center gap-1.5">
                             <span>₹{Number(p.price || 0).toLocaleString()}</span>
-                            {Number(p.mrp || 0) > Number(p.price || 0) && (
-                              <span className="text-[10px] text-muted-foreground line-through font-normal">
-                                ₹{Number(p.mrp).toLocaleString()}
-                              </span>
-                            )}
+                            <Pencil className="h-3 w-3 opacity-30 group-hover:opacity-100 transition-opacity" />
                           </div>
-                          <div className="text-[10px] text-muted-foreground">GST: {p.gst || 18}%</div>
-                        </div>
+                          <div className="text-[10px] text-muted-foreground flex items-center gap-1">
+                            {Number(p.mrp || 0) > Number(p.price || 0) && (
+                              <span className="line-through">₹{Number(p.mrp).toLocaleString()}</span>
+                            )}
+                            <span>• GST: {p.gst || 18}%</span>
+                          </div>
+                        </button>
                       </TableCell>
 
                       {/* Stock & Weight */}
@@ -1438,7 +1783,7 @@ function ProductsMarketplacePage() {
               <div className="flex items-center justify-between p-4 rounded-2xl border bg-primary/5 border-primary/20 flex-wrap gap-3">
                 <div className="flex items-center gap-3">
                   {selectedProductDetail.sellerLogo ? (
-                    <ProductImage src={selectedProductDetail.sellerLogo} alt="Logo" className="h-10 w-10 rounded-2xl object-cover border shrink-0 bg-white" fallbackIcon={Building} />
+                    <ProductImage src={selectedProductDetail.sellerLogo} alt="Logo" className="h-10 min-w-[90px] max-w-[140px] px-2 py-0.5 rounded-xl object-contain border shrink-0 bg-white shadow-2xs" fallbackIcon={Building} />
                   ) : (
                     <div className="h-10 w-10 rounded-2xl bg-primary text-primary-foreground flex items-center justify-center font-bold">
                       <Building className="h-5 w-5" />
@@ -1506,93 +1851,160 @@ function ProductsMarketplacePage() {
                       id="prod-name-en"
                       placeholder="e.g. Portable Liquid Nitrogen Container"
                       value={nameEn}
-                      onChange={(e) => setNameEn(e.target.value)}
+                      onChange={(e) => {
+                        setNameEn(e.target.value);
+                        clearFieldError("name");
+                      }}
                       required
+                      className={fieldErrors.name ? "border-destructive ring-2 ring-destructive/50 bg-destructive/5 text-destructive" : ""}
                     />
+                    {fieldErrors.name && (
+                      <p className="text-[11px] font-semibold text-destructive flex items-center gap-1 mt-1 animate-pulse">
+                        <AlertCircle className="h-3 w-3" />
+                        <span>Product name in English is required. Please fill in this field.</span>
+                      </p>
+                    )}
                   </div>
                 </div>
 
                 {/* Multilingual Names (Map<String, dynamic> name) */}
                 <div className="p-3 rounded-2xl bg-muted/30 border space-y-2">
-                  <div className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
-                    Regional Languages (<code>name.hi, kn, mr, pa, ta</code>)
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                      Regional Languages (<code>name.hi, kn, mr, pa, ta</code>) *
+                    </div>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-2.5">
                     <div className="space-y-1">
-                      <Label htmlFor="prod-name-hi" className="text-[11px]">Hindi (<code>hi</code>)</Label>
+                      <Label htmlFor="prod-name-hi" className="text-[11px]">Hindi (<code>hi</code>) *</Label>
                       <Input
                         id="prod-name-hi"
                         placeholder="e.g. प्रेगकाइन बोवाइन..."
                         value={nameHi}
-                        onChange={(e) => setNameHi(e.target.value)}
-                        className="text-xs"
+                        onChange={(e) => {
+                          setNameHi(e.target.value);
+                          clearFieldError("name_hi");
+                        }}
+                        className={`text-xs ${fieldErrors.name_hi ? "border-destructive ring-2 ring-destructive/50 bg-destructive/5 text-destructive" : ""}`}
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label htmlFor="prod-name-kn" className="text-[11px]">Kannada (<code>kn</code>)</Label>
+                      <Label htmlFor="prod-name-kn" className="text-[11px]">Kannada (<code>kn</code>) *</Label>
                       <Input
                         id="prod-name-kn"
                         placeholder="e.g. ಪ್ರೆಗ್‌ಕೈನ್ ಬೋವೈನ್..."
                         value={nameKn}
-                        onChange={(e) => setNameKn(e.target.value)}
-                        className="text-xs"
+                        onChange={(e) => {
+                          setNameKn(e.target.value);
+                          clearFieldError("name_kn");
+                        }}
+                        className={`text-xs ${fieldErrors.name_kn ? "border-destructive ring-2 ring-destructive/50 bg-destructive/5 text-destructive" : ""}`}
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label htmlFor="prod-name-mr" className="text-[11px]">Marathi (<code>mr</code>)</Label>
+                      <Label htmlFor="prod-name-mr" className="text-[11px]">Marathi (<code>mr</code>) *</Label>
                       <Input
                         id="prod-name-mr"
                         placeholder="e.g. प्रेगकाईन बोव्हाइन..."
                         value={nameMr}
-                        onChange={(e) => setNameMr(e.target.value)}
-                        className="text-xs"
+                        onChange={(e) => {
+                          setNameMr(e.target.value);
+                          clearFieldError("name_mr");
+                        }}
+                        className={`text-xs ${fieldErrors.name_mr ? "border-destructive ring-2 ring-destructive/50 bg-destructive/5 text-destructive" : ""}`}
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label htmlFor="prod-name-pa" className="text-[11px]">Punjabi (<code>pa</code>)</Label>
+                      <Label htmlFor="prod-name-pa" className="text-[11px]">Punjabi (<code>pa</code>) *</Label>
                       <Input
                         id="prod-name-pa"
                         placeholder="e.g. ਪ੍ਰੇਗਕਾਈਨ ਬੋਵਾਈਨ..."
                         value={namePa}
-                        onChange={(e) => setNamePa(e.target.value)}
-                        className="text-xs"
+                        onChange={(e) => {
+                          setNamePa(e.target.value);
+                          clearFieldError("name_pa");
+                        }}
+                        className={`text-xs ${fieldErrors.name_pa ? "border-destructive ring-2 ring-destructive/50 bg-destructive/5 text-destructive" : ""}`}
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label htmlFor="prod-name-ta" className="text-[11px]">Tamil (<code>ta</code>)</Label>
+                      <Label htmlFor="prod-name-ta" className="text-[11px]">Tamil (<code>ta</code>) *</Label>
                       <Input
                         id="prod-name-ta"
                         placeholder="e.g. பிரெக்கைன் போவின்..."
                         value={nameTa}
-                        onChange={(e) => setNameTa(e.target.value)}
-                        className="text-xs"
+                        onChange={(e) => {
+                          setNameTa(e.target.value);
+                          clearFieldError("name_ta");
+                        }}
+                        className={`text-xs ${fieldErrors.name_ta ? "border-destructive ring-2 ring-destructive/50 bg-destructive/5 text-destructive" : ""}`}
                       />
                     </div>
                   </div>
                 </div>
 
-                {/* Categories (String categoryId, String subCategoryId) */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Categories & Subcategories Dropdown Selectors */}
+                <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3 p-3.5 rounded-2xl border ${
+                  fieldErrors.categoryId ? "border-destructive ring-2 ring-destructive/50 bg-destructive/5" : "bg-muted/20"
+                }`}>
                   <div className="space-y-1.5">
-                    <Label htmlFor="prod-cat">Category ID (<code>String categoryId</code>)</Label>
-                    <Input
-                      id="prod-cat"
-                      placeholder="e.g. cat_breeding"
+                    <Label htmlFor="prod-cat" className="text-xs font-semibold flex items-center justify-between">
+                      <span>Category *</span>
+                      <span className="text-[10px] text-muted-foreground font-mono">categoryId</span>
+                    </Label>
+                    <Select
                       value={categoryId}
-                      onChange={(e) => setCategoryId(e.target.value)}
-                      className="font-mono text-xs"
-                    />
+                      onValueChange={(newCatId) => {
+                        setCategoryId(newCatId);
+                        clearFieldError("categoryId");
+                        const subs = getSubcategoriesForCategory(newCatId);
+                        if (subs.length > 0) {
+                          setSubCategoryId(subs[0].id);
+                        }
+                      }}
+                    >
+                      <SelectTrigger id="prod-cat" className="rounded-xl text-xs h-10 bg-background">
+                        <SelectValue placeholder="Select Category" />
+                      </SelectTrigger>
+                      <SelectContent className="rounded-xl">
+                        {PRODUCT_CATEGORIES.map((cat) => (
+                          <SelectItem key={cat.id} value={cat.id}>
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-semibold">{cat.name}</span>
+                              <span className="text-[10px] text-muted-foreground font-mono">({cat.id})</span>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {fieldErrors.categoryId && (
+                      <p className="text-[11px] font-semibold text-destructive flex items-center gap-1 mt-1 animate-pulse">
+                        <AlertCircle className="h-3 w-3" />
+                        <span>Please select a product category</span>
+                      </p>
+                    )}
                   </div>
 
                   <div className="space-y-1.5">
-                    <Label htmlFor="prod-subcat">Sub Category ID (<code>String subCategoryId</code>)</Label>
-                    <Input
-                      id="prod-subcat"
-                      placeholder="e.g. subcat_ai_equipment"
-                      value={subCategoryId}
-                      onChange={(e) => setSubCategoryId(e.target.value)}
-                      className="font-mono text-xs"
-                    />
+                    <Label htmlFor="prod-subcat" className="text-xs font-semibold flex items-center justify-between">
+                      <span>Subcategory</span>
+                      <span className="text-[10px] text-muted-foreground font-mono">subCategoryId</span>
+                    </Label>
+                    <Select value={subCategoryId} onValueChange={setSubCategoryId}>
+                      <SelectTrigger id="prod-subcat" className="rounded-xl text-xs h-10 bg-background">
+                        <SelectValue placeholder="Select Subcategory" />
+                      </SelectTrigger>
+                      <SelectContent className="rounded-xl">
+                        {getSubcategoriesForCategory(categoryId).map((sub) => (
+                          <SelectItem key={sub.id} value={sub.id}>
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-semibold">{sub.name}</span>
+                              <span className="text-[10px] text-muted-foreground font-mono">({sub.id})</span>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
 
@@ -1607,15 +2019,26 @@ function ProductsMarketplacePage() {
                         type="number"
                         step="0.01"
                         value={price}
-                        onChange={(e) => setPrice(e.target.value)}
+                        onChange={(e) => {
+                          setPrice(e.target.value);
+                          clearFieldError("price");
+                        }}
                         required
-                        className="pl-7 font-bold text-base"
+                        className={`pl-7 font-bold text-base ${
+                          fieldErrors.price ? "border-destructive ring-2 ring-destructive/50 bg-destructive/5 text-destructive" : ""
+                        }`}
                       />
                     </div>
+                    {fieldErrors.price && (
+                      <p className="text-[11px] font-semibold text-destructive flex items-center gap-1 mt-1 animate-pulse">
+                        <AlertCircle className="h-3 w-3" />
+                        <span>Selling price must be &gt; ₹0</span>
+                      </p>
+                    )}
                   </div>
 
                   <div className="space-y-1.5">
-                    <Label htmlFor="prod-mrp">MRP (<code>double mrp</code>)</Label>
+                    <Label htmlFor="prod-mrp">MRP (<code>double mrp</code>) *</Label>
                     <div className="relative">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₹</span>
                       <Input
@@ -1623,10 +2046,21 @@ function ProductsMarketplacePage() {
                         type="number"
                         step="0.01"
                         value={mrp}
-                        onChange={(e) => setMrp(e.target.value)}
-                        className="pl-7"
+                        onChange={(e) => {
+                          setMrp(e.target.value);
+                          clearFieldError("mrp");
+                        }}
+                        className={`pl-7 ${
+                          fieldErrors.mrp ? "border-destructive ring-2 ring-destructive/50 bg-destructive/5 text-destructive" : ""
+                        }`}
                       />
                     </div>
+                    {fieldErrors.mrp && (
+                      <p className="text-[11px] font-semibold text-destructive flex items-center gap-1 mt-1 animate-pulse">
+                        <AlertCircle className="h-3 w-3" />
+                        <span>MRP must be &gt; ₹0</span>
+                      </p>
+                    )}
                   </div>
 
                   <div className="space-y-1.5">
@@ -1750,14 +2184,24 @@ function ProductsMarketplacePage() {
                   </h4>
                   <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                     <div className="space-y-1.5">
-                      <Label htmlFor="prod-weight">Weight (double)</Label>
+                      <Label htmlFor="prod-weight">Weight (double) *</Label>
                       <Input
                         id="prod-weight"
                         type="number"
                         step="0.1"
                         value={weight}
-                        onChange={(e) => setWeight(e.target.value)}
+                        onChange={(e) => {
+                          setWeight(e.target.value);
+                          clearFieldError("weight");
+                        }}
+                        className={fieldErrors.weight ? "border-destructive ring-2 ring-destructive/50 bg-destructive/5 text-destructive" : ""}
                       />
+                      {fieldErrors.weight && (
+                        <p className="text-[11px] font-semibold text-destructive flex items-center gap-1 mt-1 animate-pulse">
+                          <AlertCircle className="h-3 w-3" />
+                          <span>Weight is required</span>
+                        </p>
+                      )}
                     </div>
                     <div className="space-y-1.5">
                       <Label htmlFor="prod-wunit-en">Unit (English)</Label>
@@ -1864,73 +2308,100 @@ function ProductsMarketplacePage() {
                 {/* Description Map (en, hi, kn, mr, pa, ta) */}
                 <div className="p-4 rounded-2xl border bg-muted/20 space-y-3">
                   <h4 className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">
-                    Description (<code>description</code>: en, hi, kn, mr, pa, ta)
+                    Description (<code>description</code>: en, hi, kn, mr, pa, ta) *
                   </h4>
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                     <div className="space-y-1">
-                      <Label htmlFor="prod-desc-en" className="text-[11px]">English (<code>en</code>)</Label>
+                      <Label htmlFor="prod-desc-en" className="text-[11px]">English (<code>en</code>) *</Label>
                       <Textarea
                         id="prod-desc-en"
                         rows={2}
                         placeholder="Advanced, rapid pregnancy detection kit..."
                         value={descriptionEn}
-                        onChange={(e) => setDescriptionEn(e.target.value)}
-                        className="text-xs"
+                        onChange={(e) => {
+                          setDescriptionEn(e.target.value);
+                          clearFieldError("description");
+                          clearFieldError("description_en");
+                        }}
+                        className={`text-xs ${
+                          fieldErrors.description || fieldErrors.description_en ? "border-destructive ring-2 ring-destructive/50 bg-destructive/5 text-destructive" : ""
+                        }`}
                       />
+                      {(fieldErrors.description || fieldErrors.description_en) && (
+                        <p className="text-[11px] font-semibold text-destructive flex items-center gap-1 mt-1 animate-pulse">
+                          <AlertCircle className="h-3 w-3" />
+                          <span>Description in English is required</span>
+                        </p>
+                      )}
                     </div>
                     <div className="space-y-1">
-                      <Label htmlFor="prod-desc-hi" className="text-[11px]">Hindi (<code>hi</code>)</Label>
+                      <Label htmlFor="prod-desc-hi" className="text-[11px]">Hindi (<code>hi</code>) *</Label>
                       <Textarea
                         id="prod-desc-hi"
                         rows={2}
                         placeholder="गायों के लिए रैपिड प्रेगनेंसी..."
                         value={descriptionHi}
-                        onChange={(e) => setDescriptionHi(e.target.value)}
-                        className="text-xs"
+                        onChange={(e) => {
+                          setDescriptionHi(e.target.value);
+                          clearFieldError("description_hi");
+                        }}
+                        className={`text-xs ${fieldErrors.description_hi ? "border-destructive ring-2 ring-destructive/50 bg-destructive/5 text-destructive" : ""}`}
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label htmlFor="prod-desc-kn" className="text-[11px]">Kannada (<code>kn</code>)</Label>
+                      <Label htmlFor="prod-desc-kn" className="text-[11px]">Kannada (<code>kn</code>) *</Label>
                       <Textarea
                         id="prod-desc-kn"
                         rows={2}
                         placeholder="ಕನ್ನಡ ವಿವರಣೆ..."
                         value={descriptionKn}
-                        onChange={(e) => setDescriptionKn(e.target.value)}
-                        className="text-xs"
+                        onChange={(e) => {
+                          setDescriptionKn(e.target.value);
+                          clearFieldError("description_kn");
+                        }}
+                        className={`text-xs ${fieldErrors.description_kn ? "border-destructive ring-2 ring-destructive/50 bg-destructive/5 text-destructive" : ""}`}
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label htmlFor="prod-desc-mr" className="text-[11px]">Marathi (<code>mr</code>)</Label>
+                      <Label htmlFor="prod-desc-mr" className="text-[11px]">Marathi (<code>mr</code>) *</Label>
                       <Textarea
                         id="prod-desc-mr"
                         rows={2}
                         placeholder="मराठी वर्णन..."
                         value={descriptionMr}
-                        onChange={(e) => setDescriptionMr(e.target.value)}
-                        className="text-xs"
+                        onChange={(e) => {
+                          setDescriptionMr(e.target.value);
+                          clearFieldError("description_mr");
+                        }}
+                        className={`text-xs ${fieldErrors.description_mr ? "border-destructive ring-2 ring-destructive/50 bg-destructive/5 text-destructive" : ""}`}
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label htmlFor="prod-desc-pa" className="text-[11px]">Punjabi (<code>pa</code>)</Label>
+                      <Label htmlFor="prod-desc-pa" className="text-[11px]">Punjabi (<code>pa</code>) *</Label>
                       <Textarea
                         id="prod-desc-pa"
                         rows={2}
                         placeholder="ਪੰਜਾਬੀ ਵੇਰਵਾ..."
                         value={descriptionPa}
-                        onChange={(e) => setDescriptionPa(e.target.value)}
-                        className="text-xs"
+                        onChange={(e) => {
+                          setDescriptionPa(e.target.value);
+                          clearFieldError("description_pa");
+                        }}
+                        className={`text-xs ${fieldErrors.description_pa ? "border-destructive ring-2 ring-destructive/50 bg-destructive/5 text-destructive" : ""}`}
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label htmlFor="prod-desc-ta" className="text-[11px]">Tamil (<code>ta</code>)</Label>
+                      <Label htmlFor="prod-desc-ta" className="text-[11px]">Tamil (<code>ta</code>) *</Label>
                       <Textarea
                         id="prod-desc-ta"
                         rows={2}
                         placeholder="தமிழ் விளக்கம்..."
                         value={descriptionTa}
-                        onChange={(e) => setDescriptionTa(e.target.value)}
-                        className="text-xs"
+                        onChange={(e) => {
+                          setDescriptionTa(e.target.value);
+                          clearFieldError("description_ta");
+                        }}
+                        className={`text-xs ${fieldErrors.description_ta ? "border-destructive ring-2 ring-destructive/50 bg-destructive/5 text-destructive" : ""}`}
                       />
                     </div>
                   </div>
@@ -1939,73 +2410,94 @@ function ProductsMarketplacePage() {
                 {/* Specification Map (en, hi, kn, mr, pa, ta) */}
                 <div className="p-4 rounded-2xl border bg-muted/20 space-y-3">
                   <h4 className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">
-                    Specifications (<code>specification</code>: en, hi, kn, mr, pa, ta)
+                    Specifications (<code>specification</code>: en, hi, kn, mr, pa, ta) *
                   </h4>
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                     <div className="space-y-1">
-                      <Label htmlFor="prod-spec-en" className="text-[11px]">English (<code>en</code>)</Label>
+                      <Label htmlFor="prod-spec-en" className="text-[11px]">English (<code>en</code>) *</Label>
                       <Textarea
                         id="prod-spec-en"
                         rows={2}
                         placeholder="Detects in as early as 28 days..."
                         value={specificationEn}
-                        onChange={(e) => setSpecificationEn(e.target.value)}
-                        className="text-xs"
+                        onChange={(e) => {
+                          setSpecificationEn(e.target.value);
+                          clearFieldError("specification");
+                          clearFieldError("specification_en");
+                        }}
+                        className={`text-xs ${
+                          fieldErrors.specification || fieldErrors.specification_en ? "border-destructive ring-2 ring-destructive/50 bg-destructive/5 text-destructive" : ""
+                        }`}
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label htmlFor="prod-spec-hi" className="text-[11px]">Hindi (<code>hi</code>)</Label>
+                      <Label htmlFor="prod-spec-hi" className="text-[11px]">Hindi (<code>hi</code>) *</Label>
                       <Textarea
                         id="prod-spec-hi"
                         rows={2}
                         placeholder="प्रजनन या कृत्रिम गर्भाधान के बाद 28 दिनों में..."
                         value={specificationHi}
-                        onChange={(e) => setSpecificationHi(e.target.value)}
-                        className="text-xs"
+                        onChange={(e) => {
+                          setSpecificationHi(e.target.value);
+                          clearFieldError("specification_hi");
+                        }}
+                        className={`text-xs ${fieldErrors.specification_hi ? "border-destructive ring-2 ring-destructive/50 bg-destructive/5 text-destructive" : ""}`}
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label htmlFor="prod-spec-kn" className="text-[11px]">Kannada (<code>kn</code>)</Label>
+                      <Label htmlFor="prod-spec-kn" className="text-[11px]">Kannada (<code>kn</code>) *</Label>
                       <Textarea
                         id="prod-spec-kn"
                         rows={2}
                         placeholder="ಸಂತಾನೋತ್ಪತ್ತಿ ಅಥವಾ ಕೃತಕ ಗರ್ಭಧಾರಣೆಯ ನಂತರ 28 ದಿನಗಳಲ್ಲಿ..."
                         value={specificationKn}
-                        onChange={(e) => setSpecificationKn(e.target.value)}
-                        className="text-xs"
+                        onChange={(e) => {
+                          setSpecificationKn(e.target.value);
+                          clearFieldError("specification_kn");
+                        }}
+                        className={`text-xs ${fieldErrors.specification_kn ? "border-destructive ring-2 ring-destructive/50 bg-destructive/5 text-destructive" : ""}`}
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label htmlFor="prod-spec-mr" className="text-[11px]">Marathi (<code>mr</code>)</Label>
+                      <Label htmlFor="prod-spec-mr" className="text-[11px]">Marathi (<code>mr</code>) *</Label>
                       <Textarea
                         id="prod-spec-mr"
                         rows={2}
                         placeholder="प्रजनन किंवा कृत्रिम रेतन नंतर अवघ्या २८ दिवसांत..."
                         value={specificationMr}
-                        onChange={(e) => setSpecificationMr(e.target.value)}
-                        className="text-xs"
+                        onChange={(e) => {
+                          setSpecificationMr(e.target.value);
+                          clearFieldError("specification_mr");
+                        }}
+                        className={`text-xs ${fieldErrors.specification_mr ? "border-destructive ring-2 ring-destructive/50 bg-destructive/5 text-destructive" : ""}`}
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label htmlFor="prod-spec-pa" className="text-[11px]">Punjabi (<code>pa</code>)</Label>
+                      <Label htmlFor="prod-spec-pa" className="text-[11px]">Punjabi (<code>pa</code>) *</Label>
                       <Textarea
                         id="prod-spec-pa"
                         rows={2}
                         placeholder="ਪ੍ਰਜਨਨ ਜਾਂ ਕ੍ਰਿਤ੍ਰਿਮ ਗਰਭਧਾਰਣ ਤੋਂ 28 ਦਿਨਾਂ ਬਾਅਦ..."
                         value={specificationPa}
-                        onChange={(e) => setSpecificationPa(e.target.value)}
-                        className="text-xs"
+                        onChange={(e) => {
+                          setSpecificationPa(e.target.value);
+                          clearFieldError("specification_pa");
+                        }}
+                        className={`text-xs ${fieldErrors.specification_pa ? "border-destructive ring-2 ring-destructive/50 bg-destructive/5 text-destructive" : ""}`}
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label htmlFor="prod-spec-ta" className="text-[11px]">Tamil (<code>ta</code>)</Label>
+                      <Label htmlFor="prod-spec-ta" className="text-[11px]">Tamil (<code>ta</code>) *</Label>
                       <Textarea
                         id="prod-spec-ta"
                         rows={2}
                         placeholder="இனப்பெருக்கம் அல்லது செயற்கை கருத்தரிப்பிற்குப் பின் 28 நாட்களிலேயே..."
                         value={specificationTa}
-                        onChange={(e) => setSpecificationTa(e.target.value)}
-                        className="text-xs"
+                        onChange={(e) => {
+                          setSpecificationTa(e.target.value);
+                          clearFieldError("specification_ta");
+                        }}
+                        className={`text-xs ${fieldErrors.specification_ta ? "border-destructive ring-2 ring-destructive/50 bg-destructive/5 text-destructive" : ""}`}
                       />
                     </div>
                   </div>
@@ -2014,67 +2506,94 @@ function ProductsMarketplacePage() {
                 {/* Product Ingredients Map (en, hi, kn, mr, pa, ta) */}
                 <div className="p-4 rounded-2xl border bg-muted/20 space-y-3">
                   <h4 className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">
-                    Ingredients (<code>productIngredients</code>: en, hi, kn, mr, pa, ta)
+                    Ingredients (<code>productIngredients</code>: en, hi, kn, mr, pa, ta) *
                   </h4>
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
                     <div className="space-y-1">
-                      <Label htmlFor="prod-ing-en" className="text-[11px]">English</Label>
+                      <Label htmlFor="prod-ing-en" className="text-[11px]">English *</Label>
                       <Input
                         id="prod-ing-en"
                         placeholder="Vaccutainer, 18G Needle, Syringe..."
                         value={productIngredientsEn}
-                        onChange={(e) => setProductIngredientsEn(e.target.value)}
-                        className="text-xs"
+                        onChange={(e) => {
+                          setProductIngredientsEn(e.target.value);
+                          clearFieldError("ingredients");
+                          clearFieldError("ingredients_en");
+                        }}
+                        className={`text-xs ${
+                          fieldErrors.ingredients || fieldErrors.ingredients_en ? "border-destructive ring-2 ring-destructive/50 bg-destructive/5 text-destructive" : ""
+                        }`}
                       />
+                      {(fieldErrors.ingredients || fieldErrors.ingredients_en) && (
+                        <p className="text-[11px] font-semibold text-destructive flex items-center gap-1 mt-1 animate-pulse">
+                          <AlertCircle className="h-3 w-3" />
+                          <span>Ingredients are required</span>
+                        </p>
+                      )}
                     </div>
                     <div className="space-y-1">
-                      <Label htmlFor="prod-ing-hi" className="text-[11px]">Hindi</Label>
+                      <Label htmlFor="prod-ing-hi" className="text-[11px]">Hindi *</Label>
                       <Input
                         id="prod-ing-hi"
                         placeholder="वै큠टेनर, 18G सुई, सिरिंज..."
                         value={productIngredientsHi}
-                        onChange={(e) => setProductIngredientsHi(e.target.value)}
-                        className="text-xs"
+                        onChange={(e) => {
+                          setProductIngredientsHi(e.target.value);
+                          clearFieldError("ingredients_hi");
+                        }}
+                        className={`text-xs ${fieldErrors.ingredients_hi ? "border-destructive ring-2 ring-destructive/50 bg-destructive/5 text-destructive" : ""}`}
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label htmlFor="prod-ing-kn" className="text-[11px]">Kannada</Label>
+                      <Label htmlFor="prod-ing-kn" className="text-[11px]">Kannada *</Label>
                       <Input
                         id="prod-ing-kn"
                         placeholder="ವ್ಯಾಕ್ಯೂಟೈನರ್, 18G ಸೂಜಿ..."
                         value={productIngredientsKn}
-                        onChange={(e) => setProductIngredientsKn(e.target.value)}
-                        className="text-xs"
+                        onChange={(e) => {
+                          setProductIngredientsKn(e.target.value);
+                          clearFieldError("ingredients_kn");
+                        }}
+                        className={`text-xs ${fieldErrors.ingredients_kn ? "border-destructive ring-2 ring-destructive/50 bg-destructive/5 text-destructive" : ""}`}
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label htmlFor="prod-ing-mr" className="text-[11px]">Marathi</Label>
+                      <Label htmlFor="prod-ing-mr" className="text-[11px]">Marathi *</Label>
                       <Input
                         id="prod-ing-mr"
                         placeholder="व्हॅक्यूटेनर, १८G सुई..."
                         value={productIngredientsMr}
-                        onChange={(e) => setProductIngredientsMr(e.target.value)}
-                        className="text-xs"
+                        onChange={(e) => {
+                          setProductIngredientsMr(e.target.value);
+                          clearFieldError("ingredients_mr");
+                        }}
+                        className={`text-xs ${fieldErrors.ingredients_mr ? "border-destructive ring-2 ring-destructive/50 bg-destructive/5 text-destructive" : ""}`}
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label htmlFor="prod-ing-pa" className="text-[11px]">Punjabi</Label>
+                      <Label htmlFor="prod-ing-pa" className="text-[11px]">Punjabi *</Label>
                       <Input
                         id="prod-ing-pa"
                         placeholder="ਵੈਕਿਊਟੇਨਰ, 18G ਸੂਈ..."
                         value={productIngredientsPa}
-                        onChange={(e) => setProductIngredientsPa(e.target.value)}
-                        className="text-xs"
+                        onChange={(e) => {
+                          setProductIngredientsPa(e.target.value);
+                          clearFieldError("ingredients_pa");
+                        }}
+                        className={`text-xs ${fieldErrors.ingredients_pa ? "border-destructive ring-2 ring-destructive/50 bg-destructive/5 text-destructive" : ""}`}
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label htmlFor="prod-ing-ta" className="text-[11px]">Tamil</Label>
+                      <Label htmlFor="prod-ing-ta" className="text-[11px]">Tamil *</Label>
                       <Input
                         id="prod-ing-ta"
                         placeholder="வாக்குடெய்னர், 18G ஊசி..."
                         value={productIngredientsTa}
-                        onChange={(e) => setProductIngredientsTa(e.target.value)}
-                        className="text-xs"
+                        onChange={(e) => {
+                          setProductIngredientsTa(e.target.value);
+                          clearFieldError("ingredients_ta");
+                        }}
+                        className={`text-xs ${fieldErrors.ingredients_ta ? "border-destructive ring-2 ring-destructive/50 bg-destructive/5 text-destructive" : ""}`}
                       />
                     </div>
                   </div>
@@ -2083,73 +2602,100 @@ function ProductsMarketplacePage() {
                 {/* Instructions to Use (en, hi, kn, mr, pa, ta) */}
                 <div className="p-4 rounded-2xl border bg-muted/20 space-y-3">
                   <h4 className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">
-                    Instructions To Use (<code>instructionsToUse</code>: en, hi, kn, mr, pa, ta)
+                    Instructions To Use (<code>instructionsToUse</code>: en, hi, kn, mr, pa, ta) *
                   </h4>
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                     <div className="space-y-1">
-                      <Label htmlFor="prod-inst-en" className="text-[11px]">English (<code>en</code>)</Label>
+                      <Label htmlFor="prod-inst-en" className="text-[11px]">English (<code>en</code>) *</Label>
                       <Textarea
                         id="prod-inst-en"
                         rows={2}
                         placeholder="Step - 1: Add one drop of Whole Blood..."
                         value={instructionsToUseEn}
-                        onChange={(e) => setInstructionsToUseEn(e.target.value)}
-                        className="text-xs"
+                        onChange={(e) => {
+                          setInstructionsToUseEn(e.target.value);
+                          clearFieldError("instructions");
+                          clearFieldError("instructions_en");
+                        }}
+                        className={`text-xs ${
+                          fieldErrors.instructions || fieldErrors.instructions_en ? "border-destructive ring-2 ring-destructive/50 bg-destructive/5 text-destructive" : ""
+                        }`}
                       />
+                      {(fieldErrors.instructions || fieldErrors.instructions_en) && (
+                        <p className="text-[11px] font-semibold text-destructive flex items-center gap-1 mt-1 animate-pulse">
+                          <AlertCircle className="h-3 w-3" />
+                          <span>Usage instructions in English are required</span>
+                        </p>
+                      )}
                     </div>
                     <div className="space-y-1">
-                      <Label htmlFor="prod-inst-hi" className="text-[11px]">Hindi (<code>hi</code>)</Label>
+                      <Label htmlFor="prod-inst-hi" className="text-[11px]">Hindi (<code>hi</code>) *</Label>
                       <Textarea
                         id="prod-inst-hi"
                         rows={2}
                         placeholder="वैक्यूम जाँचें, प्री-हाइजीन के बाद..."
                         value={instructionsToUseHi}
-                        onChange={(e) => setInstructionsToUseHi(e.target.value)}
-                        className="text-xs"
+                        onChange={(e) => {
+                          setInstructionsToUseHi(e.target.value);
+                          clearFieldError("instructions_hi");
+                        }}
+                        className={`text-xs ${fieldErrors.instructions_hi ? "border-destructive ring-2 ring-destructive/50 bg-destructive/5 text-destructive" : ""}`}
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label htmlFor="prod-inst-kn" className="text-[11px]">Kannada (<code>kn</code>)</Label>
+                      <Label htmlFor="prod-inst-kn" className="text-[11px]">Kannada (<code>kn</code>) *</Label>
                       <Textarea
                         id="prod-inst-kn"
                         rows={2}
                         placeholder="ಹಂತ - 1: ರಕ್ತದ ಹನಿಯನ್ನು ಸೇರಿಸಿ..."
                         value={instructionsToUseKn}
-                        onChange={(e) => setInstructionsToUseKn(e.target.value)}
-                        className="text-xs"
+                        onChange={(e) => {
+                          setInstructionsToUseKn(e.target.value);
+                          clearFieldError("instructions_kn");
+                        }}
+                        className={`text-xs ${fieldErrors.instructions_kn ? "border-destructive ring-2 ring-destructive/50 bg-destructive/5 text-destructive" : ""}`}
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label htmlFor="prod-inst-mr" className="text-[11px]">Marathi (<code>mr</code>)</Label>
+                      <Label htmlFor="prod-inst-mr" className="text-[11px]">Marathi (<code>mr</code>) *</Label>
                       <Textarea
                         id="prod-inst-mr"
                         rows={2}
                         placeholder="पायरी - १: नमुना रक्ताचा थेंब घाला..."
                         value={instructionsToUseMr}
-                        onChange={(e) => setInstructionsToUseMr(e.target.value)}
-                        className="text-xs"
+                        onChange={(e) => {
+                          setInstructionsToUseMr(e.target.value);
+                          clearFieldError("instructions_mr");
+                        }}
+                        className={`text-xs ${fieldErrors.instructions_mr ? "border-destructive ring-2 ring-destructive/50 bg-destructive/5 text-destructive" : ""}`}
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label htmlFor="prod-inst-pa" className="text-[11px]">Punjabi (<code>pa</code>)</Label>
+                      <Label htmlFor="prod-inst-pa" className="text-[11px]">Punjabi (<code>pa</code>) *</Label>
                       <Textarea
                         id="prod-inst-pa"
                         rows={2}
                         placeholder="ਕਦਮ - 1: ਖੂਨ ਦੀ ਇੱਕ ਬੂੰਦ ਪਾਓ..."
                         value={instructionsToUsePa}
-                        onChange={(e) => setInstructionsToUsePa(e.target.value)}
-                        className="text-xs"
+                        onChange={(e) => {
+                          setInstructionsToUsePa(e.target.value);
+                          clearFieldError("instructions_pa");
+                        }}
+                        className={`text-xs ${fieldErrors.instructions_pa ? "border-destructive ring-2 ring-destructive/50 bg-destructive/5 text-destructive" : ""}`}
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label htmlFor="prod-inst-ta" className="text-[11px]">Tamil (<code>ta</code>)</Label>
+                      <Label htmlFor="prod-inst-ta" className="text-[11px]">Tamil (<code>ta</code>) *</Label>
                       <Textarea
                         id="prod-inst-ta"
                         rows={2}
                         placeholder="படி - 1: இரத்த மாதிரியை சேர்க்கவும்..."
                         value={instructionsToUseTa}
-                        onChange={(e) => setInstructionsToUseTa(e.target.value)}
-                        className="text-xs"
+                        onChange={(e) => {
+                          setInstructionsToUseTa(e.target.value);
+                          clearFieldError("instructions_ta");
+                        }}
+                        className={`text-xs ${fieldErrors.instructions_ta ? "border-destructive ring-2 ring-destructive/50 bg-destructive/5 text-destructive" : ""}`}
                       />
                     </div>
                   </div>
@@ -2227,38 +2773,173 @@ function ProductsMarketplacePage() {
 
               {/* TAB 4: MEDIA, SELLER & DELIVERY */}
               <TabsContent value="media" className="space-y-4">
-                {/* Thumbnail URL with Google Drive Support */}
-                <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-3 items-center">
-                  <div className="space-y-1.5 flex-1">
-                    <Label htmlFor="prod-thumb">Thumbnail URL (<code>String thumbnailUrl</code>)</Label>
-                    <Input
-                      id="prod-thumb"
-                      placeholder="https://drive.google.com/file/d/... or web image URL"
-                      value={thumbnailUrl}
-                      onChange={(e) => setThumbnailUrl(e.target.value)}
-                    />
-                    <span className="text-[10px] text-muted-foreground">
-                      Paste direct Google Drive link or web image URL.
-                    </span>
-                  </div>
-                  {thumbnailUrl && (
-                    <div className="h-14 w-14 rounded-2xl border bg-muted overflow-hidden flex items-center justify-center shrink-0">
-                      <ProductImage src={thumbnailUrl} alt="Thumb" className="h-full w-full object-cover" />
+                {/* Image Gallery and Multi-Upload Section */}
+                <div
+                  className={`p-4 rounded-2xl border space-y-4 transition-all ${
+                    fieldErrors.images ? "border-destructive ring-2 ring-destructive/50 bg-destructive/5" : "bg-muted/20"
+                  }`}
+                >
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <h4 className="font-semibold text-xs text-foreground flex items-center gap-1.5">
+                        <ImageIcon className="h-4 w-4 text-primary" /> Product Images *
+                      </h4>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">
+                        Upload one or multiple images to Firebase Storage (<code>marketplace/products</code>). Click any image to set as Primary Thumbnail.
+                      </p>
                     </div>
-                  )}
-                </div>
 
-                {/* Array of Image URLs */}
-                <div className="space-y-1.5">
-                  <Label htmlFor="prod-images">Image URLs List (<code>List&lt;String&gt; imageUrls</code>)</Label>
-                  <Textarea
-                    id="prod-images"
-                    rows={3}
-                    placeholder="https://drive.google.com/file/d/1AdeHmp...&#10;https://drive.google.com/file/d/1x72e_n..."
-                    value={imageUrlsText}
-                    onChange={(e) => setImageUrlsText(e.target.value)}
-                    className="font-mono text-xs"
-                  />
+                    <div className="flex items-center gap-2">
+                      <label
+                        className={`cursor-pointer inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-primary/20 bg-primary text-primary-foreground text-xs font-bold shadow-xs hover:bg-primary/90 transition-all ${
+                          isUploadingImage ? "opacity-60 cursor-not-allowed" : ""
+                        }`}
+                      >
+                        <Upload className="h-3.5 w-3.5" />
+                        <span>{isUploadingImage ? "Uploading to Storage..." : "Upload Image(s)"}</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          multiple
+                          className="hidden"
+                          onChange={handleImageFileUpload}
+                          disabled={isUploadingImage}
+                        />
+                      </label>
+                    </div>
+                  </div>
+
+                  {fieldErrors.images && (
+                    <p className="text-xs font-semibold text-destructive flex items-center gap-1 animate-pulse">
+                      <AlertCircle className="h-4 w-4" />
+                      <span>Product image is required! Please upload at least one image or provide an image link.</span>
+                    </p>
+                  )}
+
+                  {/* Render Visual Image Previews for All Uploaded Images */}
+                  {(() => {
+                    const allImgs = Array.from(
+                      new Set([
+                        thumbnailUrl.trim() ? convertToDirectImageUrl(thumbnailUrl.trim()) : "",
+                        ...imageUrlsText
+                          .split(/[\n,]/)
+                          .map((s) => convertToDirectImageUrl(s.trim()))
+                          .filter(Boolean),
+                      ])
+                    ).filter(Boolean);
+
+                    if (allImgs.length === 0) {
+                      return (
+                        <div className="p-6 border-2 border-dashed rounded-2xl text-center bg-card/50">
+                          <ImageIcon className="h-8 w-8 text-muted-foreground/40 mx-auto" />
+                          <p className="text-xs text-muted-foreground mt-2 font-medium">No images uploaded yet</p>
+                          <p className="text-[11px] text-muted-foreground/70 mt-0.5">
+                            Click "Upload Image(s)" above to upload 1 or more images directly to Firebase Storage.
+                          </p>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="space-y-2">
+                        <div className="text-[11px] font-semibold text-muted-foreground flex items-center justify-between">
+                          <span>Uploaded Images ({allImgs.length}):</span>
+                          <span className="text-[10px] text-emerald-600 font-bold">Auto-saved to Storage</span>
+                        </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3">
+                          {allImgs.map((imgUrl, idx) => {
+                            const isPrimary = idx === 0 || convertToDirectImageUrl(thumbnailUrl) === imgUrl;
+                            return (
+                              <div
+                                key={idx}
+                                className={`relative group rounded-2xl border-2 overflow-hidden bg-card aspect-square flex flex-col justify-between shadow-xs transition-all ${
+                                  isPrimary ? "border-primary ring-2 ring-primary/30" : "border-border hover:border-primary/50"
+                                }`}
+                              >
+                                <img
+                                  src={formatImageUrl(imgUrl)}
+                                  alt={`Product Image ${idx + 1}`}
+                                  referrerPolicy="no-referrer"
+                                  className="h-full w-full object-cover"
+                                />
+
+                                {isPrimary ? (
+                                  <span className="absolute top-1.5 left-1.5 bg-primary text-primary-foreground text-[9px] font-bold px-1.5 py-0.5 rounded-md shadow-xs">
+                                    Thumbnail
+                                  </span>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setThumbnailUrl(imgUrl);
+                                      const others = allImgs.filter((u) => u !== imgUrl);
+                                      setImageUrlsText(others.join("\n"));
+                                      toast.success("Set as Primary Thumbnail!");
+                                    }}
+                                    className="absolute top-1.5 left-1.5 bg-black/75 hover:bg-black text-white text-[9px] font-semibold px-1.5 py-0.5 rounded-md opacity-0 group-hover:opacity-100 transition-opacity"
+                                  >
+                                    Make Main
+                                  </button>
+                                )}
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const remaining = allImgs.filter((u) => u !== imgUrl);
+                                    setThumbnailUrl(remaining[0] || "");
+                                    setImageUrlsText(remaining.slice(1).join("\n"));
+                                    toast.info("Image removed");
+                                  }}
+                                  className="absolute top-1.5 right-1.5 bg-destructive text-white p-1 rounded-md opacity-0 group-hover:opacity-100 transition-opacity shadow-xs"
+                                  title="Remove Image"
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Manual URL Input Fields */}
+                  <div className="pt-2 border-t border-border/40 space-y-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <Label htmlFor="prod-thumb" className="text-[11px] font-semibold text-muted-foreground">
+                          Primary Thumbnail URL (Firebase Storage or Google Drive):
+                        </Label>
+                        <Input
+                          id="prod-thumb"
+                          value={thumbnailUrl}
+                          onChange={(e) => {
+                            setThumbnailUrl(e.target.value);
+                            clearFieldError("images");
+                          }}
+                          placeholder="https://firebasestorage.googleapis.com/... or Google Drive URL"
+                          className="rounded-xl font-mono text-xs"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <Label htmlFor="prod-images" className="text-[11px] font-semibold text-muted-foreground">
+                          Additional Image URLs List (One URL per line):
+                        </Label>
+                        <Textarea
+                          id="prod-images"
+                          rows={1}
+                          value={imageUrlsText}
+                          onChange={(e) => {
+                            setImageUrlsText(e.target.value);
+                            clearFieldError("images");
+                          }}
+                          placeholder="https://firebasestorage.googleapis.com/..."
+                          className="font-mono text-xs rounded-xl"
+                        />
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 {/* Seller Profile Localized Map & Logo */}
@@ -2296,7 +2977,7 @@ function ProductsMarketplacePage() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-3 items-center pt-1">
+                  <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-3 items-end pt-1">
                     <div className="space-y-1.5 flex-1">
                       <Label htmlFor="prod-seller-logo">Seller Logo URL (<code>String sellerLogo</code>)</Label>
                       <Input
@@ -2307,8 +2988,13 @@ function ProductsMarketplacePage() {
                       />
                     </div>
                     {sellerLogo && (
-                      <div className="h-10 w-10 rounded-2xl border bg-muted overflow-hidden flex items-center justify-center shrink-0">
-                        <ProductImage src={sellerLogo} alt="Logo" className="h-full w-full object-cover" fallbackIcon={Building} />
+                      <div className="h-10 min-w-[130px] max-w-[180px] px-3 py-1 rounded-xl border bg-white dark:bg-card shadow-2xs flex items-center justify-center shrink-0">
+                        <ProductImage
+                          src={sellerLogo}
+                          alt="Seller Logo"
+                          className="h-full w-full object-contain"
+                          fallbackIcon={Building}
+                        />
                       </div>
                     )}
                   </div>
@@ -2516,6 +3202,85 @@ function ProductsMarketplacePage() {
                 className="max-h-[75vh] w-auto object-contain rounded-xl"
               />
             </div>
+          )}
+        </DialogContent>
+      </Dialog>
+      {/* QUICK PRICE ONLY MODAL */}
+      <Dialog open={quickPriceOpen} onOpenChange={setQuickPriceOpen}>
+        <DialogContent className="max-w-md p-6 rounded-3xl">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold flex items-center gap-2">
+              <div className="grid h-8 w-8 place-items-center rounded-xl bg-primary/10 text-primary">
+                <IndianRupee className="h-4 w-4" />
+              </div>
+              <span>Update Product Price Only</span>
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              Modify only the selling price or MRP. All product titles, multi-language descriptions, images, and specifications remain completely preserved.
+            </DialogDescription>
+          </DialogHeader>
+
+          {quickProduct && (
+            <form onSubmit={handleSaveQuickPrice} className="space-y-4 pt-2">
+              <div className="p-3 rounded-2xl border bg-muted/30 space-y-1">
+                <div className="text-xs font-bold text-foreground truncate">
+                  {getLocalizedText(quickProduct.name)}
+                </div>
+                <div className="text-[11px] font-mono text-muted-foreground">
+                  ID: {quickProduct.id}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label htmlFor="qp-price" className="text-xs font-semibold text-primary flex items-center gap-1">
+                    <IndianRupee className="h-3 w-3" /> Selling Price (₹) *
+                  </Label>
+                  <Input
+                    id="qp-price"
+                    type="number"
+                    min="0"
+                    value={quickPriceVal}
+                    onChange={(e) => setQuickPriceVal(e.target.value)}
+                    required
+                    autoFocus
+                    className="rounded-xl font-mono text-sm font-bold text-primary"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <Label htmlFor="qp-mrp" className="text-xs font-semibold text-muted-foreground flex items-center gap-1">
+                    <IndianRupee className="h-3 w-3" /> MRP Price (₹)
+                  </Label>
+                  <Input
+                    id="qp-mrp"
+                    type="number"
+                    min="0"
+                    value={quickMrpVal}
+                    onChange={(e) => setQuickMrpVal(e.target.value)}
+                    className="rounded-xl font-mono text-sm"
+                  />
+                </div>
+              </div>
+
+              <DialogFooter className="pt-2 sm:justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setQuickPriceOpen(false)}
+                  className="rounded-xl"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={isUpdatingPrice}
+                  className="rounded-xl bg-primary text-primary-foreground font-semibold px-5"
+                >
+                  {isUpdatingPrice ? "Updating..." : "Save Price Only"}
+                </Button>
+              </DialogFooter>
+            </form>
           )}
         </DialogContent>
       </Dialog>

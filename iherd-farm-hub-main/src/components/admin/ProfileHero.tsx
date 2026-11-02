@@ -74,12 +74,14 @@ export function ProfileHero({
 
         {/* Right: metadata grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-4">
-          <MetaItem
-            icon={ShieldCheck}
-            label="Account status"
-            value={status}
-            valueClass={status === "Active" ? "text-success" : ""}
-          />
+          {status && status.toLowerCase() !== "active" && (
+            <MetaItem
+              icon={ShieldCheck}
+              label="Account status"
+              value={status}
+              valueClass="text-destructive font-semibold"
+            />
+          )}
           <MetaItem
             icon={BadgeCheck}
             label="Verification"
