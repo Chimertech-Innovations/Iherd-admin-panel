@@ -288,6 +288,7 @@ function CouponsPage() {
   // KPIs
   const totalCoupons = coupons.length;
   const activeCoupons = coupons.filter((c) => c.active !== false).length;
+  const deactivatedCoupons = totalCoupons - activeCoupons;
   const percentCoupons = coupons.filter((c) => (c.type || "PERCENT").toUpperCase() === "PERCENT").length;
 
   const filteredCoupons = coupons.filter((c) => {
@@ -296,7 +297,13 @@ function CouponsPage() {
       typeFilter === "all"
         ? true
         : (c.type || "PERCENT").toUpperCase() === typeFilter.toUpperCase();
-    return codeMatch && matchType;
+    const matchStatus =
+      statusFilter === "all"
+        ? true
+        : statusFilter === "active"
+        ? c.active !== false
+        : c.active === false;
+    return codeMatch && matchType && matchStatus;
   });
 
   const handleExportCoupons = () => {
@@ -364,7 +371,7 @@ function CouponsPage() {
 
         <Card className="p-4 rounded-2xl bg-card border-border relative overflow-hidden">
           <div className="flex items-center justify-between">
-            <span className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Valid Coupons</span>
+            <span className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Active Coupons</span>
             <div className="grid h-8 w-8 place-items-center rounded-xl bg-emerald-500/10 text-emerald-600">
               <CheckCircle2 className="h-4 w-4" />
             </div>
@@ -374,7 +381,22 @@ function CouponsPage() {
           ) : (
             <div className="mt-2 text-2xl font-bold text-emerald-600">{activeCoupons}</div>
           )}
-          <div className="text-xs text-muted-foreground mt-1">Available for redemption</div>
+          <div className="text-xs text-muted-foreground mt-1">Live & redeemable at checkout</div>
+        </Card>
+
+        <Card className="p-4 rounded-2xl bg-card border-border relative overflow-hidden">
+          <div className="flex items-center justify-between">
+            <span className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Deactivated Coupons</span>
+            <div className="grid h-8 w-8 place-items-center rounded-xl bg-red-500/10 text-red-600">
+              <Power className="h-4 w-4" />
+            </div>
+          </div>
+          {isLoading ? (
+            <div className="h-8 w-16 bg-muted/70 rounded-lg mt-2 animate-pulse" />
+          ) : (
+            <div className="mt-2 text-2xl font-bold text-red-600">{deactivatedCoupons}</div>
+          )}
+          <div className="text-xs text-muted-foreground mt-1">Inactive & blocked from redemption</div>
         </Card>
 
         <Card className="p-4 rounded-2xl bg-card border-border relative overflow-hidden">
@@ -390,21 +412,6 @@ function CouponsPage() {
             <div className="mt-2 text-2xl font-bold">{products.length} Products</div>
           )}
           <div className="text-xs text-muted-foreground mt-1">Ready for discount inclusion</div>
-        </Card>
-
-        <Card className="p-4 rounded-2xl bg-card border-border relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            
-            <div className="grid h-8 w-8 place-items-center rounded-xl bg-amber-500/10 text-amber-600">
-              <Percent className="h-4 w-4" />
-            </div>
-          </div>
-          {isLoading ? (
-            <div className="h-8 w-24 bg-muted/70 rounded-lg mt-2 animate-pulse" />
-          ) : (
-            <div className="mt-2 text-2xl font-bold">{`${percentCoupons} % / ${totalCoupons - percentCoupons} Flat`}</div>
-          )}
-          <div className="text-xs text-muted-foreground mt-1">Discount structure</div>
         </Card>
       </div>
 
@@ -430,6 +437,27 @@ function CouponsPage() {
           </div>
 
           <div className="flex items-center gap-2">
+            <Select value={statusFilter} onValueChange={setStatusFilter} disabled={isLoading}>
+              <SelectTrigger className="w-36 bg-muted/50">
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All statuses</SelectItem>
+                <SelectItem value="active">
+                  <div className="flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                    <span>Active (Green)</span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="inactive">
+                  <div className="flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full bg-red-500" />
+                    <span>Deactivated (Red)</span>
+                  </div>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+
             <Select value={typeFilter} onValueChange={setTypeFilter} disabled={isLoading}>
               <SelectTrigger className="w-36 bg-muted/50">
                 <SelectValue placeholder="Type" />
@@ -453,6 +481,7 @@ function CouponsPage() {
                 <TableHead>Min. Order</TableHead>
                 <TableHead>Max. Cap</TableHead>
                 <TableHead>Expiry</TableHead>
+                <TableHead>Status</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -484,6 +513,7 @@ function CouponsPage() {
 
                   const hasIncluded = Array.isArray(c.productIds) && c.productIds.length > 0;
                   const hasExcluded = Array.isArray(c.excludedProductIds) && c.excludedProductIds.length > 0;
+                  const isActive = c.active !== false;
 
                   return (
                     <TableRow key={c.id} className="hover:bg-muted/30 transition-colors">
@@ -545,18 +575,33 @@ function CouponsPage() {
                         </div>
                       </TableCell>
 
+                      {/* Status Column: strictly Green for Active, strictly Red for Deactivated */}
+                      <TableCell>
+                        {isActive ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-600 border border-emerald-500/30">
+                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                            Active
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-red-500/10 text-red-600 border border-red-500/30">
+                            <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
+                            Deactivated
+                          </span>
+                        )}
+                      </TableCell>
+
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1.5">
                           <Button
                             size="sm"
                             variant="ghost"
                             onClick={() => handleToggle(c)}
-                            className={`h-8 w-8 p-0 ${
-                              c.active !== false
-                                ? "text-amber-500 hover:text-amber-600 hover:bg-amber-50"
-                                : "text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
+                            className={`h-8 w-8 p-0 rounded-lg transition-colors ${
+                              isActive
+                                ? "text-emerald-600 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20"
+                                : "text-red-500 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/20"
                             }`}
-                            title={c.active !== false ? "Deactivate coupon" : "Activate coupon"}
+                            title={isActive ? "Active (Green) — Click to Deactivate (turns Red)" : "Deactivated (Red) — Click to Activate (turns Green)"}
                           >
                             <Power className="h-4 w-4" />
                           </Button>
@@ -1140,6 +1185,55 @@ function CouponsPage() {
                   Limit to One Time Use per Customer (Prevents duplicate redemption by the same user account)
                 </span>
               </label>
+            </div>
+
+            {/* 5. Coupon Status: Green for Active, Red for Deactivated */}
+            <div
+              onClick={() => setActive(!active)}
+              className={`flex items-center justify-between p-4 rounded-2xl border cursor-pointer transition-all ${
+                active
+                  ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-900 dark:text-emerald-200"
+                  : "bg-red-500/10 border-red-500/30 text-red-900 dark:text-red-200"
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <div
+                  className={`h-9 w-9 rounded-xl grid place-items-center ${
+                    active ? "bg-emerald-500/20 text-emerald-600" : "bg-red-500/20 text-red-600"
+                  }`}
+                >
+                  <Power className="h-5 w-5" />
+                </div>
+                <div>
+                  <div className="text-xs font-bold flex items-center gap-2">
+                    <span>Coupon Activation Status:</span>
+                    <span
+                      className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                        active ? "bg-emerald-600 text-white" : "bg-red-600 text-white"
+                      }`}
+                    >
+                      {active ? "Active" : "Deactivated"}
+                    </span>
+                  </div>
+                  <p className="text-[11px] opacity-80 mt-0.5">
+                    {active
+                      ? "Coupon is live in green status and valid for customer checkout redemption."
+                      : "Coupon is deactivated in red status and cannot be redeemed."}
+                  </p>
+                </div>
+              </div>
+
+              <div className="shrink-0">
+                <span
+                  className={`text-xs font-bold px-3 py-1.5 rounded-xl border ${
+                    active
+                      ? "bg-emerald-600 text-white border-emerald-700 shadow-xs"
+                      : "bg-red-600 text-white border-red-700 shadow-xs"
+                  }`}
+                >
+                  {active ? "Active (Green)" : "Deactivated (Red)"}
+                </span>
+              </div>
             </div>
 
             {/* Modal Sticky Footer */}

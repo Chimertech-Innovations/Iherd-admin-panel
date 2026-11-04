@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useRef } from "react";
 import { createFileRoute } from "@tanstack/react-router";
+import { processBannerImage, validateImageFile } from "@/lib/imageProcessor";
 import { getApiBaseUrlSync } from "@/lib/apiClient";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -192,6 +193,7 @@ function BannersPage() {
   const [imageTab, setImageTab] = useState<"upload" | "url">("upload");
   const [imagePreview, setImagePreview] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [detectedDimensions, setDetectedDimensions] = useState<{ width: number; height: number; isExact: boolean } | null>(null);
   const [productSearch, setProductSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("cat_disease_management");
   const [selectedSubCategory, setSelectedSubCategory] = useState<string>("subcat_disease_detection");
@@ -440,10 +442,18 @@ function BannersPage() {
     });
   };
 
-  // Handle Image File Upload directly to Firebase Storage
+  // Handle Image File Upload directly to Firebase Storage with format validation and dimension detection
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    // Strict image validation
+    const validation = validateImageFile(file);
+    if (!validation.valid) {
+      toast.error(validation.error || "Unsupported file format! Please upload an image file (PNG, JPG, WebP).");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
 
     setSelectedFile(file);
     const localUrl = URL.createObjectURL(file);
@@ -451,13 +461,57 @@ function BannersPage() {
     setUploadingImage(true);
 
     try {
+      const bannerProcessed = await processBannerImage(file, false);
+      setDetectedDimensions({
+        width: bannerProcessed.width,
+        height: bannerProcessed.height,
+        isExact: bannerProcessed.isExact,
+      });
+
       const downloadUrl = await uploadImageFile(file);
       setImageUrl(downloadUrl);
-      toast.success("Banner image uploaded to Firebase Storage!");
+      if (bannerProcessed.isExact) {
+        toast.success("Banner image uploaded with exact 485 × 210 px dimensions!");
+      } else {
+        toast.info(`Banner uploaded (${bannerProcessed.width}×${bannerProcessed.height} px). You can click "Auto-Fit to 485×210" if desired.`);
+      }
     } catch (err: any) {
       console.warn("Background upload error, will auto-retry when saving:", err);
       const msg = err?.message || "Storage upload issue";
       toast.error(msg.includes("too large") ? "Image size too large. Please select a smaller file." : msg);
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  // Auto-fit selected banner image to exact 485 × 210 canvas
+  const handleAutoFitBanner = async () => {
+    if (!selectedFile && !imagePreview && !imageUrl) return;
+    try {
+      setUploadingImage(true);
+      let fileToFit = selectedFile;
+      if (!fileToFit && (imagePreview || imageUrl)) {
+        const res = await fetch(imagePreview || formatImageUrl(imageUrl));
+        const blob = await res.blob();
+        fileToFit = new File([blob], "banner.jpg", { type: blob.type || "image/jpeg" });
+      }
+      if (!fileToFit) return;
+
+      const fitted = await processBannerImage(fileToFit, true);
+      setSelectedFile(fitted.file);
+      const localUrl = URL.createObjectURL(fitted.file);
+      setImagePreview(localUrl);
+      setDetectedDimensions({
+        width: fitted.width,
+        height: fitted.height,
+        isExact: true,
+      });
+
+      const downloadUrl = await uploadImageFile(fitted.file);
+      setImageUrl(downloadUrl);
+      toast.success("Banner image successfully auto-fitted to 485 × 210 px!");
+    } catch (err: any) {
+      toast.error("Auto-fit failed: " + (err.message || "Unknown error"));
     } finally {
       setUploadingImage(false);
     }
@@ -473,6 +527,7 @@ function BannersPage() {
     setImageUrl("");
     setImagePreview("");
     setSelectedFile(null);
+    setDetectedDimensions(null);
     setImageTab("upload");
     setProductSearch("");
     setSelectedCategory("cat_disease_management");
@@ -498,6 +553,18 @@ function BannersPage() {
     setImageUrl(banner.imageUrl || "");
     setImagePreview(banner.imageUrl || "");
     setSelectedFile(null);
+    setDetectedDimensions(null);
+    if (banner.imageUrl) {
+      const img = new Image();
+      img.onload = () => {
+        setDetectedDimensions({
+          width: img.width,
+          height: img.height,
+          isExact: img.width === 485 && img.height === 210,
+        });
+      };
+      img.src = formatImageUrl(banner.imageUrl);
+    }
     setImageTab(banner.imageUrl ? "upload" : "upload");
     setProductSearch("");
     const resolvedActionType = banner.actionType || (banner.bannerType === "offer_banners" ? "product" : "screen");
@@ -1564,24 +1631,29 @@ function BannersPage() {
             </div>
 
             {/* 2. Banner Artwork & Media Upload */}
-            <div className="bg-muted/20 p-4 rounded-2xl border border-border/60 space-y-3">
-              <div className="flex items-center justify-between">
+            <div className="bg-muted/20 p-4 sm:p-5 rounded-2xl border border-border/60 space-y-3.5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div>
-                  <Label className="text-xs font-bold text-foreground flex items-center gap-1.5">
-                    <ImageIcon className="h-4 w-4 text-primary" />
-                    <span>Banner Artwork</span>
-                  </Label>
-                  <p className="text-[11px] text-muted-foreground">
-                    Upload image file to Firebase Storage or enter image URL
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Label className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                      <ImageIcon className="h-4 w-4 text-primary" />
+                      <span>Banner Artwork</span>
+                    </Label>
+                    <Badge variant="outline" className="text-[11px] font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/30 border-blue-200">
+                      Required Dimension: 485 × 210 px
+                    </Badge>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    Standard mobile app carousel banner ratio is 485 × 210 px (~2.31:1)
                   </p>
                 </div>
-                <div className="flex items-center rounded-xl bg-background border p-0.5 text-xs font-medium">
+                <div className="flex items-center rounded-xl bg-background border p-0.5 text-xs font-medium shrink-0">
                   <button
                     type="button"
                     onClick={() => setImageTab("upload")}
                     className={`px-3 py-1 rounded-lg transition-all ${
                       imageTab === "upload"
-                        ? "bg-primary text-primary-foreground shadow-xs"
+                        ? "bg-primary text-primary-foreground shadow-xs font-semibold"
                         : "text-muted-foreground hover:text-foreground"
                     }`}
                   >
@@ -1592,7 +1664,7 @@ function BannersPage() {
                     onClick={() => setImageTab("url")}
                     className={`px-3 py-1 rounded-lg transition-all ${
                       imageTab === "url"
-                        ? "bg-primary text-primary-foreground shadow-xs"
+                        ? "bg-primary text-primary-foreground shadow-xs font-semibold"
                         : "text-muted-foreground hover:text-foreground"
                     }`}
                   >
@@ -1606,82 +1678,111 @@ function BannersPage() {
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept="image/*"
+                    accept="image/png,image/jpeg,image/jpg,image/webp"
                     onChange={handleFileUpload}
                     className="hidden"
                   />
                   {imagePreview || imageUrl ? (
-                    <div className="relative rounded-2xl overflow-hidden border border-border/80 bg-black/10 group">
-                      <div className="w-full h-44 sm:h-48 flex items-center justify-center p-2 bg-muted/40">
+                    <div className="rounded-2xl overflow-hidden border border-border/80 bg-background shadow-xs space-y-0">
+                      <div className="relative w-full aspect-[485/210] max-h-56 bg-slate-900/90 dark:bg-black flex items-center justify-center p-2 group">
                         <img
                           src={imagePreview || formatImageUrl(imageUrl)}
                           alt="Banner Preview"
-                          className="max-h-full max-w-full object-contain rounded-xl shadow-xs"
+                          className="max-h-full max-w-full object-contain rounded-lg shadow-sm"
                         />
+                        <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => fileInputRef.current?.click()}
+                            className="rounded-xl text-xs gap-1.5 bg-white text-black hover:bg-slate-100 font-semibold"
+                          >
+                            <Upload className="h-3.5 w-3.5" /> Replace Image
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => {
+                              setSelectedFile(null);
+                              setImagePreview("");
+                              setImageUrl("");
+                              setDetectedDimensions(null);
+                            }}
+                            className="rounded-xl text-xs gap-1.5 font-semibold"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" /> Remove
+                          </Button>
+                        </div>
                       </div>
-                      <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="secondary"
-                          onClick={() => fileInputRef.current?.click()}
-                          className="rounded-xl text-xs gap-1.5 bg-white/90 text-black hover:bg-white"
-                        >
-                          <Upload className="h-3.5 w-3.5" /> Replace Image
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="destructive"
-                          onClick={() => {
-                            setSelectedFile(null);
-                            setImagePreview("");
-                            setImageUrl("");
-                          }}
-                          className="rounded-xl text-xs gap-1.5"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" /> Remove
-                        </Button>
-                      </div>
-                      <div className="p-2.5 bg-background/95 border-t flex items-center justify-between text-xs">
-                        <div className="flex items-center gap-1.5 text-emerald-600 font-medium text-[11px]">
-                          {uploadingImage ? (
-                            <>
-                              <RefreshCw className="h-3.5 w-3.5 animate-spin text-primary" />
-                              <span className="text-primary font-semibold">Uploading to Firebase Storage...</span>
-                            </>
+
+                      {/* Dimension and Auto-Fit action banner */}
+                      <div className="p-3 bg-muted/40 border-t flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {detectedDimensions ? (
+                            detectedDimensions.isExact ? (
+                              <Badge className="bg-emerald-600 hover:bg-emerald-600 text-white gap-1 text-[11px] font-semibold py-0.5">
+                                <CheckCircle2 className="h-3.5 w-3.5" /> Exact Dimension: 485 × 210 px
+                              </Badge>
+                            ) : (
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <Badge variant="outline" className="text-amber-600 border-amber-300 bg-amber-50 dark:bg-amber-950/30 gap-1 text-[11px] font-semibold py-0.5">
+                                  <AlertTriangle className="h-3.5 w-3.5" /> Uploaded: {detectedDimensions.width} × {detectedDimensions.height} px
+                                </Badge>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  onClick={handleAutoFitBanner}
+                                  disabled={uploadingImage}
+                                  className="h-6 text-[11px] rounded-lg px-2.5 bg-amber-600 hover:bg-amber-700 text-white font-semibold shadow-xs gap-1"
+                                >
+                                  <Sparkles className="h-3 w-3" /> Auto-Fit to 485 × 210 px
+                                </Button>
+                              </div>
+                            )
                           ) : (
-                            <>
-                              <CheckCircle2 className="h-3.5 w-3.5" />
-                              <span>Banner image attached and ready</span>
-                            </>
+                            <span className="text-[11px] text-muted-foreground font-medium">
+                              Target Dimension: 485 × 210 px
+                            </span>
                           )}
                         </div>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => fileInputRef.current?.click()}
-                          className="h-6 text-[11px] px-2 text-primary hover:text-primary"
-                        >
-                          Change File
-                        </Button>
+
+                        <div className="flex items-center gap-2">
+                          {uploadingImage && (
+                            <span className="text-primary font-semibold text-[11px] flex items-center gap-1">
+                              <RefreshCw className="h-3.5 w-3.5 animate-spin" /> Uploading...
+                            </span>
+                          )}
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => fileInputRef.current?.click()}
+                            className="h-7 text-xs px-2.5 text-primary hover:text-primary font-semibold"
+                          >
+                            Change File
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   ) : (
                     <div
                       onClick={() => fileInputRef.current?.click()}
-                      className="border-2 border-dashed border-border/90 hover:border-primary/70 transition-all rounded-2xl p-6 bg-background/50 hover:bg-background text-center cursor-pointer group space-y-2"
+                      className="border-2 border-dashed border-border/80 hover:border-primary/80 transition-all rounded-2xl p-6 bg-background/50 hover:bg-background text-center cursor-pointer group space-y-2.5"
                     >
                       <div className="h-12 w-12 rounded-2xl bg-primary/10 text-primary grid place-items-center mx-auto group-hover:scale-105 transition-transform">
                         <Upload className="h-6 w-6" />
                       </div>
                       <div>
-                        <div className="text-xs sm:text-sm font-semibold text-foreground">
+                        <div className="text-sm font-semibold text-foreground">
                           Click to browse banner image file
                         </div>
-                        <div className="text-[11px] text-muted-foreground mt-0.5">
-                          PNG, JPG, WebP supported. File is auto-compressed and uploaded to Firebase Storage.
+                        <div className="text-xs text-muted-foreground mt-0.5">
+                          Only image files (PNG, JPG, WebP) supported. Standard size: <strong className="text-foreground">485 × 210 px</strong>.
+                        </div>
+                        <div className="mt-2 inline-flex items-center gap-1 text-[11px] font-semibold text-primary bg-primary/10 px-2.5 py-0.5 rounded-full">
+                          <Sparkles className="h-3 w-3" /> Auto-fits & compresses to Firebase Storage
                         </div>
                       </div>
                     </div>
@@ -1696,18 +1797,46 @@ function BannersPage() {
                       onChange={(e) => {
                         setImageUrl(e.target.value);
                         setImagePreview(e.target.value);
+                        if (e.target.value) {
+                          const img = new Image();
+                          img.onload = () => {
+                            setDetectedDimensions({
+                              width: img.width,
+                              height: img.height,
+                              isExact: img.width === 485 && img.height === 210,
+                            });
+                          };
+                          img.src = e.target.value;
+                        } else {
+                          setDetectedDimensions(null);
+                        }
                       }}
                       placeholder="Paste https://firebasestorage.googleapis.com/... or CDN image URL"
                       className="h-10 pl-9 text-xs font-mono rounded-xl bg-background border-border"
                     />
                   </div>
                   {(imagePreview || imageUrl) && (
-                    <div className="relative rounded-2xl overflow-hidden border bg-muted/40 h-40 flex items-center justify-center p-2">
-                      <img
-                        src={imagePreview || formatImageUrl(imageUrl)}
-                        alt="Banner Preview"
-                        className="max-h-full max-w-full object-contain rounded-xl"
-                      />
+                    <div className="rounded-2xl overflow-hidden border bg-background shadow-xs space-y-0">
+                      <div className="relative w-full aspect-[485/210] max-h-56 bg-slate-900/90 dark:bg-black flex items-center justify-center p-2">
+                        <img
+                          src={imagePreview || formatImageUrl(imageUrl)}
+                          alt="Banner Preview"
+                          className="max-h-full max-w-full object-contain rounded-lg"
+                        />
+                      </div>
+                      {detectedDimensions && (
+                        <div className="p-2.5 bg-muted/40 border-t flex items-center justify-between text-xs">
+                          {detectedDimensions.isExact ? (
+                            <Badge className="bg-emerald-600 text-white gap-1 text-[11px] font-semibold py-0.5">
+                              <CheckCircle2 className="h-3 w-3" /> Exact Dimension: 485 × 210 px
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-amber-600 border-amber-300 bg-amber-50 dark:bg-amber-950/30 gap-1 text-[11px] font-semibold py-0.5">
+                              <AlertTriangle className="h-3 w-3" /> Dimension: {detectedDimensions.width} × {detectedDimensions.height} px (Recommended: 485 × 210)
+                            </Badge>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

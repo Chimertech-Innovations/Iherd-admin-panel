@@ -320,13 +320,6 @@ function FarmsPage() {
 
         {/* Action Button & Filters */}
         <div className="flex items-center flex-wrap gap-2">
-          <Button asChild size="sm" className="rounded-xl h-9 text-xs gap-1.5 shadow-sm bg-primary text-primary-foreground">
-            <Link to="/map">
-              <MapPin className="h-3.5 w-3.5" />
-              <span>Explore Farms on Live Map</span>
-            </Link>
-          </Button>
-
           <Button asChild size="sm" variant="outline" className="rounded-xl h-9 text-xs gap-1.5 border-dashed">
             <Link to="/cattle">
               <Beef className="h-3.5 w-3.5 text-primary" />
@@ -536,12 +529,6 @@ function FarmsPage() {
             label: "Actions",
             render: (r) => (
               <div className="flex items-center gap-1.5 justify-end">
-                <Button asChild size="sm" variant="outline" className="h-8 text-xs gap-1 rounded-xl bg-background/50 hover:bg-teal-50 hover:text-teal-700 hover:border-teal-300 dark:hover:bg-teal-950/50 transition-colors" title="Locate Farm on Map">
-                  <Link to="/map">
-                    <MapPin className="h-3.5 w-3.5 text-teal-600" />
-                    <span>Map</span>
-                  </Link>
-                </Button>
                 <Button
                   size="sm"
                   variant="outline"
@@ -697,14 +684,7 @@ function FarmsPage() {
               )}
 
               {/* Action Buttons */}
-              <div className="flex items-center justify-between gap-2 pt-2 border-t">
-                <Button asChild size="sm" variant="outline" className="rounded-xl text-xs gap-1.5 border-teal-300 text-teal-700 hover:bg-teal-50 dark:border-teal-800 dark:text-teal-400">
-                  <Link to="/map">
-                    <MapPin className="h-3.5 w-3.5" />
-                    <span>View All Farms on Live Map</span>
-                  </Link>
-                </Button>
-
+              <div className="flex items-center justify-end gap-2 pt-2 border-t">
                 {selectedFarmDetail.ownerUid && (
                   <Button asChild size="sm" className="rounded-xl text-xs gap-1.5">
                     <Link to="/users/$userId" params={{ userId: selectedFarmDetail.ownerUid }} search={{ tab: "farmer" } as any}>

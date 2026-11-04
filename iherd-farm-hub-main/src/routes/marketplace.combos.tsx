@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useMemo } from "react";
+import { processSquareImage, validateImageFile } from "@/lib/imageProcessor";
 import { PageHeader } from "@/components/admin/PageHeader";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -492,8 +493,12 @@ function CombosPage() {
     if (!quickCombo) return;
     const pVal = Number(quickPrice);
     const mVal = Number(quickMrp) || pVal;
-    if (isNaN(pVal) || pVal < 0) {
-      toast.error("Please enter a valid price");
+    if (isNaN(pVal) || pVal <= 0) {
+      toast.error("Please enter a valid price greater than ₹0");
+      return;
+    }
+    if (mVal <= pVal) {
+      toast.error(`Invalid Price Condition: MRP (₹${mVal.toLocaleString()}) must be strictly greater than Selling Price (₹${pVal.toLocaleString()}).`);
       return;
     }
 
@@ -531,23 +536,28 @@ function CombosPage() {
 
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        if (!file.type.startsWith("image/")) continue;
+        const val = validateImageFile(file);
+        if (!val.valid) {
+          toast.error(val.error || "Unsupported file format! Please upload only image files (PNG, JPEG, WebP).");
+          continue;
+        }
 
-        const reader = new FileReader();
-        const base64Promise = new Promise<string>((resolve, reject) => {
-          reader.onload = () => resolve(reader.result as string);
-          reader.onerror = reject;
-          reader.readAsDataURL(file);
-        });
-        const base64 = await base64Promise;
+        const isPrimary = i === 0 && !thumbnailUrl.trim();
+        let processed;
+        try {
+          processed = await processSquareImage(file, isPrimary);
+        } catch (procErr: any) {
+          toast.error(`Image error for ${file.name}: ${procErr.message}`);
+          continue;
+        }
 
         const res = await fetch(`${base}/api/admin/upload-image`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            base64,
-            filename: file.name,
-            contentType: file.type || "image/jpeg",
+            base64: processed.base64,
+            filename: processed.file.name,
+            contentType: processed.file.type || "image/webp",
             folder: "combos/images",
           }),
         });
@@ -557,6 +567,9 @@ function CombosPage() {
           if (data?.url) {
             newUrls.push(data.url);
             successCount++;
+            if (isPrimary) {
+              toast.success(`Primary combo image cropped to 1:1 square & compressed to ${processed.sizeKB} KB (<= 20 KB limit)!`);
+            }
           }
         }
       }
@@ -665,6 +678,13 @@ function CombosPage() {
       setFieldErrors({ mrp: true });
       setActiveTab("basic");
       toast.error("Required field missing: MRP Price. Please enter a valid MRP greater than ₹0.");
+      return;
+    }
+
+    if (numMrp <= numPrice) {
+      setFieldErrors({ mrp: true, price: true });
+      setActiveTab("basic");
+      toast.error(`Invalid Price Condition: MRP (₹${numMrp.toLocaleString()}) must be strictly greater than Selling Price (₹${numPrice.toLocaleString()}).`);
       return;
     }
 
@@ -1116,8 +1136,10 @@ function CombosPage() {
                       </button>
                     </TableCell>
 
-                    <TableCell className="line-through text-muted-foreground font-mono">
-                      ₹{c.mrp?.toLocaleString() || "0"}
+                    <TableCell className="font-mono">
+                      <span className="line-through text-red-500 font-semibold">
+                        ₹{c.mrp?.toLocaleString() || "0"}
+                      </span>
                     </TableCell>
 
                     <TableCell>
@@ -1125,6 +1147,8 @@ function CombosPage() {
                         <Badge className="bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 text-[10px] font-bold">
                           {discount}% OFF
                         </Badge>
+                      ) : (c.mrp && c.price && c.mrp <= c.price) ? (
+                        <span className="text-[10px] font-bold text-destructive">⚠️ MRP &le; Price</span>
                       ) : (
                         <span className="text-muted-foreground">—</span>
                       )}
@@ -1322,79 +1346,107 @@ function CombosPage() {
                   </div>
                 </div>
 
-                {/* Pricing, MRP & GST */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3.5 rounded-2xl border bg-muted/20">
-                  <div className="space-y-1">
-                    <Label htmlFor="price" className="text-xs font-semibold flex items-center gap-1 text-emerald-600">
-                      <IndianRupee className="h-3.5 w-3.5" />
-                      Selling Price (₹) *
-                    </Label>
-                    <Input
-                      id="price"
-                      type="number"
-                      min="0"
-                      value={price}
-                      onChange={(e) => {
-                        setPrice(e.target.value);
-                        clearFieldError("price");
-                      }}
-                      required
-                      className={`rounded-xl font-mono text-xs font-bold text-emerald-600 ${
-                        fieldErrors.price ? "border-destructive ring-2 ring-destructive/50 bg-destructive/5 text-destructive" : ""
-                      }`}
-                    />
-                    {fieldErrors.price && (
-                      <p className="text-[11px] font-semibold text-destructive flex items-center gap-1 mt-1 animate-pulse">
-                        <AlertCircle className="h-3.5 w-3.5" />
-                        <span>Selling price is required and must be greater than ₹0</span>
-                      </p>
-                    )}
-                  </div>
+                {/* Pricing, MRP & GST with Strict Validation (MRP > Price, Green/Red Highlights) */}
+                {(() => {
+                  const numPriceVal = Number(price) || 0;
+                  const numMrpVal = Number(mrp) || 0;
+                  const isPriceInvalid = numPriceVal > 0 && numMrpVal > 0 && numMrpVal <= numPriceVal;
+                  const discountPercent = numMrpVal > numPriceVal && numMrpVal > 0 ? Math.round(((numMrpVal - numPriceVal) / numMrpVal) * 100) : 0;
 
-                  <div className="space-y-1">
-                    <Label htmlFor="mrp" className="text-xs font-semibold flex items-center gap-1">
-                      <IndianRupee className="h-3.5 w-3.5 text-muted-foreground" />
-                      MRP Price (₹) *
-                    </Label>
-                    <Input
-                      id="mrp"
-                      type="number"
-                      min="0"
-                      value={mrp}
-                      onChange={(e) => {
-                        setMrp(e.target.value);
-                        clearFieldError("mrp");
-                      }}
-                      required
-                      className={`rounded-xl font-mono text-xs ${
-                        fieldErrors.mrp ? "border-destructive ring-2 ring-destructive/50 bg-destructive/5 text-destructive" : ""
-                      }`}
-                    />
-                    {fieldErrors.mrp && (
-                      <p className="text-[11px] font-semibold text-destructive flex items-center gap-1 mt-1 animate-pulse">
-                        <AlertCircle className="h-3.5 w-3.5" />
-                        <span>MRP is required and must be greater than ₹0</span>
-                      </p>
-                    )}
-                  </div>
+                  return (
+                    <div className="space-y-2 p-3.5 rounded-2xl border bg-muted/20">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className="space-y-1">
+                          <Label htmlFor="price" className="text-xs font-semibold flex items-center justify-between text-emerald-600">
+                            <span className="flex items-center gap-1">
+                              <IndianRupee className="h-3.5 w-3.5" />
+                              Selling Price (₹) *
+                            </span>
+                            {discountPercent > 0 && (
+                              <span className="text-[10px] font-bold bg-emerald-500/10 text-emerald-600 px-1.5 py-0.2 rounded">
+                                {discountPercent}% OFF
+                              </span>
+                            )}
+                          </Label>
+                          <Input
+                            id="price"
+                            type="number"
+                            min="0"
+                            value={price}
+                            onChange={(e) => {
+                              setPrice(e.target.value);
+                              clearFieldError("price");
+                            }}
+                            required
+                            className={`rounded-xl font-mono text-xs font-bold text-emerald-600 border-emerald-500/40 focus:border-emerald-600 ${
+                              fieldErrors.price || isPriceInvalid ? "border-destructive ring-2 ring-destructive/50 bg-destructive/5 text-destructive" : ""
+                            }`}
+                          />
+                          {fieldErrors.price && (
+                            <p className="text-[11px] font-semibold text-destructive flex items-center gap-1 mt-1 animate-pulse">
+                              <AlertCircle className="h-3.5 w-3.5" />
+                              <span>Selling price is required and must be greater than ₹0</span>
+                            </p>
+                          )}
+                        </div>
 
-                  <div className="space-y-1">
-                    <Label htmlFor="gst" className="text-xs font-semibold flex items-center gap-1">
-                      <Percent className="h-3.5 w-3.5 text-muted-foreground" />
-                      GST Rate (%)
-                    </Label>
-                    <Input
-                      id="gst"
-                      type="number"
-                      min="0"
-                      max="28"
-                      value={gst}
-                      onChange={(e) => setGst(e.target.value)}
-                      placeholder="5"
-                      className="rounded-xl font-mono text-xs"
-                    />
-                  </div>
-                </div>
+                        <div className="space-y-1">
+                          <Label htmlFor="mrp" className="text-xs font-semibold flex items-center justify-between text-red-500">
+                            <span className="flex items-center gap-1">
+                              <IndianRupee className="h-3.5 w-3.5" />
+                              MRP Price (₹) *
+                            </span>
+                            <span className="text-[10px] text-muted-foreground font-normal">(Must be &gt; Price)</span>
+                          </Label>
+                          <Input
+                            id="mrp"
+                            type="number"
+                            min="0"
+                            value={mrp}
+                            onChange={(e) => {
+                              setMrp(e.target.value);
+                              clearFieldError("mrp");
+                            }}
+                            required
+                            className={`rounded-xl font-mono text-xs text-red-500 font-semibold border-red-300 dark:border-red-900 ${
+                              fieldErrors.mrp || isPriceInvalid ? "border-destructive ring-2 ring-destructive/50 bg-destructive/5 text-destructive font-bold" : ""
+                            }`}
+                          />
+                          {fieldErrors.mrp && (
+                            <p className="text-[11px] font-semibold text-destructive flex items-center gap-1 mt-1 animate-pulse">
+                              <AlertCircle className="h-3.5 w-3.5" />
+                              <span>MRP is required and must be greater than ₹0</span>
+                            </p>
+                          )}
+                        </div>
+
+                        <div className="space-y-1">
+                          <Label htmlFor="gst" className="text-xs font-semibold flex items-center gap-1">
+                            <Percent className="h-3.5 w-3.5 text-muted-foreground" />
+                            GST Rate (%)
+                          </Label>
+                          <Input
+                            id="gst"
+                            type="number"
+                            min="0"
+                            max="28"
+                            value={gst}
+                            onChange={(e) => setGst(e.target.value)}
+                            placeholder="5"
+                            className="rounded-xl font-mono text-xs"
+                          />
+                        </div>
+                      </div>
+
+                      {isPriceInvalid && (
+                        <div className="p-2.5 rounded-xl bg-destructive/10 border border-destructive/30 text-destructive text-xs font-medium flex items-center gap-2">
+                          <AlertCircle className="h-4 w-4 shrink-0" />
+                          <span>Condition Error: MRP (₹{numMrpVal}) must be strictly GREATER than Selling Price (₹{numPriceVal}).</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* Packaging, Weight & Units */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-3.5 rounded-2xl border bg-muted/20">
@@ -2364,7 +2416,7 @@ function CombosPage() {
                         <ImageIcon className="h-4 w-4 text-primary" /> Combo Product Images *
                       </h4>
                       <p className="text-[11px] text-muted-foreground mt-0.5">
-                        Upload one or multiple images to Firebase Storage (<code>combos/images</code>). Click any image to set as Primary Thumbnail.
+                        Upload images to Firebase Storage (<code>combos/images</code>). <strong>1st image: 1:1 square ratio &lt;= 20 KB</strong> (auto-compressed). Other images: 1:1 square ratio &lt;= 1 MB. Click any image to set as Primary Thumbnail.
                       </p>
                     </div>
 
@@ -2375,10 +2427,10 @@ function CombosPage() {
                         }`}
                       >
                         <Upload className="h-3.5 w-3.5" />
-                        <span>{isUploading ? "Uploading Images..." : "Upload Image(s)"}</span>
+                        <span>{isUploading ? "Compressing & Uploading..." : "Upload Image(s)"}</span>
                         <input
                           type="file"
-                          accept="image/*"
+                          accept="image/png,image/jpeg,image/jpg,image/webp"
                           multiple
                           className="hidden"
                           onChange={handleImageFileUpload}
@@ -2443,22 +2495,32 @@ function CombosPage() {
                                 />
 
                                 {isPrimary ? (
-                                  <span className="absolute top-1.5 left-1.5 bg-primary text-primary-foreground text-[9px] font-bold px-1.5 py-0.5 rounded-md shadow-xs">
-                                    Thumbnail
-                                  </span>
+                                  <div className="absolute top-1.5 left-1.5 flex flex-col gap-0.5 pointer-events-none">
+                                    <span className="bg-primary text-primary-foreground text-[9px] font-bold px-1.5 py-0.5 rounded-md shadow-xs">
+                                      Primary 1:1
+                                    </span>
+                                    <span className="bg-emerald-600/90 text-white text-[8px] font-bold px-1 py-0.2 rounded shadow-xs">
+                                      &le; 20 KB
+                                    </span>
+                                  </div>
                                 ) : (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setThumbnailUrl(imgUrl);
-                                      const others = allImgs.filter((u) => u !== imgUrl);
-                                      setExtraImagesText(others.join("\n"));
-                                      toast.success("Set as Primary Thumbnail!");
-                                    }}
-                                    className="absolute top-1.5 left-1.5 bg-black/75 hover:bg-black text-white text-[9px] font-semibold px-1.5 py-0.5 rounded-md opacity-0 group-hover:opacity-100 transition-opacity"
-                                  >
-                                    Make Main
-                                  </button>
+                                  <div className="absolute top-1.5 left-1.5 flex flex-col gap-0.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setThumbnailUrl(imgUrl);
+                                        const others = allImgs.filter((u) => u !== imgUrl);
+                                        setExtraImagesText(others.join("\n"));
+                                        toast.success("Set as Primary Thumbnail!");
+                                      }}
+                                      className="bg-black/75 hover:bg-black text-white text-[9px] font-semibold px-1.5 py-0.5 rounded-md opacity-0 group-hover:opacity-100 transition-opacity"
+                                    >
+                                      Make Main
+                                    </button>
+                                    <span className="bg-black/60 text-white text-[8px] px-1 py-0.2 rounded opacity-0 group-hover:opacity-100 transition-opacity">
+                                      1:1 &le; 1 MB
+                                    </span>
+                                  </div>
                                 )}
 
                                 <button
@@ -2659,37 +2721,63 @@ function CombosPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <Label htmlFor="qPrice" className="text-xs font-semibold text-emerald-600 flex items-center gap-1">
-                    <IndianRupee className="h-3 w-3" /> Selling Price (₹) *
-                  </Label>
-                  <Input
-                    id="qPrice"
-                    type="number"
-                    min="0"
-                    value={quickPrice}
-                    onChange={(e) => setQuickPrice(e.target.value)}
-                    required
-                    autoFocus
-                    className="rounded-xl font-mono text-sm font-bold text-emerald-600"
-                  />
-                </div>
+              {(() => {
+                const p = Number(quickPrice) || 0;
+                const m = Number(quickMrp) || 0;
+                const isInvalid = p > 0 && m > 0 && m <= p;
+                const discount = m > p && m > 0 ? Math.round(((m - p) / m) * 100) : 0;
+                return (
+                  <>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <Label htmlFor="qPrice" className="text-xs font-semibold text-emerald-600 flex items-center gap-1">
+                          <IndianRupee className="h-3 w-3" /> Selling Price (₹) *
+                        </Label>
+                        <Input
+                          id="qPrice"
+                          type="number"
+                          min="0"
+                          value={quickPrice}
+                          onChange={(e) => setQuickPrice(e.target.value)}
+                          required
+                          autoFocus
+                          className="rounded-xl font-mono text-sm font-bold text-emerald-600 border-emerald-500/40 focus:border-emerald-600"
+                        />
+                      </div>
 
-                <div className="space-y-1">
-                  <Label htmlFor="qMrp" className="text-xs font-semibold text-muted-foreground flex items-center gap-1">
-                    <IndianRupee className="h-3 w-3" /> MRP Price (₹)
-                  </Label>
-                  <Input
-                    id="qMrp"
-                    type="number"
-                    min="0"
-                    value={quickMrp}
-                    onChange={(e) => setQuickMrp(e.target.value)}
-                    className="rounded-xl font-mono text-sm"
-                  />
-                </div>
-              </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="qMrp" className="text-xs font-semibold text-red-500 flex items-center gap-1">
+                          <IndianRupee className="h-3 w-3" /> MRP Price (₹) *
+                        </Label>
+                        <Input
+                          id="qMrp"
+                          type="number"
+                          min="0"
+                          value={quickMrp}
+                          onChange={(e) => setQuickMrp(e.target.value)}
+                          className={`rounded-xl font-mono text-sm ${
+                            isInvalid
+                              ? "border-destructive ring-2 ring-destructive/40 bg-destructive/5 text-destructive font-bold"
+                              : "text-red-500 font-semibold border-red-300 dark:border-red-900"
+                          }`}
+                        />
+                      </div>
+                    </div>
+
+                    {isInvalid ? (
+                      <div className="p-2.5 rounded-xl bg-destructive/10 border border-destructive/30 text-destructive text-xs font-medium flex items-center gap-2">
+                        <AlertCircle className="h-4 w-4 shrink-0" />
+                        <span>Condition Error: MRP (₹{m}) must be strictly GREATER than Selling Price (₹{p}).</span>
+                      </div>
+                    ) : discount > 0 ? (
+                      <div className="p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 text-xs font-semibold flex items-center justify-between">
+                        <span>Customer Discount:</span>
+                        <span className="font-bold">{discount}% OFF</span>
+                      </div>
+                    ) : null}
+                  </>
+                );
+              })()}
 
               <DialogFooter className="pt-2 sm:justify-end gap-2">
                 <Button

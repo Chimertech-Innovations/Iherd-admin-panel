@@ -134,9 +134,7 @@ function CattleOrdersPage() {
         statusKey="status"
         kpis={[
           { label: "Total Cattle Orders", value: isLoading ? "…" : totalCount.toLocaleString() },
-          { label: "Pending / Escrow", value: isLoading ? "…" : escrowCount.toLocaleString() },
-          { label: "Completed", value: isLoading ? "…" : completedCount.toLocaleString() },
-          { label: "Trade Volume", value: isLoading ? "…" : `₹${totalVolume.toLocaleString()}` },
+          { label: "Total Revenue", value: isLoading ? "…" : `₹${totalVolume.toLocaleString()}` },
         ]}
         data={orders.map((o: any) => {
           return {

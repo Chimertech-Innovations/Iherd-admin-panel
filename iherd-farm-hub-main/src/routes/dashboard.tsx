@@ -2060,8 +2060,7 @@ function Dashboard() {
           icon={Beef}
           tint="bg-amber-500/10 text-amber-600"
           onClick={() => {
-            setSearchQuery("");
-            setModalType("cattle");
+            navigate({ to: "/marketplace/cattle" });
           }}
         />
         <Kpi

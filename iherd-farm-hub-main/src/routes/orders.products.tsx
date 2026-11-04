@@ -94,7 +94,7 @@ async function fetchProductOrders() {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 6000);
-      const res = await fetch(`${base}/api/admin/product-orders`, { signal: controller.signal });
+      const res = await fetch(`${base}/api/admin/product-orders?refresh=1&t=${Date.now()}`, { signal: controller.signal });
       clearTimeout(timeoutId);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
@@ -375,10 +375,16 @@ function ProductOrdersPage() {
           { label: "Total Revenue", value: isLoading ? "…" : `₹${totalRevenue.toLocaleString()}` }
         ]}
         data={orders.map((o: any) => {
+          const rawSeller = (o.sellerName || o.shopName || o.storeName || "").trim();
+          const sellerName =
+            rawSeller && rawSeller !== "—" && !rawSeller.toLowerCase().includes("iherd marketplace")
+              ? rawSeller
+              : "Chimertech";
           return {
             ...o,
+            sellerName,
             status: getLocalizedText(o.status, "Ordered"),
-            rawOrder: o,
+            rawOrder: { ...o, sellerName },
           };
         })}
         columns={[
@@ -441,14 +447,21 @@ function ProductOrdersPage() {
           {
             key: "seller",
             label: "Shop / Seller",
-            render: (r) => (
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground min-w-[120px]">
-                <Store className="h-3.5 w-3.5 text-primary shrink-0" />
-                <span className="text-foreground font-medium truncate">
-                  {r.sellerName || "iHerd Marketplace"}
-                </span>
-              </div>
-            ),
+            render: (r) => {
+              const raw = (r.sellerName || r.shopName || r.storeName || r.rawOrder?.sellerName || "").trim();
+              const sellerName =
+                raw && raw !== "—" && !raw.toLowerCase().includes("iherd marketplace")
+                  ? raw
+                  : "Chimertech";
+              return (
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground min-w-[120px]">
+                  <Store className="h-3.5 w-3.5 text-primary shrink-0" />
+                  <span className="text-foreground font-semibold truncate">
+                    {sellerName}
+                  </span>
+                </div>
+              );
+            },
           },
           {
             key: "items",
@@ -681,175 +694,45 @@ function ProductOrdersPage() {
           </DialogHeader>
 
           {selectedOrder && (
-            <div className="space-y-6 mt-3">
-              {/* Visual Order & Tracking Step Progression */}
-              <div className="p-4 rounded-2xl bg-muted/40 border space-y-3">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                    <Navigation className="h-3.5 w-3.5 text-primary" /> Shipment Journey Status
-                  </span>
-                  <span className="font-semibold text-foreground">
-                    Current: <strong className="text-primary">{selectedOrder.status || "Ordered"}</strong>
-                  </span>
-                </div>
-
-                {getStepIndex(selectedOrder.status) === -1 ? (
-                  <div className="p-3 rounded-xl bg-destructive/10 border border-destructive/30 flex items-center gap-2 text-xs text-destructive font-semibold">
-                    <AlertCircle className="h-4 w-4 shrink-0" />
-                    <span>This order is marked as {selectedOrder.status || "Cancelled"}.</span>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-5 gap-2 pt-2">
-                    {ORDER_STATUS_STEPS.map((step, sIdx) => {
-                      const currentIdx = getStepIndex(selectedOrder.status);
-                      const isDone = sIdx <= currentIdx;
-                      const isCurrent = sIdx === currentIdx;
-                      return (
-                        <div key={step.key} className="flex flex-col items-center text-center space-y-1.5">
-                          <div
-                            className={`h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold transition-all shadow-sm ${
-                              isCurrent
-                                ? "bg-primary text-primary-foreground ring-4 ring-primary/20 scale-105"
-                                : isDone
-                                ? "bg-emerald-500 text-white"
-                                : "bg-muted text-muted-foreground border"
-                            }`}
-                          >
-                            {isDone ? <Check className="h-4 w-4" /> : sIdx + 1}
-                          </div>
-                          <span
-                            className={`text-[11px] font-semibold leading-tight ${
-                              isCurrent ? "text-primary font-bold" : isDone ? "text-foreground" : "text-muted-foreground"
-                            }`}
-                          >
-                            {step.label}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {/* Live Shipping & Courier Tracking Card */}
-              <div className="p-5 rounded-2xl bg-primary/5 border border-primary/20 space-y-4">
-                <div className="flex items-center justify-between flex-wrap gap-2">
-                  <div className="flex items-center gap-2">
-                    <div className="h-9 w-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
-                      <Truck className="h-5 w-5" />
+            <div className="space-y-5 mt-3">
+              {/* Official Tax Invoice Download Banner */}
+              {(selectedOrder.invoiceUrl || (selectedOrder.invoiceNumber && selectedOrder.invoiceNumber !== "—")) && (
+                <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-between gap-3 flex-wrap">
+                  <div className="flex items-center gap-2.5 text-xs text-emerald-800 dark:text-emerald-300 font-semibold">
+                    <div className="h-9 w-9 rounded-xl bg-emerald-500/20 grid place-items-center text-emerald-700 dark:text-emerald-300">
+                      <FileCheck className="h-5 w-5" />
                     </div>
                     <div>
-                      <h4 className="text-sm font-bold text-foreground">
-                        Shipping Carrier & Tracking Information
-                      </h4>
-                      <p className="text-xs text-muted-foreground">
-                        Real-time courier dispatch and delivery tracking details
-                      </p>
+                      <div className="font-bold text-sm">Official Tax Invoice</div>
+                      <div className="text-[11px] font-mono opacity-85">
+                        Invoice No: {selectedOrder.invoiceNumber || `INV-${selectedOrder.orderId || selectedOrder.id}`}
+                      </div>
                     </div>
                   </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => openTrackingDialog(selectedOrder)}
-                    className="h-7 text-xs rounded-xl gap-1 font-semibold"
-                  >
-                    <Edit3 className="h-3 w-3" /> Edit Shipment
-                  </Button>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 text-xs pt-1">
-                  <div className="p-3 rounded-xl bg-background border space-y-1">
-                    <span className="text-muted-foreground text-[11px] font-medium block">Courier Partner</span>
-                    <span className="font-bold text-foreground text-sm flex items-center gap-1.5">
-                      <Building2 className="h-3.5 w-3.5 text-primary" />
-                      {selectedOrder.carrierName || selectedOrder.courierPartner || "Not Assigned"}
-                    </span>
-                  </div>
-
-                  <div className="p-3 rounded-xl bg-background border space-y-1">
-                    <span className="text-muted-foreground text-[11px] font-medium block">AWB / Tracking Number</span>
-                    <div className="flex items-center justify-between gap-1">
-                      <span className="font-mono font-bold text-foreground text-xs">
-                        {selectedOrder.trackingId && selectedOrder.trackingId !== "—"
-                          ? selectedOrder.trackingId
-                          : "Not Available"}
-                      </span>
-                      {selectedOrder.trackingId && selectedOrder.trackingId !== "—" && (
-                        <button
-                          onClick={() => handleCopy(selectedOrder.trackingId)}
-                          className="text-muted-foreground hover:text-foreground p-0.5"
-                          title="Copy AWB"
-                        >
-                          <Copy className="h-3 w-3" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="p-3 rounded-xl bg-background border space-y-1">
-                    <span className="text-muted-foreground text-[11px] font-medium block">Estimated Delivery</span>
-                    <span className="font-semibold text-foreground flex items-center gap-1.5">
-                      <Calendar className="h-3.5 w-3.5 text-primary" />
-                      {formatDateOnly(selectedOrder.estimatedDeliveryDate || selectedOrder.deliveryDate)}
-                    </span>
-                  </div>
-
-                  {selectedOrder.dispatchedAt && (
-                    <div className="p-3 rounded-xl bg-background border space-y-1">
-                      <span className="text-muted-foreground text-[11px] font-medium block">Dispatched Date</span>
-                      <span className="font-semibold text-foreground flex items-center gap-1.5">
-                        <Clock className="h-3.5 w-3.5 text-primary" />
-                        {formatDateTime(selectedOrder.dispatchedAt)}
-                      </span>
-                    </div>
-                  )}
-
-                  {selectedOrder.shippingNotes && (
-                    <div className="p-3 rounded-xl bg-background border sm:col-span-2 space-y-1">
-                      <span className="text-muted-foreground text-[11px] font-medium block">Shipping Notes / Remarks</span>
-                      <p className="text-foreground text-xs">{selectedOrder.shippingNotes}</p>
-                    </div>
-                  )}
-                </div>
-
-                {/* Direct Tracking Portal Button */}
-                {selectedOrder.trackingUrl ? (
-                  <div className="pt-2 flex items-center justify-between gap-2 border-t border-primary/20">
-                    <span className="text-xs text-muted-foreground">
-                      Direct carrier tracking portal is configured.
-                    </span>
+                  {selectedOrder.invoiceUrl ? (
                     <a
-                      href={selectedOrder.trackingUrl}
+                      href={selectedOrder.invoiceUrl}
                       target="_blank"
                       rel="noreferrer"
-                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-primary text-primary-foreground text-xs font-bold shadow hover:opacity-90 transition-all"
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow transition-all"
                     >
-                      <Truck className="h-3.5 w-3.5" /> Track Package on Carrier Site{" "}
-                      <ExternalLink className="h-3 w-3" />
+                      <Download className="h-4 w-4" /> Download Tax Invoice PDF
                     </a>
-                  </div>
-                ) : (
-                  <div className="pt-1 flex items-center justify-between text-xs text-muted-foreground">
-                    <span>No external tracking URL saved.</span>
-                    <Button
-                      variant="link"
-                      size="sm"
-                      onClick={() => openTrackingDialog(selectedOrder)}
-                      className="h-auto p-0 text-primary text-xs"
-                    >
-                      + Add Tracking Link
-                    </Button>
-                  </div>
-                )}
-              </div>
+                  ) : (
+                    <span className="text-xs text-muted-foreground font-medium bg-background/60 px-3 py-1.5 rounded-xl border">
+                      Invoice Generated
+                    </span>
+                  )}
+                </div>
+              )}
 
               {/* Delivery Address & Customer Information */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="p-4 rounded-2xl bg-muted/20 border space-y-3 text-xs">
-                  <h4 className="font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                    <MapPin className="h-3.5 w-3.5 text-primary" /> Delivery & Shipping Address
-                  </h4>
-                  <div className="space-y-1.5">
+              <div className="p-4 rounded-2xl bg-muted/20 border space-y-3 text-xs">
+                <h4 className="font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                  <MapPin className="h-3.5 w-3.5 text-primary" /> Delivery & Shipping Address
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
                     <div className="font-bold text-foreground text-sm flex items-center gap-1.5">
                       <User className="h-3.5 w-3.5 text-muted-foreground" />
                       {selectedOrder.buyerName || "Customer"}
@@ -867,105 +750,22 @@ function ProductOrdersPage() {
                         </button>
                       )}
                     </div>
-                    <div className="p-2.5 rounded-xl bg-background border text-foreground leading-relaxed">
-                      {selectedOrder.buyerAddress || selectedOrder.shippingAddress
-                        ? typeof selectedOrder.shippingAddress === "object"
-                          ? [
-                              selectedOrder.shippingAddress.line1,
-                              selectedOrder.shippingAddress.line2,
-                              selectedOrder.shippingAddress.landmark && `Landmark: ${selectedOrder.shippingAddress.landmark}`,
-                              selectedOrder.shippingAddress.district || selectedOrder.shippingAddress.city,
-                              selectedOrder.shippingAddress.state,
-                              selectedOrder.shippingAddress.pincode && `PIN: ${selectedOrder.shippingAddress.pincode}`,
-                            ]
-                              .filter(Boolean)
-                              .join(", ")
-                          : selectedOrder.buyerAddress
-                        : "—"}
-                    </div>
                   </div>
-                </div>
-
-                {/* Seller & Payment Summary */}
-                <div className="p-4 rounded-2xl bg-muted/20 border space-y-3 text-xs">
-                  <h4 className="font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                    <CreditCard className="h-3.5 w-3.5 text-primary" /> Payment & Seller Details
-                  </h4>
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-muted-foreground flex items-center gap-1">
-                        <Store className="h-3.5 w-3.5 text-primary" /> Store / Merchant:
-                      </span>
-                      <span className="font-bold text-foreground">
-                        {selectedOrder.sellerName && selectedOrder.sellerName !== "iHerd Marketplace Store"
-                          ? selectedOrder.sellerName
-                          : (selectedOrder.shopName || selectedOrder.storeName || "—")}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-muted-foreground flex items-center gap-1">
-                        <CreditCard className="h-3.5 w-3.5 text-primary" /> Payment Method:
-                      </span>
-                      <span className="font-semibold text-foreground">
-                        {selectedOrder.paymentMethod || selectedOrder.paymentMode || selectedOrder.payment?.method || selectedOrder.payment_method || "—"}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-muted-foreground flex items-center gap-1">
-                        <ShieldCheck className="h-3.5 w-3.5 text-primary" /> Payment Status:
-                      </span>
-                      {(() => {
-                        const rawPayStatus = (
-                          selectedOrder.paymentStatus ||
-                          selectedOrder.payment?.status ||
-                          selectedOrder.payment_status ||
-                          selectedOrder.paymentDetails?.status ||
-                          ""
-                        ).trim();
-
-                        const statusLower = (selectedOrder.status || "").toLowerCase();
-                        const isDeliveredOrComplete = statusLower === "delivered" || statusLower === "completed";
-                        const isCancelled = statusLower === "cancelled" || statusLower === "canceled";
-
-                        const effectiveStatus = rawPayStatus
-                          ? rawPayStatus
-                          : isCancelled
-                          ? "Cancelled"
-                          : isDeliveredOrComplete
-                          ? "Paid"
-                          : selectedOrder.paymentMode === "Prepaid" || selectedOrder.paymentMethod?.toLowerCase().includes("online")
-                          ? "Paid"
-                          : "Pending";
-
-                        const isPaid = effectiveStatus.toLowerCase() === "paid";
-                        const isFailed = effectiveStatus.toLowerCase() === "failed" || effectiveStatus.toLowerCase() === "cancelled";
-
-                        return (
-                          <Badge
-                            variant="secondary"
-                            className={
-                              isPaid
-                                ? "bg-emerald-500/10 text-emerald-600 font-bold"
-                                : isFailed
-                                ? "bg-destructive/10 text-destructive font-bold"
-                                : "bg-amber-500/10 text-amber-600 font-bold"
-                            }
-                          >
-                            {effectiveStatus}
-                          </Badge>
-                        );
-                      })()}
-                    </div>
-                    {selectedOrder.invoiceNumber && selectedOrder.invoiceNumber !== "—" && (
-                      <div className="flex items-center justify-between pt-1 border-t">
-                        <span className="text-muted-foreground flex items-center gap-1">
-                          <Receipt className="h-3.5 w-3.5 text-primary" /> Invoice No:
-                        </span>
-                        <span className="font-mono font-bold text-foreground">
-                          {selectedOrder.invoiceNumber}
-                        </span>
-                      </div>
-                    )}
+                  <div className="p-2.5 rounded-xl bg-background border text-foreground leading-relaxed text-xs">
+                    {selectedOrder.buyerAddress || selectedOrder.shippingAddress
+                      ? typeof selectedOrder.shippingAddress === "object"
+                        ? [
+                            selectedOrder.shippingAddress.line1,
+                            selectedOrder.shippingAddress.line2,
+                            selectedOrder.shippingAddress.landmark && `Landmark: ${selectedOrder.shippingAddress.landmark}`,
+                            selectedOrder.shippingAddress.district || selectedOrder.shippingAddress.city,
+                            selectedOrder.shippingAddress.state,
+                            selectedOrder.shippingAddress.pincode && `PIN: ${selectedOrder.shippingAddress.pincode}`,
+                          ]
+                            .filter(Boolean)
+                            .join(", ")
+                        : selectedOrder.buyerAddress
+                      : "—"}
                   </div>
                 </div>
               </div>
@@ -1058,27 +858,6 @@ function ProductOrdersPage() {
                   </span>
                 </div>
               </div>
-
-              {/* Official Tax Invoice Download Banner */}
-              {selectedOrder.invoiceUrl ? (
-                <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2 text-xs text-emerald-700 dark:text-emerald-400 font-semibold">
-                    <FileCheck className="h-5 w-5" />
-                    <div>
-                      <div>Official Tax Invoice Ready</div>
-                      <div className="text-[11px] font-normal opacity-80">Invoice #{selectedOrder.invoiceNumber || selectedOrder.orderId}</div>
-                    </div>
-                  </div>
-                  <a
-                    href={selectedOrder.invoiceUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-bold shadow hover:bg-emerald-700 transition-all"
-                  >
-                    <Download className="h-3.5 w-3.5" /> Download Tax Invoice PDF
-                  </a>
-                </div>
-              ) : null}
             </div>
           )}
 

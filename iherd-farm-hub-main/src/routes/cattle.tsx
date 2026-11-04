@@ -557,18 +557,6 @@ function CattleDetailsPage() {
               ))}
             </select>
           </div>
-
-          {/* Sort Order Toggle */}
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setSortOrder(sortOrder === "newest" ? "oldest" : "newest")}
-            className="rounded-xl h-9 text-xs gap-1.5 border-dashed"
-            title="Toggle Sort Order"
-          >
-            <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
-            <span>{sortOrder === "newest" ? "Latest First" : "Oldest First"}</span>
-          </Button>
         </div>
       </div>
 

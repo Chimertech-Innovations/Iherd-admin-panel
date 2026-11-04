@@ -3,7 +3,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { DataPage } from "@/components/admin/DataPage";
 import { StatusBadge } from "@/components/admin/StatusBadge";
 import { useAdminUsers } from "../hooks/useAdminUsers";
-import { useFirebaseCollection } from "../hooks/useFirebaseData";
+import { useFirebaseCollection, useFirebaseCollectionGroup } from "../hooks/useFirebaseData";
 import { getLocalizedText } from "@/lib/utils";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -261,13 +261,30 @@ function SellersPage() {
   const { data: authUsers = [], isLoading: authLoading, refetch: refetchAuth } = useAdminUsers();
   const { data: firestoreUsers = [], isLoading: fsLoading, refetch: refetchFs } = useFirebaseCollection<any>("users");
   const { data: directSellers = [], isLoading: sellersLoading, refetch: refetchSellers } = useFirebaseCollection<any>("sellers");
-  const isLoading = authLoading || fsLoading || sellersLoading;
+  const { data: roleDocs = [], isLoading: rolesLoading, refetch: refetchRoles } = useFirebaseCollectionGroup<any>("roles");
+  const isLoading = authLoading || fsLoading || sellersLoading || rolesLoading;
 
   const handleRefresh = () => {
     refetchAuth();
     refetchFs();
     refetchSellers();
+    refetchRoles();
   };
+
+  // Build a lookup map of seller role documents by user ID
+  const sellerRoleDocsByUid = new Map<string, any>();
+  roleDocs.forEach((rd: any) => {
+    if (rd.id === "seller" || rd.role === "seller" || rd.sellerPhoneNumber || rd._path?.includes("/roles/seller")) {
+      let uid = rd.uid || rd.userId;
+      if (!uid && rd._path) {
+        const parts = rd._path.split("/");
+        if (parts[0] === "users" && parts[1]) uid = parts[1];
+      }
+      if (uid) {
+        sellerRoleDocsByUid.set(uid, rd);
+      }
+    }
+  });
 
   const sellerMap = new Map<string, any>();
 
@@ -305,11 +322,13 @@ function SellersPage() {
     const uid = authUser.uid;
     const fsUser = firestoreUsers.find((fu: any) => fu.id === uid || fu.uid === uid);
     const directSeller = directSellers.find((ds: any) => ds.id === uid || ds.uid === uid);
+    const sellerRoleDoc = sellerRoleDocsByUid.get(uid);
 
     const fsRoles = fsUser?.roles || (fsUser?.role ? [fsUser.role] : []);
     const roles: string[] = Array.isArray(fsRoles) ? fsRoles : [String(fsRoles)];
     const hasSellerRole = roles.some((r: any) => typeof r === "string" && r.toLowerCase().includes("seller"));
     const hasDirectSellerDoc = Boolean(directSeller);
+    const hasRoleDoc = Boolean(sellerRoleDoc);
     const hasSellerProfile = Boolean(
       (fsUser?.seller && typeof fsUser.seller === "object" && (fsUser.seller.name || fsUser.seller.shopName || fsUser.seller.storeName || fsUser.seller.phone || fsUser.seller.sellerPhoneNumber || fsUser.seller.category)) ||
       (authUser?.seller && typeof authUser.seller === "object" && (authUser.seller.name || authUser.seller.shopName || authUser.seller.storeName || authUser.seller.sellerPhoneNumber || authUser.seller.category)) ||
@@ -317,11 +336,12 @@ function SellersPage() {
       authUser?.isSeller === true
     );
 
-    const isSeller = hasSellerRole || hasDirectSellerDoc || hasSellerProfile;
+    const isSeller = hasSellerRole || hasDirectSellerDoc || hasSellerProfile || hasRoleDoc;
 
     if (isSeller) {
-      const sellerProfile = fsUser?.seller || authUser?.seller || directSeller || {};
+      const sellerProfile = sellerRoleDoc || fsUser?.seller || authUser?.seller || directSeller || {};
       const rawTimestamp = parseTime(
+        sellerRoleDoc?.createdAt ||
         sellerProfile?.createdAt ||
         fsUser?.createdAt ||
         authUser?.createdAt ||
@@ -329,10 +349,11 @@ function SellersPage() {
         authUser?.metadata?.creationTime
       );
 
-      const phone = extractSellerPhone(sellerProfile, fsUser, authUser, directSeller);
+      const phone = extractSellerPhone(sellerRoleDoc, sellerProfile, fsUser, authUser, directSeller);
       const email = authUser?.email || fsUser?.email || sellerProfile?.email || directSeller?.email || "";
 
       const shopName =
+        sellerRoleDoc?.shopName ||
         sellerProfile.shopName ||
         sellerProfile.storeName ||
         sellerProfile.name ||
@@ -342,6 +363,7 @@ function SellersPage() {
         (phone !== "—" ? `Store (${phone})` : `Seller #${uid.slice(-6).toUpperCase()}`);
 
       const ownerName =
+        (sellerRoleDoc?.name && sellerRoleDoc.name !== "User") ? sellerRoleDoc.name :
         (fsUser?.fullName && fsUser.fullName !== "User" && !fsUser.fullName.startsWith("Farmer")) ? fsUser.fullName :
         (fsUser?.name && fsUser.name !== "User" && !fsUser.name.startsWith("Farmer")) ? fsUser.name :
         (sellerProfile.name && sellerProfile.name !== "User") ? sellerProfile.name :
@@ -354,16 +376,16 @@ function SellersPage() {
         ownerName: getLocalizedText(ownerName),
         phone,
         email,
-        category: getLocalizedText(sellerProfile.category || "Feed & Supplies"),
+        category: getLocalizedText(sellerRoleDoc?.category || sellerProfile.category || "Feed & Supplies"),
         products: Number(sellerProfile.products || sellerProfile.productCount || 0),
         gmv: sellerProfile.gmv || "—",
         rating: Number(sellerProfile.rating || 5.0),
         joined: formatDate(rawTimestamp),
         rawTimestamp,
         status: fsUser?.status || authUser?.status || sellerProfile.status || "Active",
-        verified: Boolean(sellerProfile.verified || fsUser?.verified),
-        city: sellerProfile.city || fsUser?.district || "—",
-        state: sellerProfile.state || fsUser?.state || "—",
+        verified: Boolean(sellerRoleDoc?.verified || sellerProfile.verified || fsUser?.verified),
+        city: sellerRoleDoc?.district || sellerRoleDoc?.village || sellerProfile.city || fsUser?.district || "—",
+        state: sellerRoleDoc?.state || sellerProfile.state || fsUser?.state || "—",
       });
     }
   });
@@ -419,6 +441,33 @@ function SellersPage() {
         location: [sellerProfile.city || fsUser.district, sellerProfile.state || fsUser.state].filter(x => x && x !== "—").join(", ") || "—",
       });
     }
+  });
+
+  // 4. Process any standalone seller role documents from /users/{uid}/roles/seller
+  sellerRoleDocsByUid.forEach((rd: any, uid: string) => {
+    if (!uid || sellerMap.has(uid)) return;
+    const rawTimestamp = parseTime(rd.createdAt || rd.updatedAt);
+    const phone = extractSellerPhone(rd);
+    const shopName = rd.shopName || rd.storeName || rd.name || (phone !== "—" ? `Store (${phone})` : `Seller #${uid.slice(-6).toUpperCase()}`);
+    sellerMap.set(uid, {
+      id: uid,
+      uid,
+      name: getLocalizedText(shopName),
+      ownerName: getLocalizedText(rd.name || "Seller"),
+      phone,
+      email: rd.email || "",
+      category: getLocalizedText(rd.category || "Feed & Supplies"),
+      products: Number(rd.products || 0),
+      gmv: "—",
+      rating: 5.0,
+      joined: formatDate(rawTimestamp),
+      rawTimestamp,
+      status: rd.status || "Active",
+      verified: Boolean(rd.verified),
+      city: rd.district || rd.village || rd.city || "—",
+      state: rd.state || "—",
+      location: [rd.district || rd.village || rd.city, rd.state].filter(Boolean).join(", ") || "—",
+    });
   });
 
   // Sort strictly by registration timestamp descending (latest registered first)

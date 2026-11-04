@@ -3,7 +3,8 @@ import { getApiBaseUrlSync } from "@/lib/apiClient";
 import { useState, useMemo, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { doc, getDoc, collection, getDocs } from "firebase/firestore";
-import { db } from "../lib/firebase";
+import { ref, listAll, getDownloadURL, getMetadata } from "firebase/storage";
+import { db, storage } from "../lib/firebase";
 import { useFirebaseCollection, useFirebaseCollectionGroup } from "../hooks/useFirebaseData";
 import { useAdminUsers } from "../hooks/useAdminUsers";
 import { getLocalizedText, formatImageUrl } from "@/lib/utils";
@@ -221,6 +222,90 @@ function UserDetail() {
     staleTime: 10000,
   });
 
+  // 4b. Secondary: Direct Firestore Live Veterinarian Subcollection Fallback
+  const { data: directVetDoc } = useQuery({
+    queryKey: ["directVetRole", resolvedDocId, userId],
+    queryFn: async () => {
+      if (!isClient) return null;
+      const candidates = Array.from(
+        new Set([resolvedDocId, userId, authUser?.uid, firestoreUser?.id, firestoreUser?.uid])
+      ).filter(Boolean) as string[];
+
+      for (const uid of candidates) {
+        try {
+          const docRef = doc(db, "users", uid, "roles", "veterinarian");
+          const snap = await getDoc(docRef);
+          if (snap.exists()) return { id: snap.id, uid, ...snap.data() };
+
+          const docRefVet = doc(db, "users", uid, "roles", "vet");
+          const snapVet = await getDoc(docRefVet);
+          if (snapVet.exists()) return { id: snapVet.id, uid, ...snapVet.data() };
+
+          const colRef = collection(db, "users", uid, "roles");
+          const colSnap = await getDocs(colRef);
+          if (!colSnap.empty) {
+            const vDoc = colSnap.docs.find(
+              (d) => d.id === "veterinarian" || d.id === "vet" || d.data().vetPhoneNumber || d.data().qualification || d.data().educationProof
+            );
+            if (vDoc) return { id: vDoc.id, uid, ...vDoc.data() };
+          }
+        } catch (err) {}
+      }
+      return null;
+    },
+    enabled: isClient,
+    staleTime: 10000,
+  });
+
+  // 4c. Direct Firebase Storage Client Fallback (fetches files directly under users/{userId})
+  const { data: clientStorageFiles = [] } = useQuery({
+    queryKey: ["clientUserStorageFiles", userId, resolvedDocId],
+    queryFn: async () => {
+      if (!isClient) return [];
+      const prefixes = Array.from(
+        new Set([
+          `users/${userId}`,
+          `users/${resolvedDocId}`,
+          `user/${userId}`,
+          `user/${resolvedDocId}`,
+          `UserImages/${userId}`,
+          `UserImages/${resolvedDocId}`,
+          `vets/${userId}`,
+          `vets/${resolvedDocId}`,
+          `veterinarians/${userId}`,
+          `veterinarians/${resolvedDocId}`,
+          `documents/${userId}`,
+          `documents/${resolvedDocId}`,
+        ])
+      ).filter(Boolean);
+
+      const itemsList: any[] = [];
+      for (const p of prefixes) {
+        try {
+          const folderRef = ref(storage, p);
+          const res = await listAll(folderRef);
+          for (const itemRef of res.items) {
+            try {
+              const url = await getDownloadURL(itemRef);
+              const meta = await getMetadata(itemRef).catch(() => ({}));
+              itemsList.push({
+                name: itemRef.name,
+                fullPath: itemRef.fullPath,
+                url,
+                size: (meta as any)?.size || 0,
+                updated: (meta as any)?.updated || null,
+                contentType: (meta as any)?.contentType || "application/octet-stream",
+              });
+            } catch (e) {}
+          }
+        } catch (e) {}
+      }
+      return itemsList;
+    },
+    enabled: isClient,
+    staleTime: 30000,
+  });
+
   const mergedUserDoc = backendFullData?.userDoc || firestoreUser || {};
 
   // Resolve Farmer Profile
@@ -382,6 +467,7 @@ function UserDetail() {
   // Resolve Veterinarian Profile
   const vetDoc =
     backendFullData?.vetDoc ||
+    directVetDoc ||
     (backendFullData?.subcollections?.roles?.find((r: any) => r.id === "veterinarian" || r.id === "vet" || r.role === "vet")) ||
     mergedUserDoc?.veterinarian ||
     mergedUserDoc?.vet ||
@@ -537,30 +623,106 @@ function UserDetail() {
       if (p.image || p.imageUrl) addImg(p.image || p.imageUrl, p.name || p.title || "Product", "Seller Product");
     });
 
-    // 7. Backend Storage Files with valid URLs
-    if (Array.isArray(backendFullData?.storageFiles)) {
-      backendFullData.storageFiles.forEach((file: any) => {
-        if (file.url && file.size > 0) {
-          const fileName = file.name.split("/").pop() || file.name;
-          const isFarmerImg = file.name.includes("FarmerImage");
-          const isFarmImg = file.name.includes("FarmImage");
-          const isCattle = file.name.includes("CattleImage") || file.name.includes("cattle");
-          const isVet = file.name.includes("Vet");
-          const isSeller = file.name.includes("Seller");
-          let source = "Storage File";
-          let title = fileName;
-          if (isFarmerImg) { source = "Farmer Profile"; title = "Farmer Profile Photo"; }
-          else if (isFarmImg) { source = "Farm"; title = "Farm Facility Photo"; }
-          else if (isCattle) { source = "Cattle"; title = `Cattle Proof (${fileName})`; }
-          else if (isVet) { source = "Veterinarian"; title = `Vet Proof (${fileName})`; }
-          else if (isSeller) { source = "Seller"; title = `Seller Photo (${fileName})`; }
-          addImg(file.url, title, source, file.updated ? new Date(file.updated).toLocaleDateString() : undefined, formatBytes(file.size));
-        }
-      });
-    }
+    // 7. Backend & Client Storage Files with valid URLs
+    const allStorageMedia = [
+      ...(Array.isArray(backendFullData?.storageFiles) ? backendFullData.storageFiles : []),
+      ...(Array.isArray(clientStorageFiles) ? clientStorageFiles : []),
+    ];
+    allStorageMedia.forEach((file: any) => {
+      if (file.url && file.size > 0) {
+        const fileName = file.name.split("/").pop() || file.name;
+        const isFarmerImg = file.name.includes("FarmerImage");
+        const isFarmImg = file.name.includes("FarmImage");
+        const isCattle = file.name.includes("CattleImage") || file.name.includes("cattle");
+        const isVet = file.name.includes("Vet") || file.name.includes("doctor");
+        const isSeller = file.name.includes("Seller");
+        let source = "Storage File";
+        let title = fileName;
+        if (isFarmerImg) { source = "Farmer Profile"; title = "Farmer Profile Photo"; }
+        else if (isFarmImg) { source = "Farm"; title = "Farm Facility Photo"; }
+        else if (isCattle) { source = "Cattle"; title = `Cattle Proof (${fileName})`; }
+        else if (isVet) { source = "Veterinarian"; title = `Vet Proof (${fileName})`; }
+        else if (isSeller) { source = "Seller"; title = `Seller Photo (${fileName})`; }
+        addImg(file.url, title, source, file.updated ? new Date(file.updated).toLocaleDateString() : undefined, formatBytes(file.size));
+      }
+    });
 
     return imagesList;
-  }, [farmerDoc, farmDoc, sellerDoc, vetDoc, sellerProducts, mergedUserDoc, allUserCattle, backendFullData]);
+  }, [farmerDoc, farmDoc, sellerDoc, vetDoc, sellerProducts, mergedUserDoc, allUserCattle, backendFullData, clientStorageFiles]);
+
+  // Consolidate Veterinarian Official Documents & Storage Records
+  const vetDocumentsList = useMemo(() => {
+    const list: Array<{
+      title: string;
+      url: string;
+      icon: any;
+      type: "image" | "pdf" | "file";
+      path?: string;
+      size?: number;
+      updated?: string;
+    }> = [];
+    const seenUrls = new Set<string>();
+
+    const addDocItem = (title: string, rawUrl: any, defaultIcon: any, path?: string, size?: number, updated?: string) => {
+      if (!rawUrl || typeof rawUrl !== "string" || rawUrl === "—" || !rawUrl.trim()) return;
+      const trimmed = rawUrl.trim();
+      if (seenUrls.has(trimmed)) return;
+      seenUrls.add(trimmed);
+
+      const lower = (path || title || trimmed).toLowerCase();
+      const isPdf = lower.includes(".pdf") || lower.includes("application/pdf") || (lower.includes("alt=media") && lower.includes(".pdf"));
+      const icon = isPdf ? FileText : defaultIcon;
+      const type: "image" | "pdf" | "file" = isPdf ? "pdf" : "image";
+
+      list.push({ title, url: trimmed, icon, type, path, size, updated });
+    };
+
+    // 1. Explicit fields on vetDoc
+    if (vetDoc?.educationProof) addDocItem("Education Qualification Proof", vetDoc.educationProof, GraduationCap, "educationProof");
+    if (vetDoc?.identityProof) addDocItem("Doctor Identity Proof", vetDoc.identityProof, FileText, "identityProof");
+    if (vetDoc?.registrationProof) addDocItem("Registration License Proof", vetDoc.registrationProof, Award, "registrationProof");
+    if (vetDoc?.degreeProof) addDocItem("Degree Certificate Proof", vetDoc.degreeProof, GraduationCap, "degreeProof");
+    if (vetDoc?.certificateProof) addDocItem("Practice Certificate Proof", vetDoc.certificateProof, Award, "certificateProof");
+    if (vetDoc?.documentUrl) addDocItem("Official Doctor Document", vetDoc.documentUrl, FileCheck, "documentUrl");
+    if (vetDoc?.document) addDocItem("Veterinary Document", vetDoc.document, FileCheck, "document");
+
+    // 2. Storage files from backend and client
+    const allStorage = [
+      ...(Array.isArray(backendFullData?.storageFiles) ? backendFullData.storageFiles : []),
+      ...(Array.isArray(clientStorageFiles) ? clientStorageFiles : []),
+      ...(Array.isArray((vetDoc as any)?.allStorageFiles) ? (vetDoc as any).allStorageFiles : []),
+    ];
+
+    allStorage.forEach((f: any) => {
+      if (!f?.url) return;
+      const fName = f.name?.split("/").pop() || f.name || "Document";
+      const lower = fName.toLowerCase();
+      const lowerPath = (f.fullPath || f.name || "").toLowerCase();
+      let title = fName;
+      let icon = FileCheck;
+
+      if (lower.includes("education") || lower.includes("degree") || lower.includes("qualification") || lower.includes("bvsc") || lower.includes("mvsc") || lower.includes("diploma")) {
+        title = `Education / Degree (${fName})`;
+        icon = GraduationCap;
+      } else if (lower.includes("identity") || lower.includes("id_proof") || lower.includes("idproof") || lower.includes("aadhaar") || lower.includes("pan") || lower.includes("voter")) {
+        title = `Identity Proof (${fName})`;
+        icon = FileText;
+      } else if (lower.includes("registration") || lower.includes("license") || lower.includes("reg_proof") || lower.includes("council") || lower.includes("vci")) {
+        title = `Registration License (${fName})`;
+        icon = Award;
+      } else if (lower.includes("doctor") || lower.includes("vet") || lower.includes("doc") || lower.includes("certificate")) {
+        title = `Doctor Document (${fName})`;
+        icon = FileCheck;
+      } else if (lowerPath.includes("users/") || lowerPath.includes("user/") || lowerPath.includes("documents/")) {
+        title = `User Document (${fName})`;
+        icon = FileText;
+      }
+
+      addDocItem(title, f.url, icon, f.fullPath || f.name, f.size, f.updated);
+    });
+
+    return list;
+  }, [vetDoc, backendFullData?.storageFiles, clientStorageFiles]);
 
   // Profile image URL
   const profilePhoto =
@@ -617,7 +779,13 @@ function UserDetail() {
   // Active Role Flags
   const hasFarmerRole = Boolean(farmerDoc && (farmerDoc.name || farmerDoc.farmerPhoneNumber || farmerDoc.village || farmerDoc.state || farmerDoc.imagePath)) || allUserCattle.length > 0;
   const hasSellerRole = Boolean(sellerDoc && (sellerDoc.name || sellerDoc.sellerPhoneNumber || sellerDoc.village || sellerDoc.shopName || sellerDoc.imagePath)) || sellerProducts.length > 0;
-  const hasVetRole = Boolean(vetDoc && (vetDoc.name || vetDoc.vetPhoneNumber || vetDoc.specialization || vetDoc.services || vetDoc.educationProof || vetDoc.identityProof));
+  const hasVetRole = Boolean(
+    (vetDoc && (vetDoc.name || vetDoc.doctorName || vetDoc.vetPhoneNumber || vetDoc.phone || vetDoc.specialization || vetDoc.services || vetDoc.educationProof || vetDoc.identityProof || vetDoc.registrationProof || vetDoc.qualification || vetDoc.clinic || vetDoc.imagePath)) ||
+    (mergedUserDoc?.roles && Array.isArray(mergedUserDoc.roles) && mergedUserDoc.roles.some((r: any) => typeof r === "string" && (r.toLowerCase().includes("vet") || r.toLowerCase().includes("doctor")))) ||
+    (typeof mergedUserDoc?.role === "string" && (mergedUserDoc.role.toLowerCase().includes("vet") || mergedUserDoc.role.toLowerCase().includes("doctor"))) ||
+    (backendFullData?.roles && Array.isArray(backendFullData.roles) && backendFullData.roles.some((r: any) => typeof r === "string" && (r.toLowerCase().includes("vet") || r.toLowerCase().includes("doctor")))) ||
+    allVets.some((v: any) => isSimilarUid(v.id, userId) || isSimilarUid(v.uid, userId))
+  );
 
   const activeRolesList: string[] = [];
   if (hasFarmerRole) activeRolesList.push("Farmer");
@@ -1778,43 +1946,106 @@ function UserDetail() {
                 )}
               </Card>
 
-              {/* Official Verification Documents */}
+              {/* Official Verification Documents & Firebase Storage Records */}
               <Card className="p-6 rounded-3xl border shadow-sm space-y-4">
-                <h3 className="text-base font-bold flex items-center gap-2 text-foreground">
-                  <FileCheck className="h-5 w-5 text-primary" /> Official Doctor Verification Documents
-                </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  {[
-                    { title: "Education Qualification Proof", url: vetDoc.educationProof, icon: GraduationCap },
-                    { title: "Doctor Identity Proof", url: vetDoc.identityProof, icon: FileText },
-                    { title: "Registration License Proof", url: vetDoc.registrationProof, icon: Award },
-                  ].filter(doc => !!doc.url).map((vDoc, dIdx) => (
-                    <Card
-                      key={dIdx}
-                      className="p-4 rounded-2xl border bg-card hover:shadow-md transition-all flex flex-col justify-between space-y-3 cursor-pointer group"
-                      onClick={() => setSelectedPreviewImage({ url: vDoc.url, title: vDoc.title })}
-                    >
-                      <div className="h-32 bg-muted/40 rounded-xl overflow-hidden relative">
-                        <img src={vDoc.url} alt={vDoc.title} className="h-full w-full object-cover group-hover:scale-105 transition-transform" />
-                        <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white">
-                          <Eye className="h-5 w-5" />
-                        </div>
-                      </div>
-                      <div>
-                        <h5 className="font-bold text-xs text-foreground truncate">{vDoc.title}</h5>
-                        <a
-                          href={vDoc.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-[11px] text-primary hover:underline font-medium inline-flex items-center gap-1 mt-1"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          Open Document <ExternalLink className="h-3 w-3" />
-                        </a>
-                      </div>
-                    </Card>
-                  ))}
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    <h3 className="text-base font-bold flex items-center gap-2 text-foreground">
+                      <FileCheck className="h-5 w-5 text-primary" /> Official Doctor Verification Documents & Storage Records
+                    </h3>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Fetched live from Firestore role data and Firebase Storage path: <code className="text-primary font-mono text-[11px]">users/{resolvedDocId}</code>
+                    </p>
+                  </div>
+                  <span className="text-xs font-bold px-3 py-1 rounded-full bg-primary/10 text-primary border border-primary/20">
+                    {vetDocumentsList.length} Document{vetDocumentsList.length !== 1 ? "s" : ""} Available
+                  </span>
                 </div>
+
+                {vetDocumentsList.length > 0 ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                    {vetDocumentsList.map((vDoc, dIdx) => {
+                      const Icon = vDoc.icon;
+                      const isPdf = vDoc.type === "pdf";
+
+                      return (
+                        <Card
+                          key={dIdx}
+                          className="p-4 rounded-2xl border bg-card hover:shadow-md transition-all flex flex-col justify-between space-y-3 cursor-pointer group"
+                          onClick={() => {
+                            if (!isPdf) {
+                              setSelectedPreviewImage({ url: vDoc.url, title: vDoc.title });
+                            } else {
+                              window.open(vDoc.url, "_blank");
+                            }
+                          }}
+                        >
+                          <div className="h-36 bg-muted/30 rounded-xl overflow-hidden relative flex items-center justify-center border border-border/50">
+                            {isPdf ? (
+                              <div className="flex flex-col items-center justify-center gap-2 p-3 text-center">
+                                <div className="h-12 w-12 rounded-2xl bg-red-500/10 text-red-600 grid place-items-center">
+                                  <FileText className="h-6 w-6" />
+                                </div>
+                                <span className="text-[11px] font-bold text-red-600 uppercase tracking-wide">
+                                  PDF Document
+                                </span>
+                              </div>
+                            ) : (
+                              <>
+                                <img
+                                  src={vDoc.url}
+                                  alt={vDoc.title}
+                                  className="h-full w-full object-cover group-hover:scale-105 transition-transform"
+                                  onError={(e) => {
+                                    (e.target as HTMLElement).style.display = "none";
+                                  }}
+                                />
+                                <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white">
+                                  <Eye className="h-5 w-5" />
+                                </div>
+                              </>
+                            )}
+                          </div>
+
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-1.5 text-xs font-bold text-foreground truncate">
+                              <Icon className="h-3.5 w-3.5 text-primary shrink-0" />
+                              <span className="truncate">{vDoc.title}</span>
+                            </div>
+                            {vDoc.path && (
+                              <p className="text-[10px] text-muted-foreground font-mono truncate">
+                                {vDoc.path}
+                              </p>
+                            )}
+                            <div className="flex items-center justify-between pt-1">
+                              {vDoc.size ? (
+                                <span className="text-[10px] text-muted-foreground">{formatBytes(vDoc.size)}</span>
+                              ) : (
+                                <span className="text-[10px] text-emerald-600 font-semibold">Verified Proof</span>
+                              )}
+                              <a
+                                href={vDoc.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-[11px] text-primary hover:underline font-bold inline-flex items-center gap-1"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {isPdf ? "View PDF" : "Open"} <ExternalLink className="h-3 w-3" />
+                              </a>
+                            </div>
+                          </div>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="p-8 rounded-2xl border border-dashed text-center bg-muted/20 space-y-2">
+                    <FileCheck className="h-8 w-8 text-muted-foreground/50 mx-auto" />
+                    <p className="text-xs font-semibold text-muted-foreground">
+                      No documents currently found in Firestore or Storage under <code>users/{resolvedDocId}</code>.
+                    </p>
+                  </div>
+                )}
               </Card>
             </div>
           ) : (

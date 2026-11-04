@@ -43,7 +43,7 @@ import { StatusBadge } from "@/components/admin/StatusBadge";
 import { PageHeader } from "@/components/admin/PageHeader";
 import { ProfileHero } from "@/components/admin/ProfileHero";
 import { toast } from "sonner";
-import { useFirebaseCollection } from "../hooks/useFirebaseData";
+import { useFirebaseCollection, useFirebaseCollectionGroup } from "../hooks/useFirebaseData";
 import { exportToCsv } from "@/lib/csvExport";
 
 const DOCUMENTS = [
@@ -124,12 +124,17 @@ function SellerDetail() {
   const { sellerId } = Route.useParams();
   const { data: sellers = [] } = useFirebaseCollection<any>("sellers");
   const { data: users = [] } = useFirebaseCollection<any>("users");
+  const { data: roleDocs = [] } = useFirebaseCollectionGroup<any>("roles");
 
   const rawSeller = sellers.find((s) => s.id === sellerId || s.uid === sellerId);
   const rawUser = users.find((u) => u.id === sellerId || u.uid === sellerId);
-  const sellerObj = rawUser?.seller || {};
+  const sellerRoleDoc = roleDocs.find((r) => (r.id === "seller" || r.role === "seller" || r.sellerPhoneNumber) && (r.uid === sellerId || r.userId === sellerId || r._path?.includes(`/users/${sellerId}/`)));
+  const sellerObj = rawUser?.seller || sellerRoleDoc || {};
 
   const rawPhone =
+    sellerRoleDoc?.sellerPhoneNumber ||
+    sellerRoleDoc?.phone ||
+    sellerRoleDoc?.phoneNumber ||
     rawSeller?.sellerPhoneNumber ||
     rawSeller?.sellerPhone ||
     rawSeller?.phone ||
@@ -158,9 +163,9 @@ function SellerDetail() {
     owner: rawSeller?.owner || rawSeller?.name || rawUser?.name || "Seller",
     phone: resolvedPhone,
     email: rawSeller?.email || rawUser?.email || sellerObj?.email || "—",
-    city: rawSeller?.city || sellerObj?.city || rawUser?.district || "—",
-    state: rawSeller?.state || sellerObj?.state || rawUser?.state || "—",
-    address: rawSeller?.address || sellerObj?.address || rawUser?.address || "—",
+    city: rawSeller?.city || sellerRoleDoc?.district || sellerRoleDoc?.village || sellerObj?.city || rawUser?.district || "—",
+    state: rawSeller?.state || sellerRoleDoc?.state || sellerObj?.state || rawUser?.state || "—",
+    address: rawSeller?.address || sellerRoleDoc?.address || sellerObj?.address || rawUser?.address || "—",
     joined: rawSeller?.joined || rawSeller?.createdAt || rawUser?.createdAt || "—",
     lastLogin: rawSeller?.lastLogin || rawUser?.lastLoginAt || "—",
     gstin: rawSeller?.gstin || sellerObj?.gstin || "—",

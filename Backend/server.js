@@ -594,6 +594,14 @@ app.get("/api/admin/user-full-data/:userId", async (req, res) => {
           if (!vq.empty) vetDoc = { id: vq.docs[0].id, ...vq.docs[0].data() };
         }
       }
+      if (!vetDoc) {
+        const vSnap2 = await db.collection("veterinarians").doc(resolvedDocId).get().catch(() => null);
+        if (vSnap2 && vSnap2.exists) vetDoc = { id: vSnap2.id, ...vSnap2.data() };
+        else if (cleanPhone) {
+          const vq2 = await db.collection("veterinarians").where("phone", "==", cleanPhone).limit(1).get().catch(() => ({ empty: true }));
+          if (!vq2.empty) vetDoc = { id: vq2.docs[0].id, ...vq2.docs[0].data() };
+        }
+      }
     } catch (e) {}
 
     const resolvedPhone = cleanPhone || (farmerDoc?.farmerPhoneNumber || sellerDoc?.sellerPhoneNumber || vetDoc?.vetPhoneNumber || userDoc?.phoneNumber || userDoc?.phone || authRecord?.phoneNumber || "").replace(/\D/g, "").slice(-10);
@@ -939,15 +947,33 @@ app.get("/api/admin/user-full-data/:userId", async (req, res) => {
       console.warn("Error fetching issues:", e.message);
     }
 
-    // 8. Fetch Storage Files
+    // 8. Fetch Storage Files across all user & role directories
     let storageFiles = [];
     try {
       const defaultBucketName = process.env.VITE_FIREBASE_STORAGE_BUCKET || "auth-b404a.appspot.com";
       const bucket = getStorage().bucket(defaultBucketName);
       const prefixes = Array.from(
         new Set([
+          `users/${userId}`,
+          `users/${resolvedDocId}`,
+          `user/${userId}`,
+          `user/${resolvedDocId}`,
           `UserImages/${userId}`,
           `UserImages/${resolvedDocId}`,
+          `vets/${userId}`,
+          `vets/${resolvedDocId}`,
+          `veterinarians/${userId}`,
+          `veterinarians/${resolvedDocId}`,
+          `veterinary/${userId}`,
+          `veterinary/${resolvedDocId}`,
+          `certificates/${userId}`,
+          `certificates/${resolvedDocId}`,
+          `degrees/${userId}`,
+          `degrees/${resolvedDocId}`,
+          `documents/${userId}`,
+          `documents/${resolvedDocId}`,
+          `kyc/${userId}`,
+          `kyc/${resolvedDocId}`,
           `cattle-marketplace/${userId}`,
           `cattle-marketplace/${resolvedDocId}`,
           `marketplace/${userId}`,
@@ -956,12 +982,16 @@ app.get("/api/admin/user-full-data/:userId", async (req, res) => {
           `farmers/${resolvedDocId}`,
           `farms/${userId}`,
           `farms/${resolvedDocId}`,
-          `documents/${userId}`,
-          `documents/${resolvedDocId}`,
-          `kyc/${userId}`,
-          `kyc/${resolvedDocId}`,
           `invoices/${userId}`,
           `invoices/${resolvedDocId}`,
+          ...(resolvedPhone ? [
+            `users/${resolvedPhone}`,
+            `user/${resolvedPhone}`,
+            `UserImages/${resolvedPhone}`,
+            `vets/${resolvedPhone}`,
+            `veterinarians/${resolvedPhone}`,
+            `documents/${resolvedPhone}`,
+          ] : [])
         ])
       );
       const nestedFiles = await Promise.all(prefixes.map((p) => listFilesUnderPrefix(bucket, p)));
@@ -969,14 +999,7 @@ app.get("/api/admin/user-full-data/:userId", async (req, res) => {
       const filesMap = new Map();
       allFiles.forEach((file) => {
         if (!file || !file.name) return;
-        const lower = file.name.toLowerCase();
-        const matchUid = lower.includes(userId.toLowerCase()) || lower.includes(resolvedDocId.toLowerCase());
-        const matchPh = resolvedPhone && resolvedPhone.length >= 8 && lower.includes(resolvedPhone);
-        if (matchUid || matchPh) {
-          if (!filesMap.has(file.name)) {
-            filesMap.set(file.name, file);
-          }
-        }
+        filesMap.set(file.name, file);
       });
       storageFiles = Array.from(filesMap.values());
 
@@ -988,6 +1011,57 @@ app.get("/api/admin/user-full-data/:userId", async (req, res) => {
         if (farmIdMatch && (!farmDoc.farmId || farmDoc.farmId.startsWith("FARM-"))) {
           farmDoc.farmId = farmIdMatch;
         }
+      }
+
+      // Auto-link storage files to veterinarian profile (vetDoc)
+      if (!vetDoc) {
+        const hasVetInRoles = rolesSubcol.some((r) => r.id === "veterinarian" || r.id === "vet" || r.role === "vet" || r.vetPhoneNumber) ||
+          (userDoc?.roles && Array.isArray(userDoc.roles) && userDoc.roles.some((r) => String(r).toLowerCase().includes("vet"))) ||
+          userDoc?.role === "veterinarian" || userDoc?.role === "vet" || userDoc?.isVet === true;
+        if (hasVetInRoles) {
+          vetDoc = {
+            id: resolvedDocId || userId,
+            name: userDoc?.name || userDoc?.displayName || "Doctor",
+            vetPhoneNumber: resolvedPhone,
+            ...userDoc?.veterinarian,
+            ...userDoc?.vet,
+          };
+        }
+      }
+
+      if (vetDoc) {
+        storageFiles.forEach((f) => {
+          const lower = f.name.toLowerCase();
+          // Education / Degree Proof
+          if (
+            (lower.includes("education") || lower.includes("degree") || lower.includes("qualification") || lower.includes("certificate") || lower.includes("diploma") || lower.includes("bvsc") || lower.includes("mvsc")) &&
+            (!vetDoc.educationProof || vetDoc.educationProof === "—")
+          ) {
+            vetDoc.educationProof = f.url;
+          }
+          // Identity Proof
+          if (
+            (lower.includes("identity") || lower.includes("id_proof") || lower.includes("idproof") || lower.includes("aadhaar") || lower.includes("aadhar") || lower.includes("pan") || lower.includes("voter")) &&
+            (!vetDoc.identityProof || vetDoc.identityProof === "—")
+          ) {
+            vetDoc.identityProof = f.url;
+          }
+          // Registration License Proof
+          if (
+            (lower.includes("registration") || lower.includes("license") || lower.includes("reg_proof") || lower.includes("regproof") || lower.includes("council") || lower.includes("vci")) &&
+            (!vetDoc.registrationProof || vetDoc.registrationProof === "—")
+          ) {
+            vetDoc.registrationProof = f.url;
+          }
+          // Doctor Profile Photo
+          if (
+            (lower.includes("doctor") || lower.includes("vet") || lower.includes("profile") || lower.includes("avatar")) &&
+            (lower.includes("photo") || lower.includes("image") || lower.includes("pic")) &&
+            (!vetDoc.imagePath || vetDoc.imagePath === "—")
+          ) {
+            vetDoc.imagePath = f.url;
+          }
+        });
       }
     } catch (e) {
       console.warn("Error fetching storage files:", e.message);
@@ -1417,8 +1491,8 @@ async function fetchAndProcessAdminUsers(force = false) {
       (fsUser.phoneNumber && fsUser.phoneNumber !== "—") ? fsUser.phoneNumber :
       (fsUser.phone && fsUser.phone !== "—") ? fsUser.phone :
       farmerRecord?.phone || farmerRecord?.farmerPhoneNumber ||
-      sellerRecord?.phone || sellerRecord?.sellerPhone ||
-      vetRecord?.phone || vetRecord?.vetPhone ||
+      sellerRecord?.phone || sellerRecord?.sellerPhone || sellerRecord?.sellerPhoneNumber ||
+      vetRecord?.phone || vetRecord?.vetPhone || vetRecord?.vetPhoneNumber ||
       farmMeta?.phone || cattleMeta?.phone ||
       "—";
 
@@ -1731,13 +1805,14 @@ app.get("/api/admin/sellers", async (req, res) => {
     if (cached) return res.json(cached);
 
     const db = getFirestore();
-    const [sSnap, usersSnap, groupSellerSnap, groupSellersSnap, storesSnap, vendorAppsSnap] = await Promise.all([
+    const [sSnap, usersSnap, groupSellerSnap, groupSellersSnap, storesSnap, vendorAppsSnap, groupRolesSnap] = await Promise.all([
       db.collection("sellers").get().catch(() => ({ docs: [] })),
       db.collection("users").get().catch(() => ({ docs: [] })),
       db.collectionGroup("seller").get().catch(() => ({ docs: [] })),
       db.collectionGroup("sellers").get().catch(() => ({ docs: [] })),
       db.collection("stores").get().catch(() => ({ docs: [] })),
       db.collection("vendor_applications").get().catch(() => ({ docs: [] })),
+      db.collectionGroup("roles").get().catch(() => ({ docs: [] })),
     ]);
 
     const sellersMap = new Map();
@@ -1787,12 +1862,46 @@ app.get("/api/admin/sellers", async (req, res) => {
       const id = uid || doc.id;
       if (!id) return;
 
-      const phone = d.phone || d.phoneNumber || d.sellerPhone || "—";
+      const phone = d.sellerPhoneNumber || d.phone || d.phoneNumber || d.sellerPhone || "—";
       const name = d.shopName || d.storeName || d.name || d.sellerName || d.fullName || (phone !== "—" ? `Seller (${phone})` : `Seller #${id.slice(-6).toUpperCase()}`);
 
       const existing = sellersMap.get(id) || {};
       sellersMap.set(id, {
         ...existing,
+        id,
+        uid: id,
+        ...d,
+        name: existing.name || name,
+        shopName: d.shopName || d.storeName || existing.shopName || name,
+        phone: phone !== "—" ? phone : existing.phone || "—",
+        phoneNumber: phone !== "—" ? phone : existing.phoneNumber || "—",
+        category: d.category || existing.category || "General",
+        products: d.products || existing.products || 0,
+        status: d.status || existing.status || "Active",
+        verified: Boolean(d.verified || existing.verified),
+        createdAt: d.createdAt || existing.createdAt || null,
+      });
+    });
+
+    // 2b. CollectionGroup 'roles' (/users/{uid}/roles/seller)
+    groupRolesSnap.docs.forEach((doc) => {
+      const d = doc.data();
+      if (doc.id !== "seller" && d.role !== "seller" && !d.sellerPhoneNumber) return;
+      const path = doc.ref.path;
+      const segments = path.split("/");
+      let uid = d.uid || d.userId;
+      if (!uid && segments[0] === "users" && segments[1]) uid = segments[1];
+      const id = uid || doc.id;
+      if (!id) return;
+
+      const phone = d.sellerPhoneNumber || d.phone || d.phoneNumber || d.sellerPhone || "—";
+      const name = d.shopName || d.storeName || d.name || d.sellerName || d.fullName || (phone !== "—" ? `Seller (${phone})` : `Seller #${id.slice(-6).toUpperCase()}`);
+      const loc = extractLoc(d);
+
+      const existing = sellersMap.get(id) || {};
+      sellersMap.set(id, {
+        ...existing,
+        ...loc,
         id,
         uid: id,
         ...d,
@@ -2079,8 +2188,10 @@ app.get("/api/admin/vets", async (req, res) => {
 // REST API to list all Product Orders (bypasses client security rules)
 app.get("/api/admin/product-orders", async (req, res) => {
   try {
-    const cached = getCached("admin_product_orders", 600000);
-    if (cached) return res.json(cached);
+    if (!req.query.refresh && !req.query.force) {
+      const cached = getCached("admin_product_orders", 600000);
+      if (cached) return res.json(cached);
+    }
 
     const db = getFirestore();
     const defaultBucketName = process.env.VITE_FIREBASE_STORAGE_BUCKET || "auth-b404a.appspot.com";
@@ -2159,7 +2270,7 @@ app.get("/api/admin/product-orders", async (req, res) => {
           buyerName,
           buyerPhone,
           buyerAddress,
-          sellerName: po.sellerName || po.shopName || po.storeName || "—",
+          sellerName: (po.sellerName && po.sellerName !== "—" && po.sellerName !== "iHerd Marketplace") ? po.sellerName : (po.shopName && po.shopName !== "—") ? po.shopName : (po.storeName && po.storeName !== "—") ? po.storeName : "Chimertech",
           paymentStatus: po.paymentStatus || po.payment?.status || po.payment_status || (po.status === "Delivered" || po.status === "Completed" ? "Paid" : (po.totalAmount ? "Paid" : "—")),
           paymentMethod: po.paymentMethod || po.paymentMode || po.payment?.method || po.payment_method || "—",
           items,
