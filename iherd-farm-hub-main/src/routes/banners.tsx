@@ -24,6 +24,7 @@ import {
   Tag,
   Eye,
   AlertTriangle,
+  AlertCircle,
   Download,
   Upload,
   RefreshCw,
@@ -194,24 +195,23 @@ function BannersPage() {
   const [imagePreview, setImagePreview] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [detectedDimensions, setDetectedDimensions] = useState<{ width: number; height: number; isExact: boolean } | null>(null);
+  const [fileFormatError, setFileFormatError] = useState<string | null>(null);
   const [productSearch, setProductSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("cat_disease_management");
   const [selectedSubCategory, setSelectedSubCategory] = useState<string>("subcat_disease_detection");
 
-  // Live Products for Offer Banner selector
+  // Live Products for Offer Banner selector (shows ALL products with rich details)
   const { data: marketplaceProducts = [] } = useAdminProducts();
 
   const filteredProducts = useMemo(() => {
-    if (!productSearch.trim()) return marketplaceProducts.slice(0, 30);
+    if (!productSearch.trim()) return marketplaceProducts;
     const q = productSearch.toLowerCase();
-    return marketplaceProducts
-      .filter((p: any) => {
-        const name = getLocalizedText(p.name || p.title || "").toLowerCase();
-        const sku = String(p.sku || p.productCode || p.id || "").toLowerCase();
-        const cat = getLocalizedText(p.category || "").toLowerCase();
-        return name.includes(q) || sku.includes(q) || cat.includes(q);
-      })
-      .slice(0, 30);
+    return marketplaceProducts.filter((p: any) => {
+      const name = getLocalizedText(p.name || p.title || "").toLowerCase();
+      const sku = String(p.sku || p.productCode || p.id || "").toLowerCase();
+      const cat = getLocalizedText(p.category || p.categoryName || "").toLowerCase();
+      return name.includes(q) || sku.includes(q) || cat.includes(q);
+    });
   }, [marketplaceProducts, productSearch]);
 
   // 1. Fetch Live Banners from Firestore and Backend
@@ -447,13 +447,19 @@ function BannersPage() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Strict image validation
+    // Strict image validation (explicitly reject PDF and non-images with red popup alert)
+    const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
     const validation = validateImageFile(file);
-    if (!validation.valid) {
-      toast.error(validation.error || "Unsupported file format! Please upload an image file (PNG, JPG, WebP).");
+    if (!validation.valid || isPdf) {
+      const errMsg = isPdf
+        ? "PDF format is not supported! Please upload only image files (PNG, JPG, WebP)."
+        : (validation.error || "Unsupported file format! Please upload only image files (PNG, JPG, WebP).");
+      setFileFormatError(errMsg);
+      toast.error(errMsg);
       if (fileInputRef.current) fileInputRef.current.value = "";
       return;
     }
+    setFileFormatError(null);
 
     setSelectedFile(file);
     const localUrl = URL.createObjectURL(file);
@@ -640,7 +646,7 @@ function BannersPage() {
       actionType: actionType.trim(),
       actionValue: actionValue.trim() || (isOffer ? "VDD1-101-C01-500M" : "cattleMarketplace"),
       imageUrl: finalImageUrl || imagePreview,
-      isActive,
+      isActive: isOffer ? true : isActive,
       priority: Number(priority) || 1,
     };
 
@@ -817,7 +823,6 @@ function BannersPage() {
   };
 
   const activeCount = currentList.filter((b) => b.isActive).length;
-  const pausedCount = currentList.length - activeCount;
 
   return (
     <div className="space-y-6">
@@ -860,7 +865,7 @@ function BannersPage() {
       </PageHeader>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Card
           className={`rounded-3xl border transition-all cursor-pointer shadow-sm ${
             selectedType === "ads_banners" ? "ring-2 ring-primary bg-primary/5" : "bg-card/60"
@@ -912,21 +917,6 @@ function BannersPage() {
             </div>
             <div className="h-11 w-11 rounded-2xl bg-primary/10 text-primary grid place-items-center">
               <CheckCircle2 className="h-5 w-5" />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-3xl border bg-card/60 backdrop-blur-md shadow-sm">
-          <CardContent className="p-4 flex items-center justify-between">
-            <div>
-              <div className="text-xs text-muted-foreground font-medium">Paused / Drafts</div>
-              <div className="text-2xl font-black text-muted-foreground mt-0.5">
-                {isLoading ? <span className="inline-block h-7 w-12 bg-muted/70 rounded-lg animate-pulse" /> : pausedCount}
-              </div>
-              <div className="text-[10px] text-muted-foreground font-medium mt-0.5">Hidden from App</div>
-            </div>
-            <div className="h-11 w-11 rounded-2xl bg-muted text-muted-foreground grid place-items-center">
-              <Power className="h-5 w-5" />
             </div>
           </CardContent>
         </Card>
@@ -1102,7 +1092,9 @@ function BannersPage() {
             <Card
               key={`${banner.bannerType}_${banner.id}`}
               className={`rounded-3xl border transition-all duration-200 overflow-hidden group hover:shadow-lg ${
-                banner.isActive ? "bg-card/70 border-border/80" : "bg-muted/30 border-dashed border-border/60 opacity-85"
+                banner.bannerType !== "offer_banners" && !banner.isActive
+                  ? "bg-muted/30 border-dashed border-border/60 opacity-85"
+                  : "bg-card/70 border-border/80"
               }`}
             >
               {/* Banner Image Container */}
@@ -1158,14 +1150,16 @@ function BannersPage() {
                     </div>
                   </div>
 
-                  {/* Visibility Switch Toggle */}
-                  <div className="flex items-center gap-2">
-                    <Switch
-                      checked={banner.isActive}
-                      onCheckedChange={() => handleToggle(banner)}
-                      title={banner.isActive ? "Hide from carousel" : "Show in carousel"}
-                    />
-                  </div>
+                  {/* Visibility Switch Toggle - Ads Banners only (Offer Banners have no on/off option) */}
+                  {banner.bannerType !== "offer_banners" && (
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        checked={banner.isActive}
+                        onCheckedChange={() => handleToggle(banner)}
+                        title={banner.isActive ? "Hide from carousel" : "Show in carousel"}
+                      />
+                    </div>
+                  )}
                 </div>
 
                 {/* Target Action & Screen */}
@@ -1261,8 +1255,8 @@ function BannersPage() {
                 <TableHead>Action Type</TableHead>
                 <TableHead>Target Value</TableHead>
                 <TableHead className="text-center">Priority</TableHead>
-                <TableHead>profiles</TableHead>
-                <TableHead className="text-center">Visibility</TableHead>
+                {selectedType === "ads_banners" && <TableHead>profiles</TableHead>}
+                {selectedType !== "offer_banners" && <TableHead className="text-center">Visibility</TableHead>}
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -1310,23 +1304,27 @@ function BannersPage() {
                     </span>
                   </TableCell>
 
-                  <TableCell>
-                    <div className="flex flex-wrap gap-1">
-                      {Array.isArray(banner.profiles) && banner.profiles.length > 0 ? (
-                        banner.profiles.map((p) => (
-                          <span key={p} className="px-1.5 py-0.5 rounded-md bg-muted text-[10px] font-medium">
-                            {p}
-                          </span>
-                        ))
-                      ) : (
-                        <span className="text-[10px] text-muted-foreground">All</span>
-                      )}
-                    </div>
-                  </TableCell>
+                  {selectedType === "ads_banners" && (
+                    <TableCell>
+                      <div className="flex flex-wrap gap-1">
+                        {Array.isArray(banner.profiles) && banner.profiles.length > 0 ? (
+                          banner.profiles.map((p) => (
+                            <span key={p} className="px-1.5 py-0.5 rounded-md bg-muted text-[10px] font-medium">
+                              {p}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-[10px] text-muted-foreground">All</span>
+                        )}
+                      </div>
+                    </TableCell>
+                  )}
 
-                  <TableCell className="text-center">
-                    <Switch checked={banner.isActive} onCheckedChange={() => handleToggle(banner)} />
-                  </TableCell>
+                  {selectedType !== "offer_banners" && (
+                    <TableCell className="text-center">
+                      <Switch checked={banner.isActive} onCheckedChange={() => handleToggle(banner)} />
+                    </TableCell>
+                  )}
 
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-1.5">
@@ -1682,6 +1680,25 @@ function BannersPage() {
                     onChange={handleFileUpload}
                     className="hidden"
                   />
+
+                  {/* Red Alert Pop-up for Unsupported Files / PDF Upload attempts */}
+                  {fileFormatError && (
+                    <div className="mb-3 p-3 rounded-xl bg-destructive/10 border-2 border-destructive/40 flex items-center justify-between gap-2 text-xs text-destructive font-bold animate-shake">
+                      <div className="flex items-center gap-2">
+                        <AlertCircle className="h-4 w-4 shrink-0 text-destructive" />
+                        <span>{fileFormatError}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setFileFormatError(null)}
+                        className="text-destructive/80 hover:text-destructive text-sm font-bold px-1"
+                        title="Dismiss"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  )}
+
                   {imagePreview || imageUrl ? (
                     <div className="rounded-2xl overflow-hidden border border-border/80 bg-background shadow-xs space-y-0">
                       <div className="relative w-full aspect-[485/210] max-h-56 bg-slate-900/90 dark:bg-black flex items-center justify-center p-2 group">
@@ -1936,18 +1953,23 @@ function BannersPage() {
                     />
                   </div>
 
-                  <div className="max-h-44 overflow-y-auto space-y-1 rounded-xl border border-border/60 bg-background/80 p-1.5">
+                  <div className="max-h-72 overflow-y-auto space-y-1.5 rounded-2xl border border-border/70 bg-background/90 p-2 shadow-inner">
                     {filteredProducts.length === 0 ? (
-                      <div className="p-3 text-center text-xs text-muted-foreground">
-                        No products found matching your search.
+                      <div className="p-6 text-center text-xs text-muted-foreground flex flex-col items-center justify-center gap-1.5">
+                        <Package className="h-6 w-6 opacity-40 text-muted-foreground" />
+                        <span>No products found matching "{productSearch}"</span>
+                        <span className="text-[11px] text-muted-foreground/80">Try clearing the search filter</span>
                       </div>
                     ) : (
                       filteredProducts.map((prod: any) => {
                         const sku = prod.sku || prod.productCode || prod.id || "";
                         const isSelected = actionValue === sku || actionValue === prod.id;
-                        const img = prod.images?.[0] || prod.imageUrl || prod.image || null;
+                        const img = prod.thumbnailUrl || (Array.isArray(prod.images) ? prod.images[0] : prod.imageUrl) || prod.image || null;
                         const name = getLocalizedText(prod.name || prod.title || "Product");
-                        const price = prod.sellingPrice || prod.price || null;
+                        const price = prod.price !== undefined ? Number(prod.price) : (prod.sellingPrice ? Number(prod.sellingPrice) : null);
+                        const mrp = prod.mrp ? Number(prod.mrp) : null;
+                        const stock = prod.stock !== undefined ? Number(prod.stock) : null;
+                        const cat = getLocalizedText(prod.category || prod.categoryName || "");
 
                         return (
                           <div
@@ -1956,42 +1978,65 @@ function BannersPage() {
                               setActionType("product");
                               setActionValue(sku);
                             }}
-                            className={`p-2 rounded-xl flex items-center justify-between gap-3 cursor-pointer transition-all ${
+                            className={`p-2.5 rounded-xl flex items-center justify-between gap-3 cursor-pointer transition-all border ${
                               isSelected
-                                ? "bg-amber-500/15 border border-amber-500/40 text-foreground font-semibold shadow-xs"
-                                : "hover:bg-muted/50 text-foreground border border-transparent"
+                                ? "bg-amber-500/15 border-amber-500/50 text-foreground font-semibold shadow-xs ring-1 ring-amber-500/30"
+                                : "hover:bg-muted/60 text-foreground border-transparent hover:border-border/60"
                             }`}
                           >
-                            <div className="flex items-center gap-2.5 min-w-0">
+                            <div className="flex items-center gap-3 min-w-0 flex-1">
                               {img ? (
                                 <img
                                   src={formatImageUrl(img)}
                                   alt={name}
-                                  className="h-8 w-8 rounded-lg object-cover border shrink-0 bg-muted"
+                                  className="h-10 w-10 rounded-lg object-cover border shrink-0 bg-muted shadow-xs"
+                                  onError={(e: any) => {
+                                    e.target.onerror = null;
+                                    e.target.src = "https://placehold.co/80x80?text=IMG";
+                                  }}
                                 />
                               ) : (
-                                <div className="h-8 w-8 rounded-lg bg-amber-500/10 text-amber-600 flex items-center justify-center font-bold text-xs shrink-0">
+                                <div className="h-10 w-10 rounded-lg bg-amber-500/10 text-amber-600 flex items-center justify-center font-bold text-sm shrink-0 border border-amber-500/20">
                                   📦
                                 </div>
                               )}
-                              <div className="min-w-0">
-                                <div className="text-xs truncate flex items-center gap-1.5">
+                              <div className="min-w-0 flex-1">
+                                <div className="text-xs font-bold truncate flex items-center gap-2">
                                   <span className="truncate">{name}</span>
-                                  {price && <span className="text-[11px] text-emerald-600 font-bold shrink-0">₹{price}</span>}
+                                  {price !== null && (
+                                    <span className="text-xs font-extrabold text-emerald-600 dark:text-emerald-400 shrink-0">
+                                      ₹{price.toLocaleString()}
+                                    </span>
+                                  )}
+                                  {mrp && mrp > (price || 0) && (
+                                    <span className="text-[10px] text-muted-foreground line-through shrink-0">
+                                      ₹{mrp.toLocaleString()}
+                                    </span>
+                                  )}
                                 </div>
-                                <div className="text-[10px] text-muted-foreground font-mono truncate">
-                                  SKU: <span className="text-foreground font-semibold">{sku}</span>
+                                <div className="text-[10px] text-muted-foreground flex items-center gap-2 mt-0.5 flex-wrap">
+                                  <span className="font-mono font-medium">SKU: <strong className="text-foreground">{sku}</strong></span>
+                                  {cat && (
+                                    <span className="bg-muted px-1.5 py-0.2 rounded text-[10px] border">
+                                      {cat}
+                                    </span>
+                                  )}
+                                  {stock !== null && (
+                                    <span className={`text-[10px] font-semibold ${stock > 0 ? "text-emerald-600" : "text-destructive"}`}>
+                                      {stock > 0 ? `${stock} in stock` : "Out of stock"}
+                                    </span>
+                                  )}
                                 </div>
                               </div>
                             </div>
 
                             <div className="shrink-0">
                               {isSelected ? (
-                                <Badge className="bg-amber-500 text-white font-semibold text-[10px] px-2 py-0.5 gap-1">
+                                <Badge className="bg-amber-500 text-white font-bold text-[10px] px-2.5 py-1 gap-1 shadow-xs">
                                   <Check className="h-3 w-3" /> Selected
                                 </Badge>
                               ) : (
-                                <span className="text-[11px] text-muted-foreground hover:text-foreground">
+                                <span className="text-[11px] font-semibold text-muted-foreground hover:text-foreground px-2 py-1 rounded-lg border bg-background/50 hover:bg-background">
                                   Select
                                 </span>
                               )}
@@ -2113,7 +2158,7 @@ function BannersPage() {
             </div>
 
             {/* 4. Display Priority & Active Status */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-muted/20 p-4 rounded-2xl border border-border/60 items-center">
+            <div className={`grid ${formBannerType === "offer_banners" ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2"} gap-4 bg-muted/20 p-4 rounded-2xl border border-border/60 items-center`}>
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold text-foreground flex items-center justify-between">
                   <span>Display Priority</span>
@@ -2155,28 +2200,30 @@ function BannersPage() {
                 </div>
               </div>
 
-              <div
-                onClick={() => setIsActive(!isActive)}
-                className={`flex items-center justify-between p-3 rounded-2xl border cursor-pointer transition-all ${
-                  isActive
-                    ? "bg-primary/10 border-primary/30 text-foreground"
-                    : "bg-background border-border text-muted-foreground"
-                }`}
-              >
-                <div className="space-y-0.5">
-                  <div className="text-xs font-bold flex items-center gap-1.5">
-                    <span>{isActive ? "Visible in Mobile App" : "Hidden from Mobile App"}</span>
+              {formBannerType !== "offer_banners" && (
+                <div
+                  onClick={() => setIsActive(!isActive)}
+                  className={`flex items-center justify-between p-3 rounded-2xl border cursor-pointer transition-all ${
+                    isActive
+                      ? "bg-primary/10 border-primary/30 text-foreground"
+                      : "bg-background border-border text-muted-foreground"
+                  }`}
+                >
+                  <div className="space-y-0.5">
+                    <div className="text-xs font-bold flex items-center gap-1.5">
+                      <span>{isActive ? "Visible in Mobile App" : "Hidden from Mobile App"}</span>
+                    </div>
+                    <div className="text-[11px] opacity-80">
+                      {isActive ? "Slide displays in user carousel" : "Hidden from user carousel"}
+                    </div>
                   </div>
-                  <div className="text-[11px] opacity-80">
-                    {isActive ? "Slide displays in user carousel" : "Hidden from user carousel"}
-                  </div>
+                  <Switch
+                    checked={isActive}
+                    onCheckedChange={setIsActive}
+                    onClick={(e) => e.stopPropagation()}
+                  />
                 </div>
-                <Switch
-                  checked={isActive}
-                  onCheckedChange={setIsActive}
-                  onClick={(e) => e.stopPropagation()}
-                />
-              </div>
+              )}
             </div>
 
             {/* 5. Target Audience Profiles (Ads Banners only) */}

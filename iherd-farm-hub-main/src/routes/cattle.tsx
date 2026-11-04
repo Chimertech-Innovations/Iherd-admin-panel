@@ -921,12 +921,6 @@ function CattleDetailsPage() {
                     </strong>
                   </div>
                   <div>
-                    <span className="text-muted-foreground block text-[11px]">Horns & Castration:</span>
-                    <strong className="text-foreground">
-                      {selectedCattleDetail.horns || "—"} {selectedCattleDetail.castrated !== undefined && selectedCattleDetail.castrated !== null ? `• ${selectedCattleDetail.castrated ? "Castrated" : "Intact"}` : ""}
-                    </strong>
-                  </div>
-                  <div>
                     <span className="text-muted-foreground block text-[11px]">Estimated Value:</span>
                     <strong className="text-primary font-black text-sm">
                       {selectedCattleDetail.price > 0 ? `₹${Number(selectedCattleDetail.price).toLocaleString()}` : "Market Listed"}
@@ -958,13 +952,7 @@ function CattleDetailsPage() {
                     </strong>
                   </div>
                   <div>
-                    <span className="text-muted-foreground block text-[11px]">Peak Milk Capacity:</span>
-                    <strong className="text-foreground">
-                      {selectedCattleDetail.peakMilkYield !== "—" ? `${selectedCattleDetail.peakMilkYield} L/day` : "—"}
-                    </strong>
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground block text-[11px]">Parity / Lactation No:</span>
+                    <span className="text-muted-foreground block text-[11px]">Parity:</span>
                     <strong className="text-foreground">{selectedCattleDetail.parity || "—"}</strong>
                   </div>
                   <div>

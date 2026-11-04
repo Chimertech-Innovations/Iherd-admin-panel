@@ -12,8 +12,8 @@ import { getServerConfig } from "../config.server";
 // Functions for server logic.
 
 export const getGreeting = createServerFn({ method: "POST" })
-  .inputValidator(z.object({ name: z.string().min(1) }))
-  .handler(async ({ data }) => {
+  .validator((d: { name: string }) => d)
+  .handler(async ({ data }: { data: { name: string } }) => {
     const config = getServerConfig();
     return {
       greeting: `Hello, ${data.name}!`,

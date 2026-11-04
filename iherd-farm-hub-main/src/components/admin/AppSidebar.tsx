@@ -25,6 +25,7 @@ import {
   Boxes,
   Truck,
   GraduationCap,
+  FolderTree,
 } from "lucide-react";
 
 import {
@@ -57,6 +58,7 @@ const people = [
 const marketplace = [
   { title: "Product Marketplace", url: "/marketplace/products", icon: ShoppingBag },
   { title: "Combo Products", url: "/marketplace/combos", icon: Boxes },
+  { title: "Categories & Subcategories", url: "/marketplace/categories", icon: FolderTree },
   { title: "Cattle Marketplace", url: "/marketplace/cattle", icon: ShoppingBag },
   { title: "Best Sellers", url: "/marketplace/best-sellers", icon: Flame },
   { title: "Coupon Codes", url: "/marketplace/coupons", icon: Ticket },

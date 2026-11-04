@@ -160,6 +160,8 @@ export function DataPage<T extends Record<string, any>>({
   customExportColumns,
   locationOptions,
   hideStatusFilter = false,
+  hideStateFilter = false,
+  hideLocationFilter = false,
 }: {
   title: string;
   description?: string;
@@ -182,6 +184,8 @@ export function DataPage<T extends Record<string, any>>({
   customExportColumns?: CsvColumn<T>[];
   locationOptions?: string[];
   hideStatusFilter?: boolean;
+  hideStateFilter?: boolean;
+  hideLocationFilter?: boolean;
 }) {
   const navigate = useNavigate();
   const [q, setQ] = useState("");
@@ -794,41 +798,43 @@ export function DataPage<T extends Record<string, any>>({
             </div>
 
             {/* 4. Dedicated Searchable State Filter Dropdown */}
-            <Select value={selectedState} onValueChange={setSelectedState} disabled={isLoading}>
-              <SelectTrigger className="w-36 text-xs h-9 font-medium">
-                <MapPin className="h-3.5 w-3.5 mr-1 text-emerald-500 shrink-0" />
-                <SelectValue placeholder="State" />
-              </SelectTrigger>
-              <SelectContent className="max-h-64 overflow-y-auto min-w-[200px]">
-                <div className="p-2 border-b sticky top-0 bg-popover z-10">
-                  <div className="relative">
-                    <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                    <Input
-                      placeholder="Search state..."
-                      value={stateSearch}
-                      onChange={(e) => setStateSearch(e.target.value)}
-                      className="h-8 text-xs pl-8 pr-2"
-                      onClick={(e) => e.stopPropagation()}
-                      onKeyDown={(e) => e.stopPropagation()}
-                    />
+            {!hideStateFilter && (
+              <Select value={selectedState} onValueChange={setSelectedState} disabled={isLoading}>
+                <SelectTrigger className="w-36 text-xs h-9 font-medium">
+                  <MapPin className="h-3.5 w-3.5 mr-1 text-emerald-500 shrink-0" />
+                  <SelectValue placeholder="State" />
+                </SelectTrigger>
+                <SelectContent className="max-h-64 overflow-y-auto min-w-[200px]">
+                  <div className="p-2 border-b sticky top-0 bg-popover z-10">
+                    <div className="relative">
+                      <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                      <Input
+                        placeholder="Search state..."
+                        value={stateSearch}
+                        onChange={(e) => setStateSearch(e.target.value)}
+                        className="h-8 text-xs pl-8 pr-2"
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => e.stopPropagation()}
+                      />
+                    </div>
                   </div>
-                </div>
-                <SelectItem value="all">All States</SelectItem>
-                {filteredStateOptions.map((st) => (
-                  <SelectItem key={st} value={st}>
-                    {st}
-                  </SelectItem>
-                ))}
-                {filteredStateOptions.length === 0 && (
-                  <div className="p-3 text-xs text-muted-foreground text-center">
-                    No matching state found
-                  </div>
-                )}
-              </SelectContent>
-            </Select>
+                  <SelectItem value="all">All States</SelectItem>
+                  {filteredStateOptions.map((st) => (
+                    <SelectItem key={st} value={st}>
+                      {st}
+                    </SelectItem>
+                  ))}
+                  {filteredStateOptions.length === 0 && (
+                    <div className="p-3 text-xs text-muted-foreground text-center">
+                      No matching state found
+                    </div>
+                  )}
+                </SelectContent>
+              </Select>
+            )}
 
             {/* 5. Searchable District / City Location Filter Dropdown */}
-            {detectedLocations.length > 0 && (
+            {!hideLocationFilter && detectedLocations.length > 0 && (
               <Select value={locationFilter} onValueChange={setLocationFilter} disabled={isLoading}>
                 <SelectTrigger className="w-40 text-xs h-9 font-medium">
                   <MapPin className="h-3.5 w-3.5 mr-1 text-teal-500 shrink-0" />

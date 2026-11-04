@@ -4562,8 +4562,211 @@ app.get("/api/admin/proxy-image", (req, res) => {
   });
 });
 
+// ==========================================
+// Product Marketplace Categories & Subcategories APIs
+// Stored in:
+// - /product_marketplace/main/categories/{id}
+// - /product_marketplace/main/subcategories/{id}
+// ==========================================
+
+// Helper: Normalize multilingual map for category/subcategory names
+function normalizeCategoryNameMap(val, fallbackName = "") {
+  if (typeof val === "object" && val !== null) {
+    const en = String(val.en || fallbackName).trim();
+    return {
+      en: en,
+      hi: String(val.hi || en).trim(),
+      id: String(val.id || en).trim(),
+      kn: String(val.kn || en).trim(),
+      mr: String(val.mr || en).trim(),
+      pa: String(val.pa || en).trim(),
+      ta: String(val.ta || en).trim(),
+    };
+  }
+  const s = String(val || fallbackName).trim();
+  return {
+    en: s,
+    hi: s,
+    id: s,
+    kn: s,
+    mr: s,
+    pa: s,
+    ta: s,
+  };
+}
+
+// 1. GET /api/admin/categories
+app.get("/api/admin/categories", async (req, res) => {
+  try {
+    const db = getFirestore();
+    const snap = await db.collection("product_marketplace").doc("main").collection("categories").get();
+    const categories = snap.docs.map((doc) => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        ...data,
+        name: normalizeCategoryNameMap(data.name, doc.id),
+        order: typeof data.order === "number" ? data.order : parseInt(data.order, 10) || 0,
+      };
+    });
+    categories.sort((a, b) => (a.order || 0) - (b.order || 0));
+    res.json({ success: true, count: categories.length, categories });
+  } catch (error) {
+    console.error("Error in GET /api/admin/categories:", error);
+    res.status(500).json({ error: error.message, categories: [] });
+  }
+});
+
+// 2. POST /api/admin/categories (Create or Update)
+app.post("/api/admin/categories", async (req, res) => {
+  try {
+    const db = getFirestore();
+    const body = req.body || {};
+    const catId = String(body.id || "").trim();
+    if (!catId) {
+      return res.status(400).json({ error: "Category ID (e.g. cat_breeding) is required." });
+    }
+
+    const payload = {
+      id: catId,
+      image: String(body.image || "").trim(),
+      name: normalizeCategoryNameMap(body.name, body.name?.en || catId),
+      order: typeof body.order === "number" ? body.order : parseInt(body.order, 10) || 0,
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (!body.isUpdate) {
+      payload.createdAt = new Date().toISOString();
+    }
+
+    const docRef = db.collection("product_marketplace").doc("main").collection("categories").doc(catId);
+    await docRef.set(payload, { merge: true });
+
+    console.log(`Saved category ${catId} to /product_marketplace/main/categories`);
+    res.json({ success: true, message: `Category "${catId}" saved successfully`, category: payload });
+  } catch (error) {
+    console.error("Error in POST /api/admin/categories:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 3. DELETE /api/admin/categories/:id
+app.delete("/api/admin/categories/:id", async (req, res) => {
+  try {
+    const db = getFirestore();
+    const catId = req.params.id;
+    await db.collection("product_marketplace").doc("main").collection("categories").doc(catId).delete();
+    console.log(`Deleted category ${catId} from /product_marketplace/main/categories`);
+    res.json({ success: true, message: `Category "${catId}" deleted successfully` });
+  } catch (error) {
+    console.error("Error in DELETE /api/admin/categories/:id:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 4. GET /api/admin/subcategories
+app.get("/api/admin/subcategories", async (req, res) => {
+  try {
+    const db = getFirestore();
+    const snap = await db.collection("product_marketplace").doc("main").collection("subcategories").get();
+    const subcategories = snap.docs.map((doc) => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        ...data,
+        name: normalizeCategoryNameMap(data.name, doc.id),
+        order: typeof data.order === "number" ? data.order : parseInt(data.order, 10) || 0,
+      };
+    });
+    subcategories.sort((a, b) => (a.order || 0) - (b.order || 0));
+    res.json({ success: true, count: subcategories.length, subcategories });
+  } catch (error) {
+    console.error("Error in GET /api/admin/subcategories:", error);
+    res.status(500).json({ error: error.message, subcategories: [] });
+  }
+});
+
+// 5. POST /api/admin/subcategories (Create or Update)
+app.post("/api/admin/subcategories", async (req, res) => {
+  try {
+    const db = getFirestore();
+    const body = req.body || {};
+    const subId = String(body.id || "").trim();
+    const catId = String(body.categoryId || "").trim();
+
+    if (!subId) {
+      return res.status(400).json({ error: "Subcategory ID (e.g. subcat_ai_equipment) is required." });
+    }
+    if (!catId) {
+      return res.status(400).json({ error: "Parent categoryId (e.g. cat_breeding) is required." });
+    }
+
+    const payload = {
+      id: subId,
+      categoryId: catId,
+      name: normalizeCategoryNameMap(body.name, body.name?.en || subId),
+      order: typeof body.order === "number" ? body.order : parseInt(body.order, 10) || 0,
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (!body.isUpdate) {
+      payload.createdAt = new Date().toISOString();
+    }
+
+    const docRef = db.collection("product_marketplace").doc("main").collection("subcategories").doc(subId);
+    await docRef.set(payload, { merge: true });
+
+    console.log(`Saved subcategory ${subId} under ${catId} to /product_marketplace/main/subcategories`);
+    res.json({ success: true, message: `Subcategory "${subId}" saved successfully`, subcategory: payload });
+  } catch (error) {
+    console.error("Error in POST /api/admin/subcategories:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 6. DELETE /api/admin/subcategories/:id
+app.delete("/api/admin/subcategories/:id", async (req, res) => {
+  try {
+    const db = getFirestore();
+    const subId = req.params.id;
+    await db.collection("product_marketplace").doc("main").collection("subcategories").doc(subId).delete();
+    console.log(`Deleted subcategory ${subId} from /product_marketplace/main/subcategories`);
+    res.json({ success: true, message: `Subcategory "${subId}" deleted successfully` });
+  } catch (error) {
+    console.error("Error in DELETE /api/admin/subcategories/:id:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Global error handling middleware (catches client socket aborts and ECONNRESET cleanly)
+app.use((err, req, res, next) => {
+  if (err && (err.code === "ECONNRESET" || err.message === "aborted" || err.type === "request.aborted")) {
+    // Client closed or reloaded the browser before response finished — safely ignore
+    return;
+  }
+  console.error("Unhandled error in request:", err);
+  if (!res.headersSent) {
+    res.status(500).json({ error: err.message || "Internal server error" });
+  }
+});
+
+// Protect Node.js process from crashing on client connection drops or socket resets
+process.on("uncaughtException", (err) => {
+  if (err && (err.code === "ECONNRESET" || err.message === "aborted")) {
+    return; // Safely ignore client-side aborts / browser reloads
+  }
+  console.error("Uncaught Exception:", err);
+});
+
+process.on("unhandledRejection", (reason) => {
+  if (reason && (reason.code === "ECONNRESET" || reason.message === "aborted")) {
+    return;
+  }
+  console.warn("Unhandled Rejection:", reason);
+});
+
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, "0.0.0.0", () => {
+const server = app.listen(PORT, "0.0.0.0", () => {
   console.log(`Backend server running on http://127.0.0.1:${PORT}`);
   
   // Safe initial pre-warm without memory leak interval
@@ -4572,6 +4775,14 @@ app.listen(PORT, "0.0.0.0", () => {
       .then((users) => console.log(`[Cache] Ready with ${users.length} users`))
       .catch((err) => console.warn(`[Cache] Pre-load note:`, err.message));
   }, 1000);
+});
+
+// Handle premature client disconnection at HTTP socket layer cleanly
+server.on("clientError", (err, socket) => {
+  if (err.code === "ECONNRESET" || !socket.writable) {
+    return;
+  }
+  socket.end("HTTP/1.1 400 Bad Request\r\n\r\n");
 });
 
 

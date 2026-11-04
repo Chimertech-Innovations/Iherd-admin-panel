@@ -43,6 +43,8 @@ import {
 import { useFirebaseCollection } from "../hooks/useFirebaseData";
 import { getLocalizedText, formatImageUrl } from "@/lib/utils";
 import { toast } from "sonner";
+import { ref, listAll, getDownloadURL } from "firebase/storage";
+import { storage } from "../lib/firebase";
 
 export const Route = createFileRoute("/marketplace/cattle")({
   head: () => ({ meta: [{ title: "Cattle Marketplace & Live Listings — iHerd Admin" }] }),
@@ -178,6 +180,63 @@ function CattleMarketplacePage() {
   const [selectedCattleDetail, setSelectedCattleDetail] = useState<any | null>(null);
   const [selectedPreviewImage, setSelectedPreviewImage] = useState<{ url: string; title: string } | null>(null);
   const [showRawJson, setShowRawJson] = useState(false);
+  const [discoveredCertUrl, setDiscoveredCertUrl] = useState<string | null>(null);
+
+  // Auto-discover certificate URL from Firebase Storage if explicit link is missing in Firestore
+  useEffect(() => {
+    if (!selectedCattleDetail) {
+      setDiscoveredCertUrl(null);
+      return;
+    }
+    const explicitCert =
+      selectedCattleDetail.pashuCertificatePath ||
+      selectedCattleDetail.pashuCertificate ||
+      selectedCattleDetail.raw?.pashuCertificatePath ||
+      selectedCattleDetail.raw?.pashuCertificate ||
+      selectedCattleDetail.raw?.certificateUrl ||
+      selectedCattleDetail.raw?.certificatePath ||
+      selectedCattleDetail.raw?.insuranceCertificate ||
+      "";
+
+    if (explicitCert && typeof explicitCert === "string" && (explicitCert.startsWith("http") || explicitCert.startsWith("gs://"))) {
+      setDiscoveredCertUrl(explicitCert);
+      return;
+    }
+
+    const ownerUid =
+      selectedCattleDetail.ownerUid ||
+      selectedCattleDetail.sellerId ||
+      selectedCattleDetail.farmerId ||
+      selectedCattleDetail.userId ||
+      selectedCattleDetail.raw?.ownerUid ||
+      selectedCattleDetail.raw?.userId;
+    const cId = selectedCattleDetail.id || selectedCattleDetail.cattleId || selectedCattleDetail.docId;
+
+    if (!ownerUid || !cId) {
+      setDiscoveredCertUrl(null);
+      return;
+    }
+
+    let isMounted = true;
+    const certFolder = ref(storage, `cattle-marketplace/${ownerUid}/${cId}/certificates`);
+    listAll(certFolder)
+      .then(async (res) => {
+        if (!isMounted) return;
+        if (res.items.length > 0) {
+          const u = await getDownloadURL(res.items[0]).catch(() => null);
+          if (isMounted && u) setDiscoveredCertUrl(u);
+        } else {
+          if (isMounted) setDiscoveredCertUrl(null);
+        }
+      })
+      .catch(() => {
+        if (isMounted) setDiscoveredCertUrl(null);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedCattleDetail]);
 
   // Client Firebase `/cattle-marketplace` collection (live real-time sync)
   const { data: cmList = [], isLoading: cmLoading, refetch: refetchFirebase } = useFirebaseCollection<any>("cattle-marketplace");
@@ -287,21 +346,45 @@ function CattleMarketplacePage() {
       const village = getLocalizedText(extractVal(c, "village", "location", "city", "address", "town"), "—");
       const pincode = getLocalizedText(extractVal(c, "pincode", "zipCode", "postalCode"), "—");
 
-      // Multi-angle Camera Proofs
-      const faceView = extractVal(c, "faceViewImagePath", "faceView", "face", "frontView", "front", "imageUrl", "image");
-      const leftView = extractVal(c, "leftViewImagePath", "leftView", "left");
-      const rightView = extractVal(c, "rightViewImagePath", "rightView", "right");
-      const muzzleView = extractVal(c, "muzzleViewImagePath", "muzzleView", "muzzle");
-      const udderView = extractVal(c, "udderViewImagePath", "udderView", "udder");
-      const bottomView = extractVal(c, "topViewImagePath", "bottomView", "topView", "topview", "rearView", "backView");
-      const farmerView = extractVal(c, "farmerViewImagePath", "farmerView", "farmerWithCattle");
+      // Multi-angle Camera Proofs & Raw Images
+      const rawImgMap = (c.images && typeof c.images === "object" && !Array.isArray(c.images))
+        ? c.images
+        : (c.photos && typeof c.photos === "object" && !Array.isArray(c.photos))
+        ? c.photos
+        : {};
+
+      const faceView = extractVal(c, "faceViewImagePath", "faceView", "face", "frontView", "front", "imageUrl", "image") || rawImgMap.frontView || rawImgMap.front || rawImgMap.faceView || rawImgMap.face || "";
+      const leftView = extractVal(c, "leftViewImagePath", "leftView", "left") || rawImgMap.leftView || rawImgMap.left || "";
+      const rightView = extractVal(c, "rightViewImagePath", "rightView", "right") || rawImgMap.rightView || rawImgMap.right || "";
+      const muzzleView = extractVal(c, "muzzleViewImagePath", "muzzleView", "muzzle") || rawImgMap.muzzleView || rawImgMap.muzzle || "";
+      const udderView = extractVal(c, "udderViewImagePath", "udderView", "udder") || rawImgMap.udderView || rawImgMap.udder || "";
+      const bottomView = extractVal(c, "topViewImagePath", "bottomView", "topView", "topview", "rearView", "backView") || rawImgMap.bottomView || rawImgMap.topview || rawImgMap.topView || rawImgMap.rearView || "";
+      const farmerView = extractVal(c, "farmerViewImagePath", "farmerView", "farmerWithCattle") || rawImgMap.farmerView || rawImgMap.farmerWithCattle || "";
 
       // Photos Array
-      const images: string[] = Array.isArray(c.images) && c.images.length > 0
-        ? c.images
-        : Array.isArray(c.photos) && c.photos.length > 0
-        ? c.photos
-        : [faceView, leftView, rightView, muzzleView, udderView, bottomView, farmerView, c.imageUrl, c.image].filter(Boolean);
+      let images: string[] = [];
+      if (Array.isArray(c.images)) {
+        images = c.images.filter((x: any) => typeof x === "string" && x.trim().length > 0);
+      } else if (c.images && typeof c.images === "object") {
+        images = Object.values(c.images).filter((v): v is string => typeof v === "string" && v.trim().length > 0);
+      }
+      if (Array.isArray(c.photos)) {
+        images = [...images, ...c.photos.filter((x: any) => typeof x === "string" && x.trim().length > 0)];
+      }
+      if (images.length === 0) {
+        images = [faceView, leftView, rightView, muzzleView, udderView, bottomView, farmerView, c.imageUrl, c.image].filter(Boolean);
+      }
+
+      let resolvedOwnerUid = ownerUid;
+      if (!resolvedOwnerUid && images.length > 0) {
+        for (const imgUrl of images) {
+          const match = String(imgUrl).match(/(?:UserImages|cattle-marketplace)(?:%2F|\/)([a-zA-Z0-9_-]{20,})/i);
+          if (match && match[1]) {
+            resolvedOwnerUid = match[1];
+            break;
+          }
+        }
+      }
 
       cattleMap.set(docId, {
         id: docId,
@@ -338,7 +421,7 @@ function CattleMarketplacePage() {
         description,
         ownerName,
         ownerPhone,
-        ownerUid,
+        ownerUid: resolvedOwnerUid,
         farmName,
         farmId,
         state,
@@ -449,6 +532,7 @@ function CattleMarketplacePage() {
         description="Real-time livestock listings fetched directly from Firestore /cattle-marketplace, featuring multi-angle camera proofs, RFID verification, milk yields, and seller contacts."
         isLoading={isLoading}
         hideStatusFilter={true}
+        hideStateFilter={true}
         searchKeys={[
           "title",
           "breed",
@@ -859,12 +943,6 @@ function CattleMarketplacePage() {
                     </strong>
                   </div>
                   <div>
-                    <span className="text-muted-foreground block text-[11px]">Horns & Castration:</span>
-                    <strong className="text-foreground">
-                      {selectedCattleDetail.horns || "—"} {selectedCattleDetail.castrated !== undefined ? `• ${selectedCattleDetail.castrated ? "Castrated" : "Intact"}` : ""}
-                    </strong>
-                  </div>
-                  <div>
                     <span className="text-muted-foreground block text-[11px]">Listing Price:</span>
                     <strong className="text-primary font-black text-sm">
                       {formatDisplayPrice(selectedCattleDetail.price, selectedCattleDetail.negotiable, selectedCattleDetail.raw)}
@@ -897,13 +975,7 @@ function CattleMarketplacePage() {
                     </strong>
                   </div>
                   <div>
-                    <span className="text-muted-foreground block text-[11px]">Peak Milk Capacity:</span>
-                    <strong className="text-foreground">
-                      {selectedCattleDetail.peakMilkYield !== "—" ? `${selectedCattleDetail.peakMilkYield} L/day` : "—"}
-                    </strong>
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground block text-[11px]">Parity / Lactation No:</span>
+                    <span className="text-muted-foreground block text-[11px]">Parity:</span>
                     <strong className="text-foreground">{selectedCattleDetail.parity || "—"}</strong>
                   </div>
                   <div>
@@ -966,7 +1038,7 @@ function CattleMarketplacePage() {
                   <h4 className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-1.5">
                     <HardDrive className="h-4 w-4" /> User Storage, Profile & Certificate Links
                   </h4>
-                  <span className="text-[10px] text-muted-foreground font-normal">Click any link below to navigate or open media directly</span>
+                  <span className="text-[10px] text-muted-foreground font-normal">Click any image to enlarge or view profile directly</span>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
@@ -1022,141 +1094,198 @@ function CattleMarketplacePage() {
                     </div>
                   </div>
 
-                  {/* Cattle Media Storage & Photos Preview Link */}
+                  {/* Cattle Media & Photos Directly Rendered */}
                   <div className="space-y-1">
                     <span className="text-muted-foreground text-[11px] block font-medium">Cattle Media & Photos:</span>
-                    <div className="bg-background/90 p-2.5 rounded-xl border flex items-center justify-between gap-2 hover:border-emerald-500/50 transition-colors">
+                    <div className="bg-background/90 p-2 rounded-xl border hover:border-emerald-500/50 transition-colors">
                       {(() => {
-                        const firstImg =
-                          selectedCattleDetail.faceView ||
-                          selectedCattleDetail.leftView ||
-                          (Array.isArray(selectedCattleDetail.images) && selectedCattleDetail.images[0]) ||
-                          (selectedCattleDetail.images && typeof selectedCattleDetail.images === "object" && (selectedCattleDetail.images.frontView || Object.values(selectedCattleDetail.images)[0])) ||
-                          selectedCattleDetail.imageUrl ||
-                          "";
-                        const storagePath = selectedCattleDetail.ownerUid ? `/cattle-marketplace/${selectedCattleDetail.ownerUid}/` : "";
-                        return (
-                          <>
-                            <button
-                              type="button"
-                              className="font-mono font-bold text-emerald-600 dark:text-emerald-400 hover:underline text-xs truncate flex items-center gap-1.5 text-left"
-                              onClick={() => {
-                                if (firstImg) {
-                                  setSelectedPreviewImage({
-                                    url: formatImageUrl(firstImg),
-                                    title: `${selectedCattleDetail.title} — Photos`,
-                                  });
-                                } else {
-                                  toast.info(`Media path: ${storagePath || "No media attached"}`);
-                                }
-                              }}
-                              title="Click to view cattle photos"
-                            >
-                              <Camera className="h-3.5 w-3.5 shrink-0" />
-                              <span className="truncate">{storagePath || "—"}</span>
-                              <Eye className="h-3 w-3 shrink-0 opacity-70" />
-                            </button>
-                            <div className="flex items-center gap-1 shrink-0">
-                              {firstImg && (
-                                <button
-                                  type="button"
-                                  className="text-emerald-600 hover:underline text-[11px] font-semibold"
-                                  onClick={() =>
-                                    setSelectedPreviewImage({
-                                      url: formatImageUrl(firstImg),
-                                      title: `${selectedCattleDetail.title} — Photos`,
-                                    })
-                                  }
-                                >
-                                  View
-                                </button>
-                              )}
-                              {storagePath && (
-                                <button
-                                  type="button"
-                                  className="text-muted-foreground hover:text-foreground text-[11px] px-1 font-semibold"
-                                  onClick={() => {
-                                    navigator.clipboard.writeText(storagePath);
-                                    toast.success("Storage path copied");
-                                  }}
-                                  title="Copy path"
-                                >
-                                  <Copy className="h-3 w-3" />
-                                </button>
-                              )}
+                        const rawImgMap = (selectedCattleDetail.images && typeof selectedCattleDetail.images === "object" && !Array.isArray(selectedCattleDetail.images))
+                          ? selectedCattleDetail.images
+                          : (selectedCattleDetail.raw?.images && typeof selectedCattleDetail.raw.images === "object" && !Array.isArray(selectedCattleDetail.raw.images))
+                          ? selectedCattleDetail.raw.images
+                          : {};
+
+                        const directPhotos = [
+                          { label: "Front", rawUrl: selectedCattleDetail.faceView || rawImgMap.frontView || rawImgMap.front || rawImgMap.faceView || rawImgMap.face },
+                          { label: "Left", rawUrl: selectedCattleDetail.leftView || rawImgMap.leftView || rawImgMap.left },
+                          { label: "Right", rawUrl: selectedCattleDetail.rightView || rawImgMap.rightView || rawImgMap.right },
+                          { label: "Muzzle", rawUrl: selectedCattleDetail.muzzleView || rawImgMap.muzzleView || rawImgMap.muzzle },
+                          { label: "Udder", rawUrl: selectedCattleDetail.udderView || rawImgMap.udderView || rawImgMap.udder },
+                          { label: "Top", rawUrl: selectedCattleDetail.bottomView || rawImgMap.bottomView || rawImgMap.topview || rawImgMap.topView || rawImgMap.rearView },
+                          { label: "Farmer", rawUrl: selectedCattleDetail.farmerView || rawImgMap.farmerView || rawImgMap.farmerWithCattle },
+                          ...(Array.isArray(selectedCattleDetail.images)
+                            ? selectedCattleDetail.images.map((img: string, idx: number) => ({
+                                label: `Photo ${idx + 1}`,
+                                rawUrl: img,
+                              }))
+                            : []),
+                          ...(Array.isArray(selectedCattleDetail.raw?.photos)
+                            ? selectedCattleDetail.raw.photos.map((img: string, idx: number) => ({
+                                label: `Photo ${idx + 1}`,
+                                rawUrl: img,
+                              }))
+                            : []),
+                        ]
+                          .filter((p, idx, self) => !!p.rawUrl && typeof p.rawUrl === "string" && p.rawUrl.trim().length > 0 && self.findIndex((t) => t.rawUrl === p.rawUrl) === idx)
+                          .map((p) => ({
+                            label: p.label,
+                            url: formatImageUrl(p.rawUrl),
+                          }));
+
+                        if (directPhotos.length === 0) {
+                          return (
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground p-1.5">
+                              <Camera className="h-4 w-4 opacity-50" />
+                              <span>No photos uploaded</span>
                             </div>
-                          </>
+                          );
+                        }
+
+                        return (
+                          <div className="flex items-center gap-2 overflow-x-auto py-0.5">
+                            {directPhotos.map((p, pIdx) => (
+                              <div
+                                key={pIdx}
+                                className="relative group shrink-0 w-12 h-12 rounded-lg border overflow-hidden bg-muted cursor-pointer hover:ring-2 hover:ring-emerald-500 transition-all shadow-sm"
+                                onClick={() =>
+                                  setSelectedPreviewImage({
+                                    url: p.url,
+                                    title: `${selectedCattleDetail.title} — ${p.label} View`,
+                                  })
+                                }
+                                title={`Click to view ${p.label} Photo`}
+                              >
+                                <img
+                                  src={p.url}
+                                  alt={p.label}
+                                  className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-200"
+                                  referrerPolicy="no-referrer"
+                                  loading="lazy"
+                                  onError={(e) => {
+                                    (e.target as HTMLElement).style.display = "none";
+                                  }}
+                                />
+                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white">
+                                  <Eye className="h-3.5 w-3.5" />
+                                </div>
+                                <span className="absolute bottom-0 inset-x-0 bg-black/60 text-[8px] text-white font-medium text-center truncate px-0.5 leading-tight py-0.5">
+                                  {p.label}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
                         );
                       })()}
                     </div>
                   </div>
 
-                  {/* Verified Certificate & Document Link */}
+                  {/* Verified Certificate & Document Directly Rendered */}
                   <div className="sm:col-span-2 space-y-1">
                     <span className="text-muted-foreground text-[11px] block font-medium">Verified Certificate & Document:</span>
-                    <div className="bg-background/90 p-2.5 rounded-xl border flex items-center justify-between gap-2 hover:border-primary/50 transition-colors">
+                    <div className="bg-background/90 p-2.5 rounded-xl border hover:border-primary/50 transition-colors">
                       {(() => {
-                        const certUrl =
+                        const rawCert =
+                          discoveredCertUrl ||
                           selectedCattleDetail.pashuCertificatePath ||
+                          selectedCattleDetail.pashuCertificate ||
                           selectedCattleDetail.raw?.pashuCertificatePath ||
+                          selectedCattleDetail.raw?.pashuCertificate ||
                           selectedCattleDetail.raw?.certificateUrl ||
                           selectedCattleDetail.raw?.certificatePath ||
                           selectedCattleDetail.raw?.insuranceCertificate ||
                           "";
-                        const certPath = selectedCattleDetail.ownerUid
-                          ? `/cattle-marketplace/${selectedCattleDetail.ownerUid}/${selectedCattleDetail.id || selectedCattleDetail.cattleId}/`
-                          : "—";
 
-                        return (
-                          <>
-                            {certUrl ? (
+                        const certStr = typeof rawCert === "string" ? rawCert.trim() : "";
+                        const hasRealCert = Boolean(
+                          certStr &&
+                          certStr !== "—" &&
+                          !certStr.endsWith("/") &&
+                          (certStr.startsWith("http") || certStr.startsWith("gs://") || /\.(pdf|jpg|jpeg|png|webp)/i.test(certStr))
+                        );
+
+                        if (!hasRealCert) {
+                          return (
+                            <div className="flex items-center justify-between gap-2 text-xs py-1">
+                              <span className="flex items-center gap-2 text-muted-foreground">
+                                <FileText className="h-4 w-4 opacity-50 text-muted-foreground" />
+                                <span>No Certificate Document Attached</span>
+                              </span>
+                              <span className="text-[10px] text-muted-foreground bg-muted px-2 py-0.5 rounded font-medium">
+                                {selectedCattleDetail.insurance ? `Insured (#${selectedCattleDetail.insuranceNumber})` : "Standard Verified Listing"}
+                              </span>
+                            </div>
+                          );
+                        }
+
+                        const certUrl = formatImageUrl(certStr);
+                        const isPdf = certStr.toLowerCase().includes(".pdf");
+
+                        if (isPdf) {
+                          return (
+                            <div className="flex items-center justify-between gap-3 py-0.5">
+                              <div className="flex items-center gap-2.5">
+                                <div className="h-9 w-9 rounded-lg bg-emerald-500/10 text-emerald-600 grid place-items-center shrink-0">
+                                  <FileText className="h-4 w-4" />
+                                </div>
+                                <div>
+                                  <div className="text-xs font-bold text-foreground">Verified Pashu Medical / Insurance Certificate (PDF)</div>
+                                  <div className="text-[10px] text-muted-foreground">Official veterinarian certified documentation</div>
+                                </div>
+                              </div>
                               <a
-                                href={formatImageUrl(certUrl)}
+                                href={certUrl}
                                 target="_blank"
                                 rel="noreferrer"
-                                className="font-mono font-bold text-primary hover:underline text-xs truncate flex items-center gap-1.5"
-                                title="Click to open Certificate Document"
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 shadow-sm transition-all shrink-0"
                               >
-                                <FileText className="h-3.5 w-3.5 shrink-0 text-success" />
-                                <span className="truncate text-success">Verified Pashu Certificate Available (Click to View)</span>
-                                <ExternalLink className="h-3 w-3 shrink-0" />
+                                <Eye className="h-3.5 w-3.5" /> View PDF
                               </a>
-                            ) : (
-                              <span className="font-mono text-muted-foreground text-xs truncate flex items-center gap-1.5">
-                                <FileText className="h-3.5 w-3.5 shrink-0" />
-                                <span className="truncate">{certPath}</span>
-                              </span>
-                            )}
-                            <div className="flex items-center gap-1 shrink-0">
-                              {certUrl ? (
-                                <a
-                                  href={formatImageUrl(certUrl)}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="text-success hover:underline text-[11px] font-bold inline-flex items-center gap-1"
-                                >
-                                  Open Doc
-                                </a>
-                              ) : (
-                                <span className="text-[10px] text-muted-foreground bg-muted px-2 py-0.5 rounded">
-                                  {selectedCattleDetail.insurance ? `Insured (#${selectedCattleDetail.insuranceNumber})` : "Standard Verified Listing"}
-                                </span>
-                              )}
-                              {certPath !== "—" && (
-                                <button
-                                  type="button"
-                                  className="text-muted-foreground hover:text-foreground text-[11px] px-1 font-semibold"
-                                  onClick={() => {
-                                    navigator.clipboard.writeText(certUrl || certPath);
-                                    toast.success(certUrl ? "Certificate link copied" : "Path copied");
-                                  }}
-                                  title="Copy"
-                                >
-                                  <Copy className="h-3 w-3" />
-                                </button>
-                              )}
                             </div>
-                          </>
+                          );
+                        }
+
+                        return (
+                          <div className="flex items-center justify-between gap-3 py-0.5">
+                            <div className="flex items-center gap-3">
+                              <div
+                                className="relative group h-12 w-12 rounded-lg overflow-hidden border bg-muted cursor-pointer shrink-0 shadow-sm hover:ring-2 hover:ring-primary transition-all"
+                                onClick={() =>
+                                  setSelectedPreviewImage({
+                                    url: certUrl,
+                                    title: "Verified Pashu Certificate",
+                                  })
+                                }
+                                title="Click to enlarge certificate"
+                              >
+                                <img
+                                  src={certUrl}
+                                  alt="Verified Certificate"
+                                  className="h-full w-full object-cover group-hover:scale-105 transition-transform"
+                                  referrerPolicy="no-referrer"
+                                  onError={(e) => {
+                                    (e.target as HTMLElement).style.display = "none";
+                                  }}
+                                />
+                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white">
+                                  <Eye className="h-3.5 w-3.5" />
+                                </div>
+                              </div>
+                              <div>
+                                <div className="text-xs font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
+                                  <ShieldCheck className="h-3.5 w-3.5" /> Official Verified Certificate Image
+                                </div>
+                                <span className="text-[10px] text-muted-foreground">Click thumbnail to enlarge or open full image</span>
+                              </div>
+                            </div>
+                            <a
+                              href={certUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 text-xs font-bold transition-all shrink-0"
+                            >
+                              <ExternalLink className="h-3.5 w-3.5" /> Open Image
+                            </a>
+                          </div>
                         );
                       })()}
                     </div>

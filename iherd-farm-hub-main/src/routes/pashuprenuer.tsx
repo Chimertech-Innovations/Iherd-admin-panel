@@ -181,7 +181,7 @@ function PashuprenuerPage() {
       <PageHeader
         title="Pashupreneur Courses & Training"
         description="Manage dairy farming entrepreneurship curriculum and YouTube video playlists stored in /pashuprenuer_courses."
-        action={
+        actions={
           <div className="flex items-center gap-2.5">
             <Button
               variant="outline"

@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { processSquareImage, validateImageFile } from "@/lib/imageProcessor";
 import { useState, useMemo, useEffect } from "react";
 import { PageHeader } from "@/components/admin/PageHeader";
@@ -68,6 +68,7 @@ import {
   X,
   MapPin,
   Upload,
+  FolderTree,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAdminProducts, useFirebaseCollection, useBestSellers } from "@/hooks/useFirebaseData";
@@ -357,6 +358,7 @@ function ProductsMarketplacePage() {
 
   const [status, setStatus] = useState("Approved");
   const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [productFileFormatError, setProductFileFormatError] = useState<string | null>(null);
 
   // Field Validation Errors State (Highlights empty fields in red and shows alerts)
   const [fieldErrors, setFieldErrors] = useState<Record<string, boolean>>({});
@@ -392,11 +394,17 @@ function ProductsMarketplacePage() {
 
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
+        const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
         const val = validateImageFile(file);
-        if (!val.valid) {
-          toast.error(val.error || "Unsupported file format! Please upload only image files (PNG, JPEG, WebP).");
+        if (!val.valid || isPdf) {
+          const errMsg = isPdf
+            ? `PDF format is not supported for product images (${file.name})! Please upload only image files (PNG, JPG, WebP).`
+            : (val.error || "Unsupported file format! Please upload only image files (PNG, JPEG, WebP).");
+          setProductFileFormatError(errMsg);
+          toast.error(errMsg);
           continue;
         }
+        setProductFileFormatError(null);
 
         const isPrimary = i === 0 && !thumbnailUrl.trim();
         let processed;
@@ -1229,6 +1237,18 @@ function ProductsMarketplacePage() {
           description="Manage veterinary equipment, pharmaceuticals, cattle feeds, supplements, and digital products."
         />
         <div className="flex items-center gap-2 self-start sm:self-auto">
+          <Button
+            variant="outline"
+            size="sm"
+            asChild
+            className="rounded-2xl gap-1.5"
+            title="Manage product categories and subcategories"
+          >
+            <Link to="/marketplace/categories">
+              <FolderTree className="h-4 w-4 text-emerald-600" />
+              <span>Categories</span>
+            </Link>
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -2762,6 +2782,24 @@ function ProductsMarketplacePage() {
 
               {/* TAB 4: MEDIA, SELLER & DELIVERY */}
               <TabsContent value="media" className="space-y-4">
+                {/* Red Alert Pop-up for Unsupported Files / PDF Upload attempts */}
+                {productFileFormatError && (
+                  <div className="p-3 rounded-xl bg-destructive/10 border-2 border-destructive/40 flex items-center justify-between gap-2 text-xs text-destructive font-bold animate-shake">
+                    <div className="flex items-center gap-2">
+                      <AlertCircle className="h-4 w-4 shrink-0 text-destructive" />
+                      <span>{productFileFormatError}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setProductFileFormatError(null)}
+                      className="text-destructive/80 hover:text-destructive text-sm font-bold px-1"
+                      title="Dismiss"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                )}
+
                 {/* Image Gallery and Multi-Upload Section */}
                 <div
                   className={`p-4 rounded-2xl border space-y-4 transition-all ${

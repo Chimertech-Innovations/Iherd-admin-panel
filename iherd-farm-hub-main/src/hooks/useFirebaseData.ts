@@ -846,6 +846,7 @@ export interface ComboProduct {
   bestSeller?: boolean;
   thumbnailUrl?: string;
   imageUrls?: string[];
+  description?: Record<string, string> | string;
   specification?: { specification?: Record<string, string> } | Record<string, string> | string;
   instructionsToUse?: Record<string, string[]> | any;
   productIngredients?: Record<string, string[]> | any;

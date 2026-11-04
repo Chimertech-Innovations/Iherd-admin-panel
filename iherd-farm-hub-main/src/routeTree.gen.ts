@@ -30,6 +30,7 @@ import { Route as TokenAdvanceRouteImport } from './routes/token-advance'
 import { Route as FarmersIndexRouteImport } from './routes/farmers.index'
 import { Route as FarmersFarmerIdRouteImport } from './routes/farmers.$farmerId'
 import { Route as MarketplaceBestSellersRouteImport } from './routes/marketplace.best-sellers'
+import { Route as MarketplaceCategoriesRouteImport } from './routes/marketplace.categories'
 import { Route as MarketplaceCattleRouteImport } from './routes/marketplace.cattle'
 import { Route as MarketplaceCombosRouteImport } from './routes/marketplace.combos'
 import { Route as MarketplaceCouponsRouteImport } from './routes/marketplace.coupons'
@@ -148,6 +149,11 @@ const MarketplaceBestSellersRoute = MarketplaceBestSellersRouteImport.update({
   path: '/marketplace/best-sellers',
   getParentRoute: () => rootRouteImport,
 } as any)
+const MarketplaceCategoriesRoute = MarketplaceCategoriesRouteImport.update({
+  id: '/marketplace/categories',
+  path: '/marketplace/categories',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const MarketplaceCattleRoute = MarketplaceCattleRouteImport.update({
   id: '/marketplace/cattle',
   path: '/marketplace/cattle',
@@ -230,6 +236,7 @@ export interface FileRoutesByFullPath {
   '/token-advance': typeof TokenAdvanceRoute
   '/farmers/$farmerId': typeof FarmersFarmerIdRoute
   '/marketplace/best-sellers': typeof MarketplaceBestSellersRoute
+  '/marketplace/categories': typeof MarketplaceCategoriesRoute
   '/marketplace/cattle': typeof MarketplaceCattleRoute
   '/marketplace/combos': typeof MarketplaceCombosRoute
   '/marketplace/coupons': typeof MarketplaceCouponsRoute
@@ -265,6 +272,7 @@ export interface FileRoutesByTo {
   '/token-advance': typeof TokenAdvanceRoute
   '/farmers/$farmerId': typeof FarmersFarmerIdRoute
   '/marketplace/best-sellers': typeof MarketplaceBestSellersRoute
+  '/marketplace/categories': typeof MarketplaceCategoriesRoute
   '/marketplace/cattle': typeof MarketplaceCattleRoute
   '/marketplace/combos': typeof MarketplaceCombosRoute
   '/marketplace/coupons': typeof MarketplaceCouponsRoute
@@ -301,6 +309,7 @@ export interface FileRoutesById {
   '/token-advance': typeof TokenAdvanceRoute
   '/farmers/$farmerId': typeof FarmersFarmerIdRoute
   '/marketplace/best-sellers': typeof MarketplaceBestSellersRoute
+  '/marketplace/categories': typeof MarketplaceCategoriesRoute
   '/marketplace/cattle': typeof MarketplaceCattleRoute
   '/marketplace/combos': typeof MarketplaceCombosRoute
   '/marketplace/coupons': typeof MarketplaceCouponsRoute
@@ -338,6 +347,7 @@ export interface FileRouteTypes {
     | '/token-advance'
     | '/farmers/$farmerId'
     | '/marketplace/best-sellers'
+    | '/marketplace/categories'
     | '/marketplace/cattle'
     | '/marketplace/combos'
     | '/marketplace/coupons'
@@ -373,6 +383,7 @@ export interface FileRouteTypes {
     | '/token-advance'
     | '/farmers/$farmerId'
     | '/marketplace/best-sellers'
+    | '/marketplace/categories'
     | '/marketplace/cattle'
     | '/marketplace/combos'
     | '/marketplace/coupons'
@@ -408,6 +419,7 @@ export interface FileRouteTypes {
     | '/token-advance'
     | '/farmers/$farmerId'
     | '/marketplace/best-sellers'
+    | '/marketplace/categories'
     | '/marketplace/cattle'
     | '/marketplace/combos'
     | '/marketplace/coupons'
@@ -444,6 +456,7 @@ export interface RootRouteChildren {
   TokenAdvanceRoute: typeof TokenAdvanceRoute
   FarmersFarmerIdRoute: typeof FarmersFarmerIdRoute
   MarketplaceBestSellersRoute: typeof MarketplaceBestSellersRoute
+  MarketplaceCategoriesRoute: typeof MarketplaceCategoriesRoute
   MarketplaceCattleRoute: typeof MarketplaceCattleRoute
   MarketplaceCombosRoute: typeof MarketplaceCombosRoute
   MarketplaceCouponsRoute: typeof MarketplaceCouponsRoute
@@ -608,6 +621,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MarketplaceBestSellersRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/marketplace/categories': {
+      id: '/marketplace/categories'
+      path: '/marketplace/categories'
+      fullPath: '/marketplace/categories'
+      preLoaderRoute: typeof MarketplaceCategoriesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/marketplace/cattle': {
       id: '/marketplace/cattle'
       path: '/marketplace/cattle'
@@ -716,6 +736,7 @@ const rootRouteChildren: RootRouteChildren = {
   TokenAdvanceRoute: TokenAdvanceRoute,
   FarmersFarmerIdRoute: FarmersFarmerIdRoute,
   MarketplaceBestSellersRoute: MarketplaceBestSellersRoute,
+  MarketplaceCategoriesRoute: MarketplaceCategoriesRoute,
   MarketplaceCattleRoute: MarketplaceCattleRoute,
   MarketplaceCombosRoute: MarketplaceCombosRoute,
   MarketplaceCouponsRoute: MarketplaceCouponsRoute,

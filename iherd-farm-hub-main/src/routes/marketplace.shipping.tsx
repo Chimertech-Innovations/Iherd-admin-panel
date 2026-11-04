@@ -381,7 +381,7 @@ function ShippingConfigPage() {
       <PageHeader
         title="Shipping Fees & Regional Zones"
         description="Configure dynamic delivery charges, mapped state codes, and weight-based shipping slabs stored in /product_marketplace/main/shipping_config/config."
-        action={
+        actions={
           <div className="flex items-center gap-2.5">
             <Button
               variant="outline"

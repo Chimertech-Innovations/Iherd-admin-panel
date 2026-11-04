@@ -206,6 +206,7 @@ function CombosPage() {
 
   // Field Validation Errors State (Highlights empty fields in red and shows alerts)
   const [fieldErrors, setFieldErrors] = useState<Record<string, boolean>>({});
+  const [comboFileFormatError, setComboFileFormatError] = useState<string | null>(null);
 
   const clearFieldError = (f: string) => {
     setFieldErrors((prev) => {
@@ -218,6 +219,7 @@ function CombosPage() {
 
   const resetForm = () => {
     setFieldErrors({});
+    setComboFileFormatError(null);
     setId("");
     setCategoryId("cat_disease_management");
     setSubCategoryId("subcat_disease_detection");
@@ -526,6 +528,27 @@ function CombosPage() {
   const handleImageFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
+
+    setComboFileFormatError(null);
+
+    // Validate all files upfront for PDF and non-image files
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      if (f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf")) {
+        const errMsg = "PDF files are not supported! Please upload only image files (PNG, JPG, WebP).";
+        setComboFileFormatError(errMsg);
+        toast.error("Please upload only images (PNG, JPG, WebP)! PDF is not supported.");
+        e.target.value = "";
+        return;
+      }
+      if (!f.type.startsWith("image/") && !/\.(png|jpe?g|webp)$/i.test(f.name)) {
+        const errMsg = `Unsupported file format (${f.name})! Please upload only images (PNG, JPG, WebP).`;
+        setComboFileFormatError(errMsg);
+        toast.error(errMsg);
+        e.target.value = "";
+        return;
+      }
+    }
 
     setIsUploading(true);
     let successCount = 0;
@@ -927,7 +950,7 @@ function CombosPage() {
       <PageHeader
         title="Combo Products Management"
         description="Add, edit, and publish combo package bundles stored in /product_marketplace/main/combos."
-        action={
+        actions={
           <div className="flex items-center gap-2.5">
             <Button
               variant="outline"
@@ -2439,6 +2462,24 @@ function CombosPage() {
                       </label>
                     </div>
                   </div>
+
+                  {comboFileFormatError && (
+                    <div className="p-3 bg-red-500/10 border-2 border-red-500/50 rounded-xl flex items-center justify-between gap-3 text-red-600 dark:text-red-400 animate-in fade-in slide-in-from-top-1">
+                      <div className="flex items-center gap-2">
+                        <AlertCircle className="h-5 w-5 shrink-0" />
+                        <div className="text-xs font-semibold">{comboFileFormatError}</div>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setComboFileFormatError(null)}
+                        className="h-6 w-6 p-0 hover:bg-red-500/20 text-red-600 dark:text-red-400"
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  )}
 
                   {fieldErrors.images && (
                     <p className="text-xs font-semibold text-destructive flex items-center gap-1 animate-pulse">
