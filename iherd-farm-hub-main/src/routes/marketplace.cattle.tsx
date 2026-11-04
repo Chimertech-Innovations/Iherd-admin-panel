@@ -41,7 +41,7 @@ import {
   HardDrive,
 } from "lucide-react";
 import { useFirebaseCollection } from "../hooks/useFirebaseData";
-import { getLocalizedText } from "@/lib/utils";
+import { getLocalizedText, formatImageUrl } from "@/lib/utils";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/marketplace/cattle")({
@@ -471,7 +471,15 @@ function CattleMarketplacePage() {
           { label: "Insured Cattle", value: isLoading ? "…" : insuredCount.toLocaleString() },
         ]}
         data={allCattle.map(c => {
-          const mainImg = c.faceView || c.leftView || (Array.isArray(c.images) && c.images[0]) || c.imageUrl || c.image;
+          const rawMainImg = c.faceView ||
+            c.leftView ||
+            (c.images && typeof c.images === "object" && !Array.isArray(c.images) ? (c.images.frontView || c.images.faceView || Object.values(c.images)[0]) : null) ||
+            (c.raw?.images && typeof c.raw.images === "object" ? (c.raw.images.frontView || c.raw.images.faceView || Object.values(c.raw.images)[0]) : null) ||
+            (Array.isArray(c.images) && c.images[0]) ||
+            (Array.isArray(c.raw?.photos) && c.raw.photos[0]) ||
+            c.imageUrl ||
+            c.image;
+          const mainImg = formatImageUrl(rawMainImg);
           
           const yieldNum = parseFloat(String(c.milkYield).replace(/[^0-9.]/g, ""));
           const isHighYield = !isNaN(yieldNum) && yieldNum >= 12;
@@ -504,15 +512,23 @@ function CattleMarketplacePage() {
             render: (r) => (
               <div className="flex items-center gap-3">
                 {r.mainImg ? (
-                  <img
-                    src={r.mainImg}
-                    alt={r.title}
-                    className="h-11 w-11 rounded-xl object-cover ring-1 ring-border/60 shrink-0 cursor-pointer hover:scale-105 transition-transform"
+                  <div
+                    className="h-11 w-11 rounded-xl overflow-hidden ring-1 ring-border/60 shrink-0 cursor-pointer hover:scale-105 transition-transform bg-muted/40 relative group"
                     onClick={(e) => {
                       e.stopPropagation();
                       setSelectedPreviewImage({ url: r.mainImg, title: `${r.title} - Front Camera View` });
                     }}
-                  />
+                  >
+                    <img
+                      src={r.mainImg}
+                      alt={r.title}
+                      className="h-full w-full object-cover"
+                      referrerPolicy="no-referrer"
+                      onError={(e) => {
+                        (e.target as HTMLElement).style.display = "none";
+                      }}
+                    />
+                  </div>
                 ) : (
                   <div className="h-11 w-11 rounded-xl bg-primary/10 text-primary grid place-items-center shrink-0">
                     <Beef className="h-5 w-5" />
@@ -723,23 +739,39 @@ function CattleMarketplacePage() {
                 </h4>
                 
                 {(() => {
+                  const rawImgMap = (selectedCattleDetail.images && typeof selectedCattleDetail.images === "object" && !Array.isArray(selectedCattleDetail.images))
+                    ? selectedCattleDetail.images
+                    : (selectedCattleDetail.raw?.images && typeof selectedCattleDetail.raw.images === "object" && !Array.isArray(selectedCattleDetail.raw.images))
+                    ? selectedCattleDetail.raw.images
+                    : {};
+
                   const proofList = [
-                    { label: "Front / Face View", url: selectedCattleDetail.faceView },
-                    { label: "Left Side View", url: selectedCattleDetail.leftView },
-                    { label: "Right Side View", url: selectedCattleDetail.rightView },
-                    { label: "Muzzle View", url: selectedCattleDetail.muzzleView },
-                    { label: "Udder View", url: selectedCattleDetail.udderView },
-                    { label: "Top / Rear View", url: selectedCattleDetail.bottomView },
-                    { label: "Farmer with Cattle", url: selectedCattleDetail.farmerView },
+                    { label: "Front / Face View", rawUrl: selectedCattleDetail.faceView || rawImgMap.frontView || rawImgMap.faceView || rawImgMap.face },
+                    { label: "Left Side View", rawUrl: selectedCattleDetail.leftView || rawImgMap.leftView },
+                    { label: "Right Side View", rawUrl: selectedCattleDetail.rightView || rawImgMap.rightView },
+                    { label: "Muzzle View", rawUrl: selectedCattleDetail.muzzleView || rawImgMap.muzzleView },
+                    { label: "Udder View", rawUrl: selectedCattleDetail.udderView || rawImgMap.udderView },
+                    { label: "Top / Rear View", rawUrl: selectedCattleDetail.bottomView || rawImgMap.bottomView || rawImgMap.topview || rawImgMap.rearView },
+                    { label: "Farmer with Cattle", rawUrl: selectedCattleDetail.farmerView || rawImgMap.farmerView || rawImgMap.farmerWithCattle },
                     ...(Array.isArray(selectedCattleDetail.images)
                       ? selectedCattleDetail.images.map((img: string, idx: number) => ({
                           label: `Gallery Photo #${idx + 1}`,
-                          url: img,
+                          rawUrl: img,
                         }))
                       : []),
-                  ].filter(
-                    (p, idx, self) => !!p.url && self.findIndex((t) => t.url === p.url) === idx
-                  );
+                    ...(Array.isArray(selectedCattleDetail.raw?.photos)
+                      ? selectedCattleDetail.raw.photos.map((img: string, idx: number) => ({
+                          label: `Listing Photo #${idx + 1}`,
+                          rawUrl: img,
+                        }))
+                      : []),
+                  ]
+                    .filter((p, idx, self) => !!p.rawUrl && typeof p.rawUrl === "string" && self.findIndex((t) => t.rawUrl === p.rawUrl) === idx)
+                    .map((p) => ({
+                      label: p.label,
+                      url: formatImageUrl(p.rawUrl),
+                      rawUrl: p.rawUrl,
+                    }));
 
                   if (proofList.length === 0) {
                     return (
@@ -767,6 +799,7 @@ function CattleMarketplacePage() {
                               src={p.url}
                               alt={p.label}
                               className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                              referrerPolicy="no-referrer"
                               loading="lazy"
                             />
                             <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white gap-1 text-xs font-semibold">
@@ -927,71 +960,205 @@ function CattleMarketplacePage() {
                 </div>
               )}
 
-              {/* Storage & Ownership Path */}
-              <div className="p-4 rounded-2xl bg-primary/5 border border-primary/20 space-y-2.5">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-primary flex items-center justify-between">
-                  <span className="flex items-center gap-1.5">
-                    <HardDrive className="h-4 w-4" /> User Storage & Certificate Paths
-                  </span>
-                  <span className="text-[10px] lowercase text-muted-foreground font-normal">All media stored under User ID</span>
-                </h4>
+              {/* Storage & Ownership Verification Card with Direct Clickable Links */}
+              <div className="p-4 rounded-2xl bg-primary/5 border border-primary/20 space-y-3">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-1.5">
+                    <HardDrive className="h-4 w-4" /> User Storage, Profile & Certificate Links
+                  </h4>
+                  <span className="text-[10px] text-muted-foreground font-normal">Click any link below to navigate or open media directly</span>
+                </div>
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                  {/* Owner User Profile Link */}
                   <div className="space-y-1">
-                    <span className="text-muted-foreground text-[11px] block font-medium">Owner User ID:</span>
-                    <div className="font-mono font-bold text-foreground text-xs bg-background/80 p-2.5 rounded-xl border select-all flex items-center justify-between">
-                      <span className="truncate">{selectedCattleDetail.ownerUid || "—"}</span>
-                      {selectedCattleDetail.ownerUid && (
-                        <button
-                          type="button"
-                          className="text-primary hover:underline text-[11px] font-sans shrink-0 ml-2 font-semibold"
-                          onClick={() => {
-                            navigator.clipboard.writeText(selectedCattleDetail.ownerUid);
-                            toast.success("User ID copied");
-                          }}
-                        >
-                          Copy
-                        </button>
-                      )}
+                    <span className="text-muted-foreground text-[11px] block font-medium">Owner / Seller Profile:</span>
+                    <div className="bg-background/90 p-2.5 rounded-xl border flex items-center justify-between gap-2 hover:border-primary/50 transition-colors">
+                      {(() => {
+                        const sellerUid =
+                          selectedCattleDetail.ownerUid ||
+                          selectedCattleDetail.sellerId ||
+                          selectedCattleDetail.farmerId ||
+                          selectedCattleDetail.userId ||
+                          selectedCattleDetail.raw?.sellerId ||
+                          selectedCattleDetail.raw?.farmerId;
+                        if (!sellerUid) {
+                          return <span className="font-mono text-muted-foreground text-xs">—</span>;
+                        }
+                        return (
+                          <>
+                            <Link
+                              to="/users/$userId"
+                              params={{ userId: sellerUid }}
+                              search={{ tab: "cattle" } as any}
+                              className="font-mono font-bold text-primary hover:underline text-xs truncate flex items-center gap-1.5"
+                              title="Click to open User Profile"
+                            >
+                              <User className="h-3.5 w-3.5 shrink-0" />
+                              <span className="truncate">{sellerUid}</span>
+                              <ExternalLink className="h-3 w-3 shrink-0 opacity-70" />
+                            </Link>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <Button asChild size="sm" variant="ghost" className="h-7 px-2 text-[11px] text-primary hover:text-primary">
+                                <Link to="/users/$userId" params={{ userId: sellerUid }} search={{ tab: "cattle" } as any}>
+                                  Open
+                                </Link>
+                              </Button>
+                              <button
+                                type="button"
+                                className="text-muted-foreground hover:text-foreground text-[11px] font-sans px-1 font-semibold"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(sellerUid);
+                                  toast.success("User ID copied");
+                                }}
+                                title="Copy User ID"
+                              >
+                                <Copy className="h-3 w-3" />
+                              </button>
+                            </div>
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
+
+                  {/* Cattle Media Storage & Photos Preview Link */}
                   <div className="space-y-1">
-                    <span className="text-muted-foreground text-[11px] block font-medium">Cattle Media Storage Path:</span>
-                    <div className="font-mono font-bold text-emerald-600 dark:text-emerald-400 text-xs bg-background/80 p-2.5 rounded-xl border select-all flex items-center justify-between">
-                      <span className="truncate">{selectedCattleDetail.ownerUid ? `/cattle-marketplace/${selectedCattleDetail.ownerUid}/` : "—"}</span>
-                      {selectedCattleDetail.ownerUid && (
-                        <button
-                          type="button"
-                          className="text-emerald-600 hover:underline text-[11px] font-sans shrink-0 ml-2 font-semibold"
-                          onClick={() => {
-                            navigator.clipboard.writeText(`/cattle-marketplace/${selectedCattleDetail.ownerUid}/`);
-                            toast.success("Storage path copied");
-                          }}
-                        >
-                          Copy
-                        </button>
-                      )}
+                    <span className="text-muted-foreground text-[11px] block font-medium">Cattle Media & Photos:</span>
+                    <div className="bg-background/90 p-2.5 rounded-xl border flex items-center justify-between gap-2 hover:border-emerald-500/50 transition-colors">
+                      {(() => {
+                        const firstImg =
+                          selectedCattleDetail.faceView ||
+                          selectedCattleDetail.leftView ||
+                          (Array.isArray(selectedCattleDetail.images) && selectedCattleDetail.images[0]) ||
+                          (selectedCattleDetail.images && typeof selectedCattleDetail.images === "object" && (selectedCattleDetail.images.frontView || Object.values(selectedCattleDetail.images)[0])) ||
+                          selectedCattleDetail.imageUrl ||
+                          "";
+                        const storagePath = selectedCattleDetail.ownerUid ? `/cattle-marketplace/${selectedCattleDetail.ownerUid}/` : "";
+                        return (
+                          <>
+                            <button
+                              type="button"
+                              className="font-mono font-bold text-emerald-600 dark:text-emerald-400 hover:underline text-xs truncate flex items-center gap-1.5 text-left"
+                              onClick={() => {
+                                if (firstImg) {
+                                  setSelectedPreviewImage({
+                                    url: formatImageUrl(firstImg),
+                                    title: `${selectedCattleDetail.title} — Photos`,
+                                  });
+                                } else {
+                                  toast.info(`Media path: ${storagePath || "No media attached"}`);
+                                }
+                              }}
+                              title="Click to view cattle photos"
+                            >
+                              <Camera className="h-3.5 w-3.5 shrink-0" />
+                              <span className="truncate">{storagePath || "—"}</span>
+                              <Eye className="h-3 w-3 shrink-0 opacity-70" />
+                            </button>
+                            <div className="flex items-center gap-1 shrink-0">
+                              {firstImg && (
+                                <button
+                                  type="button"
+                                  className="text-emerald-600 hover:underline text-[11px] font-semibold"
+                                  onClick={() =>
+                                    setSelectedPreviewImage({
+                                      url: formatImageUrl(firstImg),
+                                      title: `${selectedCattleDetail.title} — Photos`,
+                                    })
+                                  }
+                                >
+                                  View
+                                </button>
+                              )}
+                              {storagePath && (
+                                <button
+                                  type="button"
+                                  className="text-muted-foreground hover:text-foreground text-[11px] px-1 font-semibold"
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(storagePath);
+                                    toast.success("Storage path copied");
+                                  }}
+                                  title="Copy path"
+                                >
+                                  <Copy className="h-3 w-3" />
+                                </button>
+                              )}
+                            </div>
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
+
+                  {/* Verified Certificate & Document Link */}
                   <div className="sm:col-span-2 space-y-1">
-                    <span className="text-muted-foreground text-[11px] block font-medium">Verified Certificate & Document Path:</span>
-                    <div className="font-mono text-muted-foreground text-[11px] bg-background/80 p-2.5 rounded-xl border select-all flex items-center justify-between">
-                      <span className="truncate">
-                        {selectedCattleDetail.ownerUid
+                    <span className="text-muted-foreground text-[11px] block font-medium">Verified Certificate & Document:</span>
+                    <div className="bg-background/90 p-2.5 rounded-xl border flex items-center justify-between gap-2 hover:border-primary/50 transition-colors">
+                      {(() => {
+                        const certUrl =
+                          selectedCattleDetail.pashuCertificatePath ||
+                          selectedCattleDetail.raw?.pashuCertificatePath ||
+                          selectedCattleDetail.raw?.certificateUrl ||
+                          selectedCattleDetail.raw?.certificatePath ||
+                          selectedCattleDetail.raw?.insuranceCertificate ||
+                          "";
+                        const certPath = selectedCattleDetail.ownerUid
                           ? `/cattle-marketplace/${selectedCattleDetail.ownerUid}/${selectedCattleDetail.id || selectedCattleDetail.cattleId}/`
-                          : "—"}
-                      </span>
-                      {selectedCattleDetail.ownerUid && (
-                        <button
-                          type="button"
-                          className="text-muted-foreground hover:text-foreground text-[11px] font-sans shrink-0 ml-2 font-semibold"
-                          onClick={() => {
-                            navigator.clipboard.writeText(`/cattle-marketplace/${selectedCattleDetail.ownerUid}/${selectedCattleDetail.id || selectedCattleDetail.cattleId}/`);
-                            toast.success("Certificate path copied");
-                          }}
-                        >
-                          Copy
-                        </button>
-                      )}
+                          : "—";
+
+                        return (
+                          <>
+                            {certUrl ? (
+                              <a
+                                href={formatImageUrl(certUrl)}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="font-mono font-bold text-primary hover:underline text-xs truncate flex items-center gap-1.5"
+                                title="Click to open Certificate Document"
+                              >
+                                <FileText className="h-3.5 w-3.5 shrink-0 text-success" />
+                                <span className="truncate text-success">Verified Pashu Certificate Available (Click to View)</span>
+                                <ExternalLink className="h-3 w-3 shrink-0" />
+                              </a>
+                            ) : (
+                              <span className="font-mono text-muted-foreground text-xs truncate flex items-center gap-1.5">
+                                <FileText className="h-3.5 w-3.5 shrink-0" />
+                                <span className="truncate">{certPath}</span>
+                              </span>
+                            )}
+                            <div className="flex items-center gap-1 shrink-0">
+                              {certUrl ? (
+                                <a
+                                  href={formatImageUrl(certUrl)}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-success hover:underline text-[11px] font-bold inline-flex items-center gap-1"
+                                >
+                                  Open Doc
+                                </a>
+                              ) : (
+                                <span className="text-[10px] text-muted-foreground bg-muted px-2 py-0.5 rounded">
+                                  {selectedCattleDetail.insurance ? `Insured (#${selectedCattleDetail.insuranceNumber})` : "Standard Verified Listing"}
+                                </span>
+                              )}
+                              {certPath !== "—" && (
+                                <button
+                                  type="button"
+                                  className="text-muted-foreground hover:text-foreground text-[11px] px-1 font-semibold"
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(certUrl || certPath);
+                                    toast.success(certUrl ? "Certificate link copied" : "Path copied");
+                                  }}
+                                  title="Copy"
+                                >
+                                  <Copy className="h-3 w-3" />
+                                </button>
+                              )}
+                            </div>
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
                 </div>
@@ -1031,17 +1198,27 @@ function CattleMarketplacePage() {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  {selectedCattleDetail.ownerUid && (
-                    <Button asChild size="sm" className="gap-1.5 rounded-xl text-xs">
-                      <Link
-                        to="/users/$userId"
-                        params={{ userId: selectedCattleDetail.ownerUid }}
-                        search={{ tab: "cattle" } as any}
-                      >
-                        <User className="h-3.5 w-3.5" /> View Seller Profile
-                      </Link>
-                    </Button>
-                  )}
+                  {(() => {
+                    const sellerUid =
+                      selectedCattleDetail.ownerUid ||
+                      selectedCattleDetail.sellerId ||
+                      selectedCattleDetail.farmerId ||
+                      selectedCattleDetail.userId ||
+                      selectedCattleDetail.raw?.sellerId ||
+                      selectedCattleDetail.raw?.farmerId ||
+                      selectedCattleDetail.raw?.userId;
+                    return sellerUid ? (
+                      <Button asChild size="sm" className="gap-1.5 rounded-xl text-xs">
+                        <Link
+                          to="/users/$userId"
+                          params={{ userId: sellerUid }}
+                          search={{ tab: "cattle" } as any}
+                        >
+                          <User className="h-3.5 w-3.5" /> View Seller Profile
+                        </Link>
+                      </Button>
+                    ) : null;
+                  })()}
                   <Button
                     size="sm"
                     variant="outline"
@@ -1089,8 +1266,9 @@ function CattleMarketplacePage() {
             <div className="space-y-4">
               <div className="max-h-[70vh] rounded-2xl overflow-hidden bg-black/10 flex items-center justify-center">
                 <img
-                  src={selectedPreviewImage.url}
+                  src={formatImageUrl(selectedPreviewImage.url)}
                   alt={selectedPreviewImage.title}
+                  referrerPolicy="no-referrer"
                   className="max-h-[65vh] w-auto max-w-full object-contain rounded-xl"
                 />
               </div>

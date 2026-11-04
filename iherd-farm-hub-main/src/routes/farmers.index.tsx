@@ -443,6 +443,7 @@ function FarmersPage() {
         exportFilename="iherd_farmers_directory"
         isLoading={isLoading}
         isFetchingBalance={isFetchingBalance}
+        rowHref={(r) => `/users/${r.uid}?tab=farmer`}
         customExportColumns={[
           { header: "Farmer Name", accessor: "name" },
           { header: "Farmer UID", accessor: "uid" },
@@ -540,13 +541,10 @@ function FarmersPage() {
             render: (r) => (
               <div className="space-y-0.5 text-xs">
                 {r.hasFarm ? (
-                  <Link
-                    to="/farms"
-                    className="font-semibold text-primary flex items-center gap-1 hover:underline"
-                  >
-                    <Building className="h-3 w-3 shrink-0" />
+                  <div className="font-semibold text-foreground flex items-center gap-1.5">
+                    <Building className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                     <span className="truncate max-w-[140px]">{r.registeredFarmName}</span>
-                  </Link>
+                  </div>
                 ) : (
                   <span className="text-muted-foreground text-[11px]">No Farm Registered</span>
                 )}

@@ -32,6 +32,46 @@ function parseTime(val: any): number {
   return isNaN(d) ? 0 : d;
 }
 
+function resolvePhone(val: any): string {
+  if (!val || val === "—" || val === "null" || val === "undefined") return "";
+  const s = String(val).trim();
+  if (!s || s === "—") return "";
+  if (s.startsWith("+")) return s;
+  if (/^\d{10}$/.test(s)) return `+91${s}`;
+  return s;
+}
+
+function extractSellerPhone(...sources: any[]): string {
+  for (const src of sources) {
+    if (!src) continue;
+    if (typeof src === "string") {
+      const p = resolvePhone(src);
+      if (p) return p;
+    } else if (typeof src === "object") {
+      const candidateKeys = [
+        "sellerPhoneNumber",
+        "sellerPhone",
+        "phoneNumber",
+        "phone",
+        "contactPhone",
+        "phoneNo",
+        "mobile",
+      ];
+      for (const k of candidateKeys) {
+        const p = resolvePhone(src[k]);
+        if (p) return p;
+      }
+      if (src.seller && typeof src.seller === "object") {
+        for (const k of candidateKeys) {
+          const p = resolvePhone(src.seller[k]);
+          if (p) return p;
+        }
+      }
+    }
+  }
+  return "—";
+}
+
 function formatDate(ms: number): string {
   if (!ms || isNaN(ms)) return "—";
   return new Date(ms).toLocaleDateString("en-US", {
@@ -237,7 +277,7 @@ function SellersPage() {
     if (!id) return;
 
     const rawTimestamp = parseTime(ds.createdAt || ds.timestamp || ds.updatedAt);
-    const phone = ds.phone || ds.phoneNumber || ds.sellerPhone || "—";
+    const phone = extractSellerPhone(ds);
     const shopName = ds.shopName || ds.storeName || ds.name || ds.sellerName || "Marketplace Store";
 
     sellerMap.set(id, {
@@ -246,6 +286,7 @@ function SellersPage() {
       name: getLocalizedText(shopName),
       ownerName: getLocalizedText(ds.name || ds.ownerName || "Seller"),
       phone,
+      email: ds.email || ds.sellerEmail || "",
       category: getLocalizedText(ds.category || ds.shopCategory || "Feed & Supplies"),
       products: Number(ds.products || ds.productCount || 0),
       gmv: ds.gmv || "—",
@@ -270,8 +311,8 @@ function SellersPage() {
     const hasSellerRole = roles.some((r: any) => typeof r === "string" && r.toLowerCase().includes("seller"));
     const hasDirectSellerDoc = Boolean(directSeller);
     const hasSellerProfile = Boolean(
-      (fsUser?.seller && typeof fsUser.seller === "object" && (fsUser.seller.name || fsUser.seller.shopName || fsUser.seller.storeName || fsUser.seller.phone || fsUser.seller.category)) ||
-      (authUser?.seller && typeof authUser.seller === "object" && (authUser.seller.name || authUser.seller.shopName || authUser.seller.storeName || authUser.seller.category)) ||
+      (fsUser?.seller && typeof fsUser.seller === "object" && (fsUser.seller.name || fsUser.seller.shopName || fsUser.seller.storeName || fsUser.seller.phone || fsUser.seller.sellerPhoneNumber || fsUser.seller.category)) ||
+      (authUser?.seller && typeof authUser.seller === "object" && (authUser.seller.name || authUser.seller.shopName || authUser.seller.storeName || authUser.seller.sellerPhoneNumber || authUser.seller.category)) ||
       fsUser?.isSeller === true ||
       authUser?.isSeller === true
     );
@@ -288,12 +329,8 @@ function SellersPage() {
         authUser?.metadata?.creationTime
       );
 
-      const phone =
-        (sellerProfile.phone && sellerProfile.phone !== "—") ? sellerProfile.phone :
-        (sellerProfile.sellerPhone && sellerProfile.sellerPhone !== "—") ? sellerProfile.sellerPhone :
-        (authUser?.phoneNumber && authUser.phoneNumber !== "—") ? authUser.phoneNumber :
-        (fsUser?.phoneNumber && fsUser.phoneNumber !== "—") ? fsUser.phoneNumber :
-        "—";
+      const phone = extractSellerPhone(sellerProfile, fsUser, authUser, directSeller);
+      const email = authUser?.email || fsUser?.email || sellerProfile?.email || directSeller?.email || "";
 
       const shopName =
         sellerProfile.shopName ||
@@ -316,6 +353,7 @@ function SellersPage() {
         name: getLocalizedText(shopName),
         ownerName: getLocalizedText(ownerName),
         phone,
+        email,
         category: getLocalizedText(sellerProfile.category || "Feed & Supplies"),
         products: Number(sellerProfile.products || sellerProfile.productCount || 0),
         gmv: sellerProfile.gmv || "—",
@@ -339,7 +377,7 @@ function SellersPage() {
     const roles: string[] = Array.isArray(fsRoles) ? fsRoles : [String(fsRoles)];
     const hasSellerRole = roles.some((r: any) => typeof r === "string" && r.toLowerCase().includes("seller"));
     const hasSellerProfile = Boolean(
-      (fsUser.seller && typeof fsUser.seller === "object" && (fsUser.seller.name || fsUser.seller.shopName || fsUser.seller.storeName || fsUser.seller.phone || fsUser.seller.category)) ||
+      (fsUser.seller && typeof fsUser.seller === "object" && (fsUser.seller.name || fsUser.seller.shopName || fsUser.seller.storeName || fsUser.seller.phone || fsUser.seller.sellerPhoneNumber || fsUser.seller.category)) ||
       fsUser.isSeller === true
     );
 
@@ -350,10 +388,8 @@ function SellersPage() {
         fsUser.createdAt
       );
 
-      const phone =
-        (sellerProfile.phone && sellerProfile.phone !== "—") ? sellerProfile.phone :
-        (fsUser.phoneNumber && fsUser.phoneNumber !== "—") ? fsUser.phoneNumber :
-        "—";
+      const phone = extractSellerPhone(sellerProfile, fsUser);
+      const email = fsUser.email || sellerProfile?.email || "";
 
       const shopName =
         sellerProfile.shopName ||
@@ -369,6 +405,7 @@ function SellersPage() {
         name: getLocalizedText(shopName),
         ownerName: getLocalizedText(fsUser.fullName || fsUser.name || "Seller"),
         phone,
+        email,
         category: getLocalizedText(sellerProfile.category || "Feed & Supplies"),
         products: Number(sellerProfile.products || 0),
         gmv: sellerProfile.gmv || "—",
@@ -438,12 +475,33 @@ function SellersPage() {
           {
             key: "phone",
             label: "Contact Phone",
-            render: (row) => (
-              <div className="flex items-center gap-1 text-xs font-medium">
-                <Phone className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                <span>{row.phone || "—"}</span>
-              </div>
-            ),
+            render: (row) => {
+              const hasPhone = Boolean(row.phone && row.phone !== "—");
+              const hasEmail = Boolean(row.email && row.email !== "—");
+
+              if (hasPhone) {
+                return (
+                  <div className="flex items-center gap-1 text-xs font-medium">
+                    <Phone className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                    <span>{row.phone}</span>
+                  </div>
+                );
+              }
+              if (hasEmail) {
+                return (
+                  <div className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
+                    <Mail className="h-3.5 w-3.5 text-primary shrink-0" />
+                    <span className="truncate max-w-[150px]">{row.email}</span>
+                  </div>
+                );
+              }
+              return (
+                <div className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
+                  <Phone className="h-3.5 w-3.5 text-muted-foreground/60 shrink-0" />
+                  <span>—</span>
+                </div>
+              );
+            },
           },
           {
             key: "category",

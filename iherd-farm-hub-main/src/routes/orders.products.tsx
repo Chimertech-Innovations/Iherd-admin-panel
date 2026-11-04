@@ -343,6 +343,21 @@ function ProductOrdersPage() {
         title="Product Marketplace Orders & Shipping"
         description="Monitor farm hub e-commerce orders, customer shipments, and update live courier tracking information."
         isLoading={isLoading}
+        searchKeys={[
+          "id",
+          "orderId",
+          "buyerName",
+          "buyerPhone",
+          "sellerName",
+          "trackingId",
+          "carrierName",
+          "status",
+          "paymentStatus",
+          "invoiceNumber",
+          "shippingAddress",
+          "buyerAddress",
+        ]}
+        searchPlaceholder="Search product orders by Order ID, customer, phone, seller, tracking, or items..."
         filters={[
           "Ordered",
           "Processing",
@@ -866,7 +881,7 @@ function ProductOrdersPage() {
                               .filter(Boolean)
                               .join(", ")
                           : selectedOrder.buyerAddress
-                        : "Standard Address"}
+                        : "—"}
                     </div>
                   </div>
                 </div>
@@ -882,7 +897,9 @@ function ProductOrdersPage() {
                         <Store className="h-3.5 w-3.5 text-primary" /> Store / Merchant:
                       </span>
                       <span className="font-bold text-foreground">
-                        {selectedOrder.sellerName || "iHerd Marketplace Store"}
+                        {selectedOrder.sellerName && selectedOrder.sellerName !== "iHerd Marketplace Store"
+                          ? selectedOrder.sellerName
+                          : (selectedOrder.shopName || selectedOrder.storeName || "—")}
                       </span>
                     </div>
                     <div className="flex items-center justify-between">
@@ -890,23 +907,54 @@ function ProductOrdersPage() {
                         <CreditCard className="h-3.5 w-3.5 text-primary" /> Payment Method:
                       </span>
                       <span className="font-semibold text-foreground">
-                        {selectedOrder.paymentMethod || selectedOrder.paymentMode || "Cash on Delivery (COD)"}
+                        {selectedOrder.paymentMethod || selectedOrder.paymentMode || selectedOrder.payment?.method || selectedOrder.payment_method || "—"}
                       </span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-muted-foreground flex items-center gap-1">
                         <ShieldCheck className="h-3.5 w-3.5 text-primary" /> Payment Status:
                       </span>
-                      <Badge
-                        variant="secondary"
-                        className={
-                          (selectedOrder.paymentStatus || "").toLowerCase() === "paid"
-                            ? "bg-emerald-500/10 text-emerald-600 font-bold"
-                            : "bg-amber-500/10 text-amber-600 font-bold"
-                        }
-                      >
-                        {selectedOrder.paymentStatus || (selectedOrder.status === "Delivered" ? "Paid" : "Pending")}
-                      </Badge>
+                      {(() => {
+                        const rawPayStatus = (
+                          selectedOrder.paymentStatus ||
+                          selectedOrder.payment?.status ||
+                          selectedOrder.payment_status ||
+                          selectedOrder.paymentDetails?.status ||
+                          ""
+                        ).trim();
+
+                        const statusLower = (selectedOrder.status || "").toLowerCase();
+                        const isDeliveredOrComplete = statusLower === "delivered" || statusLower === "completed";
+                        const isCancelled = statusLower === "cancelled" || statusLower === "canceled";
+
+                        const effectiveStatus = rawPayStatus
+                          ? rawPayStatus
+                          : isCancelled
+                          ? "Cancelled"
+                          : isDeliveredOrComplete
+                          ? "Paid"
+                          : selectedOrder.paymentMode === "Prepaid" || selectedOrder.paymentMethod?.toLowerCase().includes("online")
+                          ? "Paid"
+                          : "Pending";
+
+                        const isPaid = effectiveStatus.toLowerCase() === "paid";
+                        const isFailed = effectiveStatus.toLowerCase() === "failed" || effectiveStatus.toLowerCase() === "cancelled";
+
+                        return (
+                          <Badge
+                            variant="secondary"
+                            className={
+                              isPaid
+                                ? "bg-emerald-500/10 text-emerald-600 font-bold"
+                                : isFailed
+                                ? "bg-destructive/10 text-destructive font-bold"
+                                : "bg-amber-500/10 text-amber-600 font-bold"
+                            }
+                          >
+                            {effectiveStatus}
+                          </Badge>
+                        );
+                      })()}
                     </div>
                     {selectedOrder.invoiceNumber && selectedOrder.invoiceNumber !== "—" && (
                       <div className="flex items-center justify-between pt-1 border-t">
@@ -939,7 +987,6 @@ function ProductOrdersPage() {
                               alt={it.name}
                               className="h-12 w-12 rounded-xl object-cover ring-1 ring-border bg-background"
                               referrerPolicy="no-referrer"
-                              crossOrigin="anonymous"
                               onError={(e) => {
                                 (e.target as HTMLElement).style.display = "none";
                               }}

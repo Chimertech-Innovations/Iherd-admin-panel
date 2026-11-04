@@ -522,6 +522,17 @@ export function useAdminProducts() {
   });
 
   const deleteProduct = useMutation({
+    onMutate: async (productId: string) => {
+      await queryClient.cancelQueries({ queryKey: ["product_marketplace/main/products"] });
+      const previous = queryClient.getQueryData<any[]>(["product_marketplace/main/products"]);
+      if (previous) {
+        queryClient.setQueryData(
+          ["product_marketplace/main/products"],
+          previous.filter((p) => p.id !== productId)
+        );
+      }
+      return { previous };
+    },
     mutationFn: async (productId: string) => {
       try {
         const res = await fetch(`${API_BASE}/api/admin/products/${productId}`, {
@@ -536,7 +547,12 @@ export function useAdminProducts() {
       await deleteDoc(prodRef);
       return { success: true, id: productId };
     },
-    onSuccess: () => {
+    onError: (_err, _productId, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(["product_marketplace/main/products"], context.previous);
+      }
+    },
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["product_marketplace/main/products"] });
       queryClient.invalidateQueries({ queryKey: ["bestSellers"] });
     },

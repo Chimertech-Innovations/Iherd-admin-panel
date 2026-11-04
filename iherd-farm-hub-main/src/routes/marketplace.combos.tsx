@@ -643,23 +643,13 @@ function CombosPage() {
     // 1. Strict Validation - Check all basic and multi-language fields
     setFieldErrors({});
 
-    // Validate Combo Name in ALL 6 languages
-    const nameMapState: Record<string, string> = {
-      en: nameEn,
-      hi: nameHi,
-      kn: nameKn,
-      mr: nameMr,
-      pa: namePa,
-      ta: nameTa,
-    };
-    for (const lang of LANG_CONFIG) {
-      if (!nameMapState[lang.code]?.trim()) {
-        setFieldErrors({ [`name_${lang.code}`]: true, name: true });
-        setActiveTab("languages");
-        setCurrentLang(lang.code);
-        toast.error(`Required field missing: Combo Product Name in ${lang.label} (${lang.code.toUpperCase()}). All 6 languages must be filled before saving!`);
-        return;
-      }
+    // Validate English Combo Name (Primary; regional languages auto-populate if left blank)
+    if (!nameEn?.trim()) {
+      setFieldErrors({ name_en: true, name: true });
+      setActiveTab("languages");
+      setCurrentLang("en");
+      toast.error("Required field missing: Combo Product Name (English). Please enter a name.");
+      return;
     }
 
     const numPrice = Number(price);
@@ -693,80 +683,12 @@ function CombosPage() {
       return;
     }
 
-    // Validate Description in ALL 6 languages
-    const descMapState: Record<string, string> = {
-      en: descEn,
-      hi: descHi,
-      kn: descKn,
-      mr: descMr,
-      pa: descPa,
-      ta: descTa,
-    };
-    for (const lang of LANG_CONFIG) {
-      if (!descMapState[lang.code]?.trim()) {
-        setFieldErrors({ [`desc_${lang.code}`]: true, description: true });
-        setActiveTab("languages");
-        setCurrentLang(lang.code);
-        toast.error(`Required field missing: Combo Description in ${lang.label} (${lang.code.toUpperCase()}). All 6 languages must be filled before saving!`);
-        return;
-      }
-    }
-
-    // Validate Specifications in ALL 6 languages
-    const specMapState: Record<string, string> = {
-      en: specEn,
-      hi: specHi,
-      kn: specKn,
-      mr: specMr,
-      pa: specPa,
-      ta: specTa,
-    };
-    for (const lang of LANG_CONFIG) {
-      if (!specMapState[lang.code]?.trim()) {
-        setFieldErrors({ [`spec_${lang.code}`]: true, specification: true });
-        setActiveTab("languages");
-        setCurrentLang(lang.code);
-        toast.error(`Required field missing: Specifications in ${lang.label} (${lang.code.toUpperCase()}). All 6 languages must be filled before saving!`);
-        return;
-      }
-    }
-
-    // Validate Usage Instructions in ALL 6 languages
-    const instMapState: Record<string, string> = {
-      en: instructionsEn,
-      hi: instructionsHi,
-      kn: instructionsKn,
-      mr: instructionsMr,
-      pa: instructionsPa,
-      ta: instructionsTa,
-    };
-    for (const lang of LANG_CONFIG) {
-      if (!instMapState[lang.code]?.trim()) {
-        setFieldErrors({ [`instructions_${lang.code}`]: true, instructions: true });
-        setActiveTab("instructions");
-        setInstructionLang(lang.code);
-        toast.error(`Required field missing: Usage Instructions in ${lang.label} (${lang.code.toUpperCase()}). All 6 languages must be filled before saving!`);
-        return;
-      }
-    }
-
-    // Validate Product Ingredients in ALL 6 languages
-    const ingMapState: Record<string, string> = {
-      en: ingredientsEn,
-      hi: ingredientsHi,
-      kn: ingredientsKn,
-      mr: ingredientsMr,
-      pa: ingredientsPa,
-      ta: ingredientsTa,
-    };
-    for (const lang of LANG_CONFIG) {
-      if (!ingMapState[lang.code]?.trim()) {
-        setFieldErrors({ [`ingredients_${lang.code}`]: true, ingredients: true });
-        setActiveTab("instructions");
-        setInstructionLang(lang.code);
-        toast.error(`Required field missing: Product Ingredients in ${lang.label} (${lang.code.toUpperCase()}). All 6 languages must be filled before saving!`);
-        return;
-      }
+    if (!descEn?.trim()) {
+      setFieldErrors({ desc_en: true, description: true });
+      setActiveTab("languages");
+      setCurrentLang("en");
+      toast.error("Required field missing: Combo Description (English).");
+      return;
     }
 
     const rawThumb = thumbnailUrl.trim();
@@ -2083,13 +2005,13 @@ function CombosPage() {
                       {LANG_CONFIG.find((l) => l.code === instructionLang)?.label} ({instructionLang.toUpperCase()})
                     </strong>
                   </span>
-                  <span className="text-[10px] font-mono text-primary font-semibold">Required in All 6 Languages</span>
+                  <span className="text-[10px] text-muted-foreground">Optional (auto-fills from English)</span>
                 </div>
 
                 {/* Usage Instructions */}
                 <div className="space-y-1">
                   <Label htmlFor="instructions" className="text-xs font-semibold flex items-center justify-between">
-                    <span>Usage Instructions ({instructionLang.toUpperCase()}) * — One instruction per line</span>
+                    <span>Usage Instructions ({instructionLang.toUpperCase()}){instructionLang === "en" ? " *" : ""} — One instruction per line</span>
                     <span className="text-[11px] text-muted-foreground font-normal">instructionsToUse.{instructionLang}</span>
                   </Label>
                   {instructionLang === "en" && (
@@ -2627,11 +2549,11 @@ function CombosPage() {
                     />
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-3 items-end">
-                    <div className="space-y-1 flex-1">
-                      <Label htmlFor="sellerLogo" className="text-xs font-semibold">
-                        Seller Logo URL
-                      </Label>
+                  <div className="space-y-1.5 pt-1">
+                    <Label htmlFor="sellerLogo" className="text-xs font-semibold">
+                      Seller Logo URL
+                    </Label>
+                    <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-3 items-center">
                       <Input
                         id="sellerLogo"
                         value={sellerLogo}
@@ -2639,20 +2561,20 @@ function CombosPage() {
                         placeholder="https://drive.google.com/..."
                         className="rounded-xl font-mono text-xs"
                       />
+                      {sellerLogo && (
+                        <div className="h-16 w-36 px-3 py-1.5 rounded-xl border-2 border-border/80 bg-white dark:bg-card shadow-sm flex items-center justify-center shrink-0 overflow-hidden">
+                          <img
+                            src={formatImageUrl(sellerLogo)}
+                            alt="Seller Logo"
+                            referrerPolicy="no-referrer"
+                            className="max-h-12 w-auto max-w-full object-contain mx-auto"
+                            onError={(e) => {
+                              (e.currentTarget as HTMLElement).style.display = "none";
+                            }}
+                          />
+                        </div>
+                      )}
                     </div>
-                    {sellerLogo && (
-                      <div className="h-10 min-w-[120px] max-w-[160px] px-3 py-1 rounded-xl border bg-white dark:bg-card shadow-2xs flex items-center justify-center shrink-0">
-                        <img
-                          src={formatImageUrl(sellerLogo)}
-                          alt="Seller Logo"
-                          referrerPolicy="no-referrer"
-                          className="h-full w-full object-contain"
-                          onError={(e) => {
-                            (e.currentTarget as HTMLElement).style.display = "none";
-                          }}
-                        />
-                      </div>
-                    )}
                   </div>
                 </div>
               </div>

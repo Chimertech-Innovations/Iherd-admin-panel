@@ -84,6 +84,12 @@ function extractRowState(row: any): string {
     row.state ||
     row.stateName ||
     row.stateCode ||
+    row.shippingAddress?.state ||
+    row.shippingAddress?.stateCode ||
+    row.rawOrder?.shippingAddress?.state ||
+    row.rawOrder?.shippingAddress?.stateCode ||
+    row.deliveryAddress?.state ||
+    row.address?.state ||
     row.clinicState ||
     row.farmerState ||
     row.farms?.state ||
@@ -91,6 +97,7 @@ function extractRowState(row: any): string {
     row.seller?.state ||
     row.veterinarian?.state ||
     row.raw?.state ||
+    (row.buyerAddress && typeof row.buyerAddress === "string" ? row.buyerAddress : "") ||
     (row.location && typeof row.location === "string" ? row.location.split(",").pop() : "") ||
     "";
   const clean = getLocalizedText(s).trim();
@@ -314,6 +321,8 @@ export function DataPage<T extends Record<string, any>>({
   const detectedStates = useMemo(() => {
     const set = new Set<string>();
     data.forEach((row) => {
+      const s = extractRowState(row);
+      if (s && s !== "—") set.add(s);
       if (row.state && row.state !== "—") set.add(getLocalizedText(row.state));
       if (row.clinicState && row.clinicState !== "—") set.add(getLocalizedText(row.clinicState));
     });
@@ -363,13 +372,13 @@ export function DataPage<T extends Record<string, any>>({
 
         const searchFields = [
           "email", "userEmail", "authEmail", "farmerEmail", "sellerEmail", "vetEmail", "emailAddress", "mail",
-          "phone", "phoneNumber", "userPhone", "authPhone", "farmerPhone", "sellerPhone", "vetPhone",
-          "uid", "id", "userId", "farmerId", "sellerId", "vetId",
+          "phone", "phoneNumber", "userPhone", "authPhone", "farmerPhone", "sellerPhone", "vetPhone", "buyerPhone",
+          "uid", "id", "userId", "farmerId", "sellerId", "vetId", "orderId", "trackingId", "carrierName", "courierPartner", "invoiceNumber",
           "tagNo", "rfid", "cattleId", "breed", "species", "cattleName", "title",
           "sku", "sellerName", "shopName", "storeName", "productName",
-          "name", "fullName", "ownerName", "doctorName", "displayName",
-          "role", "roles", "status", "category",
-          "village", "district", "city", "state", "location", "address"
+          "name", "fullName", "ownerName", "doctorName", "displayName", "buyerName",
+          "role", "roles", "status", "paymentStatus", "category",
+          "village", "district", "city", "state", "location", "address", "buyerAddress"
         ];
 
         const isEmailQuery = queryClean.includes("@");
@@ -399,6 +408,14 @@ export function DataPage<T extends Record<string, any>>({
             }
             return false;
           });
+
+          // Check inside items array (e.g. for product orders)
+          if (!matchQ && Array.isArray(row.items)) {
+            matchQ = row.items.some((it: any) => {
+              const itName = String(it.name || it.title || it.productName || it.id || "").toLowerCase();
+              return itName.includes(queryClean);
+            });
+          }
 
           // Also check explicit searchKeys if provided
           if (!matchQ && searchKeys && searchKeys.length > 0) {
@@ -453,11 +470,19 @@ export function DataPage<T extends Record<string, any>>({
       }
 
       // 4. Dedicated State Filter
+      const extractedState = extractRowState(row).toLowerCase();
       const rowState = getLocalizedText(row.state || row.clinicState || row.farmerState || "").toLowerCase();
       const rowLoc = getRowLocation(row).toLowerCase();
+      const cleanSelectedState = selectedState.toLowerCase().trim();
       const matchState = selectedState === "all"
         ? true
-        : (rowState.includes(selectedState.toLowerCase()) || rowLoc.includes(selectedState.toLowerCase()));
+        : (
+            extractedState.includes(cleanSelectedState) ||
+            rowState.includes(cleanSelectedState) ||
+            rowLoc.includes(cleanSelectedState) ||
+            (typeof row.buyerAddress === "string" && row.buyerAddress.toLowerCase().includes(cleanSelectedState)) ||
+            (row.shippingAddress && JSON.stringify(row.shippingAddress).toLowerCase().includes(cleanSelectedState))
+          );
 
       // 5. City / District Location Filter
       const matchLoc = locationFilter === "all"

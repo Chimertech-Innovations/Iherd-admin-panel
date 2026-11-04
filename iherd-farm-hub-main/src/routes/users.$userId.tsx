@@ -6,7 +6,7 @@ import { doc, getDoc, collection, getDocs } from "firebase/firestore";
 import { db } from "../lib/firebase";
 import { useFirebaseCollection, useFirebaseCollectionGroup } from "../hooks/useFirebaseData";
 import { useAdminUsers } from "../hooks/useAdminUsers";
-import { getLocalizedText } from "@/lib/utils";
+import { getLocalizedText, formatImageUrl } from "@/lib/utils";
 import {
   ArrowLeft,
   Phone,
@@ -232,26 +232,60 @@ function UserDetail() {
     mergedUserDoc?.farms ||
     {};
 
-  // Resolve Farm Profile
-  const farmDoc =
-    backendFullData?.farmDoc ||
-    (backendFullData?.farmsList && backendFullData.farmsList[0]) ||
-    (backendFullData?.subcollections?.farms && backendFullData.subcollections.farms[0]) ||
-    (mergedUserDoc?.farms && !Array.isArray(mergedUserDoc.farms) ? mergedUserDoc.farms : {}) ||
-    {
-      name: farmerDoc.farmName || (farmerDoc.name ? `${getLocalizedText(farmerDoc.name)}'s Dairy Farm` : "Registered Dairy Farm"),
-      address: farmerDoc.address || farmerDoc.village || "—",
-      village: farmerDoc.village || "—",
-      taluk: farmerDoc.taluk || "—",
-      postoffice: farmerDoc.postoffice || "—",
-      district: farmerDoc.district || "—",
-      state: farmerDoc.state || "—",
-      pincode: farmerDoc.pincode || "—",
-      country: farmerDoc.country || "🇮🇳 India",
-      farmPhoneNumber: farmerDoc.farmerPhoneNumber || "—",
-      farmTechnique: "Modern Dairy Management",
-      numberOfAnimals: 1,
+  // Resolve ALL Farm Profiles for this user
+  const farmsList: any[] = useMemo(() => {
+    const list: any[] = [];
+    const seenIds = new Set<string>();
+
+    const addFarm = (f: any, source: string) => {
+      if (!f) return;
+      const id = String(f.id || f.farmId || "");
+      const name = String(f.name || f.farmName || "");
+      const key = id || name || `farm_${list.length}`;
+      if (seenIds.has(key)) return;
+      seenIds.add(key);
+      list.push({ ...f, id: id || key, farmId: f.farmId || id || key, sourcePath: f.sourcePath || source });
     };
+
+    if (Array.isArray(backendFullData?.farmsList)) {
+      backendFullData.farmsList.forEach((f: any) => addFarm(f, f.sourcePath || "api_farmsList"));
+    }
+    if (Array.isArray(backendFullData?.subcollections?.farms)) {
+      backendFullData.subcollections.farms.forEach((f: any) => addFarm(f, "subcollections.farms"));
+    }
+    if (mergedUserDoc?.farms) {
+      if (Array.isArray(mergedUserDoc.farms)) {
+        mergedUserDoc.farms.forEach((f: any) => addFarm(f, "userDoc.farms"));
+      } else if (typeof mergedUserDoc.farms === "object") {
+        Object.values(mergedUserDoc.farms).forEach((f: any) => {
+          if (f && typeof f === "object") addFarm(f, "userDoc.farms");
+        });
+      }
+    }
+    if (farmerDoc && (farmerDoc.farmName || farmerDoc.name) && list.length === 0) {
+      addFarm({
+        name: farmerDoc.farmName || (farmerDoc.name ? `${getLocalizedText(farmerDoc.name)}'s Dairy Farm` : "Registered Dairy Farm"),
+        address: farmerDoc.address || farmerDoc.village || "—",
+        village: farmerDoc.village || "—",
+        taluk: farmerDoc.taluk || "—",
+        postoffice: farmerDoc.postoffice || "—",
+        district: farmerDoc.district || "—",
+        state: farmerDoc.state || "—",
+        pincode: farmerDoc.pincode || "—",
+        country: farmerDoc.country || "🇮🇳 India",
+        farmPhoneNumber: farmerDoc.farmerPhoneNumber || "—",
+        farmTechnique: "Modern Dairy Management",
+        numberOfAnimals: 1,
+      }, "farmer_fallback");
+    }
+    return list;
+  }, [backendFullData, mergedUserDoc, farmerDoc]);
+
+  // Default / Primary farm
+  const farmDoc = farmsList[0] || null;
+
+  // Track specific farm selected for editing
+  const [selectedFarmToEdit, setSelectedFarmToEdit] = useState<any>(null);
 
   // Edit Farm Form state
   const [editFarmForm, setEditFarmForm] = useState({
@@ -271,37 +305,63 @@ function UserDetail() {
     numberOfEmployees: "1 - 2 Workers",
   });
 
+  const handleOpenEditFarm = (farm?: any) => {
+    const target = farm || farmDoc || {};
+    setSelectedFarmToEdit(target);
+    setEditFarmForm({
+      name: target.name || target.farmName || "",
+      farmId: target.farmId || target.id || "",
+      village: target.village || farmerDoc?.village || "",
+      taluk: target.taluk || farmerDoc?.taluk || "",
+      postoffice: target.postoffice || farmerDoc?.postoffice || "",
+      district: target.district || farmerDoc?.district || "",
+      state: target.state || farmerDoc?.state || "",
+      pincode: target.pincode || farmerDoc?.pincode || "",
+      address: target.address || farmerDoc?.address || "",
+      farmPhoneNumber: target.farmPhoneNumber || target.phone || farmerDoc?.farmerPhoneNumber || "",
+      numberOfAnimals: String(target.numberOfAnimals || "1"),
+      animal: target.animal || "Cow / Cattle",
+      farmTechnique: target.farmTechnique || "Modern Dairy Management",
+      numberOfEmployees: String(target.numberOfEmployees || "1 - 2 Workers"),
+    });
+    setIsEditFarmOpen(true);
+  };
+
   useEffect(() => {
-    if (farmDoc) {
+    if (farmDoc && !selectedFarmToEdit) {
       setEditFarmForm({
-        name: farmDoc.name || (farmerDoc.name ? `${getLocalizedText(farmerDoc.name)}'s Dairy Farm` : "Registered Dairy Farm"),
+        name: farmDoc.name || (farmerDoc?.name ? `${getLocalizedText(farmerDoc.name)}'s Dairy Farm` : "Registered Dairy Farm"),
         farmId: farmDoc.farmId || farmDoc.id || "",
-        village: farmDoc.village || farmerDoc.village || "",
-        taluk: farmDoc.taluk || farmerDoc.taluk || "",
-        postoffice: farmDoc.postoffice || farmerDoc.postoffice || "",
-        district: farmDoc.district || farmerDoc.district || "",
-        state: farmDoc.state || farmerDoc.state || "",
-        pincode: farmDoc.pincode || farmerDoc.pincode || "",
-        address: farmDoc.address || farmerDoc.address || "",
-        farmPhoneNumber: farmDoc.farmPhoneNumber || farmerDoc.farmerPhoneNumber || "",
+        village: farmDoc.village || farmerDoc?.village || "",
+        taluk: farmDoc.taluk || farmerDoc?.taluk || "",
+        postoffice: farmDoc.postoffice || farmerDoc?.postoffice || "",
+        district: farmDoc.district || farmerDoc?.district || "",
+        state: farmDoc.state || farmerDoc?.state || "",
+        pincode: farmDoc.pincode || farmerDoc?.pincode || "",
+        address: farmDoc.address || farmerDoc?.address || "",
+        farmPhoneNumber: farmDoc.farmPhoneNumber || farmerDoc?.farmerPhoneNumber || "",
         numberOfAnimals: String(farmDoc.numberOfAnimals || "1"),
         animal: farmDoc.animal || "Cow / Cattle",
         farmTechnique: farmDoc.farmTechnique || "Modern Dairy Management",
         numberOfEmployees: String(farmDoc.numberOfEmployees || "1 - 2 Workers"),
       });
     }
-  }, [farmDoc, farmerDoc]);
+  }, [farmDoc, farmerDoc, selectedFarmToEdit]);
 
   const handleSaveFarm = async () => {
     try {
       setIsSavingFarm(true);
+      const targetFarmId = selectedFarmToEdit?.id || selectedFarmToEdit?.farmId || editFarmForm.farmId;
       const res = await fetch(`${API_BASE}/api/admin/user-farm-data/${encodeURIComponent(resolvedDocId || userId)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(editFarmForm),
+        body: JSON.stringify({
+          ...editFarmForm,
+          farmId: targetFarmId,
+        }),
       });
       if (!res.ok) throw new Error("Failed to save farm details");
-      toast.success("Farm data updated and connected in database!");
+      toast.success(`Farm "${editFarmForm.name || targetFarmId}" updated successfully!`);
       setIsEditFarmOpen(false);
       refetchFullData();
     } catch (err: any) {
@@ -390,6 +450,38 @@ function UserDetail() {
 
     return Array.from(map.values());
   }, [backendFullData, allCattleDetails, allCattleMarketplace, allGroupCattles, userId, resolvedDocId]);
+
+  // Helper: Get cattle for a specific farm
+  const getCattleForFarm = (farm: any) => {
+    if (!farm) return [];
+    const fIds = [farm.id, farm.farmId].filter(Boolean).map(String);
+    return allUserCattle.filter((c: any) => {
+      const cFarmId = String(c.farmId || "");
+      return cFarmId && fIds.includes(cFarmId);
+    });
+  };
+
+  // Unassigned cattle that don't match any farm in farmsList
+  const unassignedCattle = useMemo(() => {
+    const allKnownFarmIds = new Set<string>();
+    farmsList.forEach((f) => {
+      if (f.id) allKnownFarmIds.add(String(f.id));
+      if (f.farmId) allKnownFarmIds.add(String(f.farmId));
+    });
+    return allUserCattle.filter((c: any) => {
+      const cFarmId = String(c.farmId || "");
+      return !cFarmId || !allKnownFarmIds.has(cFarmId);
+    });
+  }, [allUserCattle, farmsList]);
+
+  // Selected farm filter in Cattle tab
+  const [selectedFarmFilter, setSelectedFarmFilter] = useState<string>("all");
+
+  const filteredCattleList = useMemo(() => {
+    if (selectedFarmFilter === "all") return allUserCattle;
+    if (selectedFarmFilter === "unassigned") return unassignedCattle;
+    return allUserCattle.filter((c: any) => String(c.farmId || "") === selectedFarmFilter);
+  }, [allUserCattle, unassignedCattle, selectedFarmFilter]);
 
   // Consolidate ONLY Valid Images for This User
   const allMediaImages = useMemo(() => {
@@ -540,7 +632,7 @@ function UserDetail() {
     setTimeout(() => setCopiedId(false), 2000);
   };
 
-  const farmDisplayName = getLocalizedText(farmDoc.name || (farmerDoc.name ? `${farmerDoc.name}'s Dairy Farm` : "Registered Dairy Farm"));
+  const farmDisplayName = getLocalizedText(farmDoc?.name || (farmerDoc?.name ? `${farmerDoc.name}'s Dairy Farm` : "Registered Dairy Farm"));
   const farmName = farmDisplayName;
   const farmTechnique = getLocalizedText(farmDoc?.farmTechnique || "Modern Dairy Management");
   const farmLocation =
@@ -836,7 +928,15 @@ function UserDetail() {
               </h3>
               <div className="space-y-1 divide-y divide-border/40">
                 <InfoRow icon={User} label="User Name" value={userName} />
-                <InfoRow icon={Building} label="Registered Farm" value={farmDisplayName} />
+                <InfoRow
+                  icon={Building}
+                  label={farmsList.length > 1 ? `Registered Farms (${farmsList.length})` : "Registered Farm"}
+                  value={
+                    farmsList.length > 1
+                      ? `${farmsList.length} Farms (${farmsList.map((f) => getLocalizedText(f.name || f.farmName)).join(", ")})`
+                      : farmDisplayName
+                  }
+                />
                 <InfoRow icon={Mail} label="Email Address" value={displayEmail} />
                 <InfoRow icon={Phone} label="Phone Number" value={displayPhone} />
                 <InfoRow icon={Clock} label="Registered Roles" value={activeRolesList.join(", ")} />
@@ -876,121 +976,317 @@ function UserDetail() {
         <TabsContent value="farmer">
           {hasFarmerRole ? (
             <div className="space-y-6">
-              {/* Complete Farm Data Card */}
-              <Card className="p-6 rounded-3xl border shadow-sm space-y-6 bg-gradient-to-br from-card to-primary/[0.03]">
-                <div className="flex items-center justify-between flex-wrap gap-3">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="grid h-9 w-9 place-items-center rounded-2xl bg-primary/10 text-primary">
-                        <Building className="h-5 w-5" />
-                      </span>
+              {/* Header with summary stats */}
+              <div className="flex items-center justify-between flex-wrap gap-3 p-4 rounded-3xl bg-muted/30 border border-border/50">
+                <div className="space-y-0.5">
+                  <h3 className="text-lg font-bold flex items-center gap-2 text-foreground">
+                    <Building className="h-5 w-5 text-primary" />
+                    Registered Farms ({farmsList.length})
+                  </h3>
+                  <p className="text-xs text-muted-foreground">
+                    All {farmsList.length} dairy farm facilities registered by this farmer, along with all cattle belonging to each farm.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3.5 py-1 text-xs font-bold text-primary border border-primary/20">
+                    <Beef className="h-3.5 w-3.5" />
+                    {allUserCattle.length} Total Livestock Across Farms
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-success/15 px-3 py-1 text-xs font-bold text-success border border-success/20">
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    Verified Farmer
+                  </span>
+                </div>
+              </div>
+
+              {/* Render Every Registered Farm with its Complete Data & Cattle */}
+              {farmsList.map((farm: any, farmIdx: number) => {
+                const farmCattles = getCattleForFarm(farm);
+                const displayName = getLocalizedText(
+                  farm.name || farm.farmName || (farmsList.length > 1 ? `Farm #${farmIdx + 1}` : "Registered Dairy Farm")
+                );
+                const farmFarmingTechnique = getLocalizedText(farm.farmTechnique || "Modern Dairy Management");
+                const statedAnimals = farm.numberOfAnimals || "—";
+                const farmPhone = farm.farmPhoneNumber || farm.phone || farmerDoc?.farmerPhoneNumber || displayPhone;
+
+                return (
+                  <Card key={farm.id || farmIdx} className="p-6 rounded-3xl border shadow-sm space-y-6 bg-gradient-to-br from-card to-primary/[0.02]">
+                    {/* Farm Top Banner */}
+                    <div className="flex items-center justify-between flex-wrap gap-3 pb-4 border-b border-border/50">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2.5">
+                          <span className="grid h-10 w-10 place-items-center rounded-2xl bg-primary/10 text-primary font-bold text-sm">
+                            #{farmIdx + 1}
+                          </span>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h3 className="text-xl font-bold text-foreground capitalize">{displayName}</h3>
+                              <span className="inline-flex items-center gap-1 rounded-full bg-success/15 px-2.5 py-0.5 text-[11px] font-bold text-success border border-success/20">
+                                <CheckCircle2 className="h-3 w-3" /> Registered
+                              </span>
+                            </div>
+                            <p className="text-xs text-muted-foreground font-mono">
+                              Farm ID: <span className="font-bold text-foreground">{farm.farmId || farm.id || "—"}</span>
+                              {farm.sourcePath && <span className="ml-2 text-[10px] text-muted-foreground/70 hidden sm:inline">({farm.sourcePath})</span>}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="gap-1.5 text-xs rounded-xl h-8"
+                          onClick={() => handleOpenEditFarm(farm)}
+                        >
+                          <Edit className="h-3.5 w-3.5 text-primary" /> Edit Farm #{farmIdx + 1}
+                        </Button>
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3.5 py-1 text-xs font-bold text-primary border border-primary/20">
+                          <Beef className="h-3.5 w-3.5" />
+                          {farmCattles.length} Cattle in this Farm
+                        </span>
+                        {farm.animal && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-muted px-3 py-1 text-xs font-semibold text-foreground border border-border/60 capitalize">
+                            {getLocalizedText(farm.animal)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Facility Photo if available */}
+                    {farm.imagePath && (
+                      <div className="flex items-center gap-4 p-4 rounded-2xl bg-muted/40 border border-border/50">
+                        <img
+                          src={farm.imagePath}
+                          alt={displayName}
+                          className="h-20 w-24 rounded-xl object-cover ring-2 ring-primary/20 cursor-pointer hover:opacity-90 transition-opacity"
+                          onClick={() => setSelectedPreviewImage({ url: farm.imagePath, title: displayName })}
+                        />
+                        <div>
+                          <h4 className="font-bold text-base text-foreground capitalize">{displayName}</h4>
+                          <p className="text-xs text-muted-foreground">Farm Facility Photo stored in Firebase Storage</p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 2-Column Details Grid */}
+                    <div className="grid gap-6 md:grid-cols-2">
+                      <div className="space-y-1 divide-y divide-border/40">
+                        <InfoRow icon={Building} label="Farm Name" value={displayName} />
+                        <InfoRow icon={Phone} label="Farm Contact Phone" value={farmPhone} />
+                        <InfoRow icon={Beef} label="Primary Livestock / Animal" value={getLocalizedText(farm.animal || "Cow / Cattle")} />
+                        <InfoRow icon={Activity} label="Farming Technique" value={farmFarmingTechnique} />
+                        <InfoRow icon={Users} label="Farm Workers / Employees" value={String(farm.numberOfEmployees || "1 - 2 Workers")} />
+                        <InfoRow icon={Layers} label="Stated Capacity / Animals" value={String(statedAnimals)} />
+                      </div>
+                      <div className="space-y-1 divide-y divide-border/40">
+                        <InfoRow icon={MapPin} label="Village" value={getLocalizedText(farm.village || farmerDoc?.village || "—")} />
+                        <InfoRow icon={Building} label="Taluk" value={getLocalizedText(farm.taluk || farmerDoc?.taluk || "—")} />
+                        <InfoRow icon={MapPin} label="Post Office" value={getLocalizedText(farm.postoffice || farmerDoc?.postoffice || "—")} />
+                        <InfoRow icon={MapPin} label="District" value={getLocalizedText(farm.district || farmerDoc?.district || "—")} />
+                        <InfoRow icon={MapPin} label="State" value={getLocalizedText(farm.state || farmerDoc?.state || "—")} />
+                        <InfoRow icon={MapPin} label="Pincode" value={getLocalizedText(farm.pincode || farmerDoc?.pincode || "—")} />
+                      </div>
+                    </div>
+
+                    {/* Farm Equipment Badges */}
+                    {Array.isArray(farm.farmEquipmentList) && farm.farmEquipmentList.length > 0 && (
                       <div>
-                        <h3 className="text-xl font-bold text-foreground capitalize">{farmDisplayName}</h3>
-                        <p className="text-xs text-muted-foreground">
-                          Farm ID: <span className="font-mono font-bold text-foreground">{farmDoc.farmId || farmDoc.id || "—"}</span>
+                        <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                          <Wrench className="h-3.5 w-3.5 text-primary" /> Farm Equipment & Infrastructure ({farm.farmEquipmentList.length})
+                        </h4>
+                        <div className="flex flex-wrap gap-1.5">
+                          {farm.farmEquipmentList.map((eq: any, eIdx: number) => {
+                            const eqStr = getLocalizedText(eq?.key || eq);
+                            return (
+                              <span key={eIdx} className="px-3 py-1 rounded-xl bg-muted text-foreground text-xs font-medium border border-border/60 capitalize">
+                                {eqStr.replace(/_/g, " ")}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Geo Coordinates & Veterinarian */}
+                    {(farm.latitude || farm.veterinaryName) && (
+                      <div className="grid gap-3 sm:grid-cols-2 pt-2 border-t border-border/40 text-xs text-muted-foreground">
+                        {farm.latitude && (
+                          <div className="flex items-center gap-2">
+                            <Compass className="h-4 w-4 text-primary" />
+                            <span>Coordinates: <span className="font-mono font-bold text-foreground">{getLocalizedText(farm.latitude)}, {getLocalizedText(farm.longitude)}</span></span>
+                          </div>
+                        )}
+                        {farm.veterinaryName && (
+                          <div className="flex items-center gap-2">
+                            <Stethoscope className="h-4 w-4 text-primary" />
+                            <span>Assigned Vet: <span className="font-bold text-foreground">{getLocalizedText(farm.veterinaryName)}</span> ({getLocalizedText(farm.veterinarianPhoneNumber, "—")})</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {farm.address && (
+                      <div>
+                        <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                          Registered Farm Address
+                        </h4>
+                        <p className="text-sm text-foreground bg-muted/40 p-4 rounded-2xl font-medium border border-border/40">
+                          {getLocalizedText(farm.address)}
                         </p>
                       </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="gap-1.5 text-xs rounded-xl"
-                      onClick={() => setIsEditFarmOpen(true)}
-                    >
-                      <Edit className="h-3.5 w-3.5 text-primary" /> Edit Farm Data
-                    </Button>
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3.5 py-1 text-xs font-bold text-primary border border-primary/20">
-                      <Beef className="h-3.5 w-3.5" />
-                      {allUserCattle.length} Livestock Registered
-                    </span>
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-success/15 px-3 py-1 text-xs font-bold text-success border border-success/20">
-                      <CheckCircle2 className="h-3.5 w-3.5" /> Registered Farm
-                    </span>
-                  </div>
-                </div>
-
-                {farmDoc.imagePath && (
-                  <div className="flex items-center gap-4 p-4 rounded-2xl bg-muted/40 border border-border/50">
-                    <img
-                      src={farmDoc.imagePath}
-                      alt={farmDisplayName}
-                      className="h-20 w-24 rounded-xl object-cover ring-2 ring-primary/20 cursor-pointer"
-                      onClick={() => setSelectedPreviewImage({ url: farmDoc.imagePath, title: farmDisplayName })}
-                    />
-                    <div>
-                      <h4 className="font-bold text-base text-foreground capitalize">{farmDisplayName}</h4>
-                      <p className="text-xs text-muted-foreground">Farm Facility Photo stored in Firebase Storage</p>
-                    </div>
-                  </div>
-                )}
-
-                <div className="grid gap-6 md:grid-cols-2">
-                  <div className="space-y-1 divide-y divide-border/40">
-                    <InfoRow icon={Building} label="Farm Name" value={farmDisplayName} />
-                    <InfoRow icon={Phone} label="Farm Contact Phone" value={farmDoc.farmPhoneNumber || farmerDoc.farmerPhoneNumber || displayPhone} />
-                    <InfoRow icon={Beef} label="Primary Livestock / Animal" value={getLocalizedText(farmDoc.animal || "Cow / Cattle")} />
-                    <InfoRow icon={Activity} label="Farming Technique" value={getLocalizedText(farmDoc.farmTechnique || "Modern Dairy Management")} />
-                    <InfoRow icon={Users} label="Farm Workers / Employees" value={String(farmDoc.numberOfEmployees || "1 - 2 Workers")} />
-                  </div>
-                  <div className="space-y-1 divide-y divide-border/40">
-                    <InfoRow icon={MapPin} label="Village" value={getLocalizedText(farmDoc.village || farmerDoc.village || "—")} />
-                    <InfoRow icon={Building} label="Taluk" value={getLocalizedText(farmDoc.taluk || farmerDoc.taluk || "—")} />
-                    <InfoRow icon={MapPin} label="Post Office" value={getLocalizedText(farmDoc.postoffice || farmerDoc.postoffice || "—")} />
-                    <InfoRow icon={MapPin} label="District" value={getLocalizedText(farmDoc.district || farmerDoc.district || "—")} />
-                    <InfoRow icon={MapPin} label="State" value={getLocalizedText(farmDoc.state || farmerDoc.state || "—")} />
-                  </div>
-                </div>
-
-                {/* Farm Equipment Badges */}
-                {Array.isArray(farmDoc.farmEquipmentList) && farmDoc.farmEquipmentList.length > 0 && (
-                  <div>
-                    <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                      <Wrench className="h-3.5 w-3.5 text-primary" /> Farm Equipment & Infrastructure ({farmDoc.farmEquipmentList.length})
-                    </h4>
-                    <div className="flex flex-wrap gap-1.5">
-                      {farmDoc.farmEquipmentList.map((eq: any, eIdx: number) => {
-                        const eqStr = getLocalizedText(eq?.key || eq);
-                        return (
-                          <span key={eIdx} className="px-3 py-1 rounded-xl bg-muted text-foreground text-xs font-medium border border-border/60 capitalize">
-                            {eqStr.replace(/_/g, " ")}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {/* Geo Coordinates & Veterinarian if available */}
-                {(farmDoc.latitude || farmDoc.veterinaryName) && (
-                  <div className="grid gap-3 sm:grid-cols-2 pt-2 border-t border-border/40 text-xs text-muted-foreground">
-                    {farmDoc.latitude && (
-                      <div className="flex items-center gap-2">
-                        <Compass className="h-4 w-4 text-primary" />
-                        <span>Coordinates: <span className="font-mono font-bold text-foreground">{getLocalizedText(farmDoc.latitude)}, {getLocalizedText(farmDoc.longitude)}</span></span>
-                      </div>
                     )}
-                    {farmDoc.veterinaryName && (
-                      <div className="flex items-center gap-2">
-                        <Stethoscope className="h-4 w-4 text-primary" />
-                        <span>Assigned Vet: <span className="font-bold text-foreground">{getLocalizedText(farmDoc.veterinaryName)}</span> ({getLocalizedText(farmDoc.veterinarianPhoneNumber, "—")})</span>
-                      </div>
-                    )}
-                  </div>
-                )}
 
-                {farmerDoc.address && (
-                  <div>
-                    <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-                      Registered Farm Address
-                    </h4>
-                    <p className="text-sm text-foreground bg-muted/40 p-4 rounded-2xl font-medium border border-border/40">
-                      {getLocalizedText(farmerDoc.address)}
-                    </p>
+                    {/* CATTLE SECTION UNDER THIS FARM */}
+                    <div className="pt-5 border-t border-border/60 space-y-4">
+                      <div className="flex items-center justify-between flex-wrap gap-2">
+                        <div className="flex items-center gap-2">
+                          <Beef className="h-4 w-4 text-primary" />
+                          <h4 className="font-bold text-sm text-foreground">
+                            Livestock under "{displayName}" ({farmCattles.length} Registered)
+                          </h4>
+                        </div>
+                        <span className="text-xs text-muted-foreground font-mono bg-muted/50 px-2.5 py-0.5 rounded-lg border border-border/40">
+                          Farm ID: {farm.farmId || farm.id}
+                        </span>
+                      </div>
+
+                      {farmCattles.length === 0 ? (
+                        <div className="p-6 rounded-2xl bg-muted/20 border border-dashed border-border/60 text-center space-y-1">
+                          <p className="text-xs font-semibold text-muted-foreground">No cattle registered under this farm yet.</p>
+                          <p className="text-[11px] text-muted-foreground">Animals tagged with Farm ID {farm.farmId || farm.id} will appear directly in this section.</p>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                          {farmCattles.map((cattle: any, cIdx: number) => {
+                            const cTitle = getLocalizedText(cattle.cattleName || cattle.name || cattle.title || cattle.breed || "Cattle");
+                            const cBreed = getLocalizedText(cattle.breed?.key || cattle.breed || "—");
+                            const cImg = cattle.faceView || cattle.leftView || cattle.rightView || (Array.isArray(cattle.images) && cattle.images[0]) || cattle.imageUrl;
+                            return (
+                              <Card key={cattle.id || cIdx} className="rounded-2xl border border-border/60 overflow-hidden bg-card/60 hover:shadow-md transition-all flex flex-col justify-between">
+                                {cImg ? (
+                                  <div className="h-36 bg-muted relative overflow-hidden group">
+                                    <img
+                                      src={cImg}
+                                      alt={cTitle}
+                                      className="w-full h-full object-cover cursor-pointer group-hover:scale-105 transition-transform"
+                                      onClick={() => setSelectedPreviewImage({ url: cImg, title: `${cTitle} - ${displayName}` })}
+                                    />
+                                    {cattle.rfid && (
+                                      <span className="absolute top-2 right-2 bg-black/75 text-white text-[10px] font-mono font-bold px-2 py-0.5 rounded-md backdrop-blur-md">
+                                        {getLocalizedText(cattle.rfid)}
+                                      </span>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div className="h-28 bg-muted/50 flex flex-col items-center justify-center text-muted-foreground gap-1">
+                                    <Beef className="h-6 w-6 text-primary/40" />
+                                    <span className="text-[11px]">No Photo</span>
+                                  </div>
+                                )}
+                                <div className="p-3.5 space-y-2.5 flex-1 flex flex-col justify-between">
+                                  <div>
+                                    <div className="flex items-start justify-between gap-1.5">
+                                      <h5 className="font-bold text-sm text-foreground capitalize truncate">{cTitle}</h5>
+                                      <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-md bg-primary/10 text-primary font-bold">
+                                        {getLocalizedText(cattle.species, "Cow")}
+                                      </span>
+                                    </div>
+                                    <p className="text-xs text-muted-foreground truncate">Breed: <span className="font-medium text-foreground">{cBreed}</span></p>
+                                    <div className="grid grid-cols-2 gap-1.5 pt-2 text-[11px] text-muted-foreground">
+                                      <div><span className="text-muted-foreground/70">Gender:</span> <span className="capitalize text-foreground font-medium">{getLocalizedText(cattle.gender, "Female")}</span></div>
+                                      {cattle.milkYield && <div><span className="text-muted-foreground/70">Milk:</span> <span className="text-foreground font-medium">{getLocalizedText(cattle.milkYield)} L/d</span></div>}
+                                      {cattle.age && <div><span className="text-muted-foreground/70">Age:</span> <span className="text-foreground font-medium">{getLocalizedText(cattle.age)}</span></div>}
+                                      {cattle.value && <div><span className="text-muted-foreground/70">Val:</span> <span className="text-foreground font-medium">₹{getLocalizedText(cattle.value)}</span></div>}
+                                    </div>
+                                  </div>
+                                  <div className="pt-2 border-t border-border/40 flex items-center justify-between">
+                                    <span className="text-[10px] text-muted-foreground font-mono">#{cattle.id?.slice(-6)}</span>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="h-6 px-2 text-[11px] gap-1 text-primary hover:text-primary font-semibold rounded-md"
+                                      onClick={() => setSelectedCattleDetail(cattle)}
+                                    >
+                                      <Maximize2 className="h-3 w-3" /> View Data
+                                    </Button>
+                                  </div>
+                                </div>
+                              </Card>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </Card>
+                );
+              })}
+
+              {/* Unassigned Cattle Section if any */}
+              {unassignedCattle.length > 0 && (
+                <Card className="p-6 rounded-3xl border border-dashed shadow-sm space-y-4 bg-muted/10">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center gap-2">
+                      <Beef className="h-5 w-5 text-primary" />
+                      <h4 className="font-bold text-base text-foreground">
+                        Additional Registered Livestock ({unassignedCattle.length})
+                      </h4>
+                    </div>
+                    <span className="text-xs text-muted-foreground">
+                      Livestock without a specific Farm ID or registered under primary profile
+                    </span>
                   </div>
-                )}
-              </Card>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {unassignedCattle.map((cattle: any, cIdx: number) => {
+                      const cTitle = getLocalizedText(cattle.cattleName || cattle.name || cattle.title || cattle.breed || "Cattle");
+                      const cBreed = getLocalizedText(cattle.breed?.key || cattle.breed || "—");
+                      const cImg = cattle.faceView || cattle.leftView || cattle.rightView || (Array.isArray(cattle.images) && cattle.images[0]) || cattle.imageUrl;
+                      return (
+                        <Card key={cattle.id || cIdx} className="rounded-2xl border border-border/60 overflow-hidden bg-card/60 hover:shadow-md transition-all flex flex-col justify-between">
+                          {cImg && (
+                            <div className="h-36 bg-muted relative overflow-hidden group">
+                              <img
+                                src={cImg}
+                                alt={cTitle}
+                                className="w-full h-full object-cover cursor-pointer group-hover:scale-105 transition-transform"
+                                onClick={() => setSelectedPreviewImage({ url: cImg, title: cTitle })}
+                              />
+                              {cattle.rfid && (
+                                <span className="absolute top-2 right-2 bg-black/75 text-white text-[10px] font-mono font-bold px-2 py-0.5 rounded-md backdrop-blur-md">
+                                  {getLocalizedText(cattle.rfid)}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                          <div className="p-3.5 space-y-2.5 flex-1 flex flex-col justify-between">
+                            <div>
+                              <div className="flex items-start justify-between gap-1.5">
+                                <h5 className="font-bold text-sm text-foreground capitalize truncate">{cTitle}</h5>
+                                <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-md bg-primary/10 text-primary font-bold">
+                                  {getLocalizedText(cattle.species, "Cow")}
+                                </span>
+                              </div>
+                              <p className="text-xs text-muted-foreground truncate">Breed: <span className="font-medium text-foreground">{cBreed}</span></p>
+                            </div>
+                            <div className="pt-2 border-t border-border/40 flex items-center justify-between">
+                              <span className="text-[10px] text-muted-foreground font-mono">#{cattle.id?.slice(-6)}</span>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-6 px-2 text-[11px] gap-1 text-primary hover:text-primary font-semibold rounded-md"
+                                onClick={() => setSelectedCattleDetail(cattle)}
+                              >
+                                <Maximize2 className="h-3 w-3" /> View Data
+                              </Button>
+                            </div>
+                          </div>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                </Card>
+              )}
 
               {/* Farmer personal card */}
               <Card className="p-6 rounded-3xl border shadow-sm space-y-6">
@@ -1069,20 +1365,64 @@ function UserDetail() {
             <div className="flex items-center justify-between flex-wrap gap-3">
               <div>
                 <h3 className="text-lg font-bold flex items-center gap-2 text-foreground">
-                  <Beef className="h-5 w-5 text-primary" /> Registered Cattle Records ({allUserCattle.length})
+                  <Beef className="h-5 w-5 text-primary" /> Registered Cattle Records ({filteredCattleList.length}{filteredCattleList.length !== allUserCattle.length ? ` of ${allUserCattle.length}` : ""})
                 </h3>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  All cattle registered by this user with multi-angle photo proofs and RFID tags
+                  All cattle registered by this user with multi-angle photo proofs, RFID tags, and assigned farm facility
                 </p>
               </div>
             </div>
 
-            {allUserCattle.length > 0 ? (
+            {/* Farm Filter Pills Bar */}
+            {farmsList.length > 1 && (
+              <div className="flex items-center gap-2 p-2 rounded-2xl bg-muted/30 border border-border/50 overflow-x-auto">
+                <Button
+                  size="sm"
+                  variant={selectedFarmFilter === "all" ? "default" : "outline"}
+                  onClick={() => setSelectedFarmFilter("all")}
+                  className="rounded-xl text-xs h-8 gap-1.5 shrink-0"
+                >
+                  <Beef className="h-3.5 w-3.5" />
+                  All Farms ({allUserCattle.length})
+                </Button>
+                {farmsList.map((f: any, idx: number) => {
+                  const count = getCattleForFarm(f).length;
+                  const name = getLocalizedText(f.name || f.farmName || `Farm #${idx + 1}`);
+                  const fKey = String(f.id || f.farmId);
+                  return (
+                    <Button
+                      key={idx}
+                      size="sm"
+                      variant={selectedFarmFilter === fKey ? "default" : "outline"}
+                      onClick={() => setSelectedFarmFilter(fKey)}
+                      className="rounded-xl text-xs h-8 gap-1.5 shrink-0"
+                    >
+                      <Building className="h-3.5 w-3.5" />
+                      {name} ({count})
+                    </Button>
+                  );
+                })}
+                {unassignedCattle.length > 0 && (
+                  <Button
+                    size="sm"
+                    variant={selectedFarmFilter === "unassigned" ? "default" : "outline"}
+                    onClick={() => setSelectedFarmFilter("unassigned")}
+                    className="rounded-xl text-xs h-8 gap-1.5 shrink-0"
+                  >
+                    Unassigned ({unassignedCattle.length})
+                  </Button>
+                )}
+              </div>
+            )}
+
+            {filteredCattleList.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {allUserCattle.map((cattle: any, idx: number) => {
+                {filteredCattleList.map((cattle: any, idx: number) => {
                   const title = getLocalizedText(cattle.cattleName || cattle.title || cattle.breed || "Cattle");
                   const breed = getLocalizedText(cattle.breed?.key || cattle.breed || "—");
                   const primaryImg = cattle.faceView || cattle.leftView || cattle.rightView || (Array.isArray(cattle.images) && cattle.images[0]) || cattle.imageUrl;
+                  const assignedFarm = farmsList.find((f: any) => String(f.id || f.farmId) === String(cattle.farmId));
+                  const assignedFarmName = assignedFarm ? getLocalizedText(assignedFarm.name || assignedFarm.farmName) : cattle.farmId;
 
                   const anglePhotos = [
                     { name: "Face", url: cattle.faceView },
@@ -1128,7 +1468,13 @@ function UserDetail() {
                               <h4 className="font-bold text-xl text-foreground capitalize">{title}</h4>
                               <p className="text-xs text-muted-foreground font-mono">ID: {getLocalizedText(cattle.cattleId || cattle.id)}</p>
                             </div>
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                              {assignedFarmName && (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-semibold bg-muted text-foreground border border-border/60">
+                                  <Building className="h-3 w-3 text-primary" />
+                                  {assignedFarmName}
+                                </span>
+                              )}
                               {cattle.species && (
                                 <span className="inline-flex items-center px-2.5 py-1 rounded-xl text-xs font-bold bg-primary/10 text-primary border border-primary/20">
                                   {getLocalizedText(cattle.species, "Cow")}
@@ -1660,18 +2006,47 @@ function UserDetail() {
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
                           {/* Livestock Info */}
                           <div className="flex items-start gap-3">
-                            {ord.image ? (
-                              <img
-                                src={ord.image}
-                                alt={ord.cattleName || "Cattle"}
-                                className="h-14 w-14 rounded-xl object-cover ring-1 ring-border cursor-pointer shrink-0"
-                                onClick={() => setSelectedPreviewImage({ url: ord.image, title: ord.cattleName || "Cattle" })}
-                              />
-                            ) : (
-                              <div className="h-14 w-14 rounded-xl bg-primary/10 text-primary grid place-items-center shrink-0">
-                                <Beef className="h-6 w-6" />
-                              </div>
-                            )}
+                            {(() => {
+                              const cattleImg = formatImageUrl(
+                                ord.image ||
+                                ord.imageUrl ||
+                                ord.cattleImage ||
+                                ord.faceViewImage ||
+                                ord.faceView ||
+                                ord.frontView ||
+                                (Array.isArray(ord.images) ? ord.images[0] : (ord.images?.frontView || ord.images?.faceView)) ||
+                                ord.cattleDetails?.image ||
+                                ord.cattleDetails?.imageUrl ||
+                                ""
+                              );
+                              if (cattleImg) {
+                                return (
+                                  <div
+                                    className="h-14 w-14 rounded-xl overflow-hidden ring-1 ring-border/80 cursor-pointer shrink-0 bg-muted/30 relative group"
+                                    onClick={() => setSelectedPreviewImage({ url: cattleImg, title: ord.cattleName || "Cattle Photo" })}
+                                    title="Click to zoom photo"
+                                  >
+                                    <img
+                                      src={cattleImg}
+                                      alt={ord.cattleName || "Cattle"}
+                                      className="h-full w-full object-cover group-hover:scale-105 transition-transform"
+                                      referrerPolicy="no-referrer"
+                                      onError={(e) => {
+                                        (e.target as HTMLElement).style.display = "none";
+                                      }}
+                                    />
+                                    <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white">
+                                      <Maximize2 className="h-3.5 w-3.5" />
+                                    </div>
+                                  </div>
+                                );
+                              }
+                              return (
+                                <div className="h-14 w-14 rounded-xl bg-primary/10 text-primary grid place-items-center shrink-0">
+                                  <Beef className="h-6 w-6" />
+                                </div>
+                              );
+                            })()}
                             <div className="space-y-0.5 min-w-0">
                               <div className="font-bold text-foreground text-sm truncate">{ord.cattleName || "Livestock Cattle"}</div>
                               <div className="text-muted-foreground">Breed: <span className="text-foreground font-medium">{ord.breed || "—"}</span></div>
@@ -1787,19 +2162,46 @@ function UserDetail() {
                               Order Items ({items.length})
                             </div>
                             <div className="space-y-1.5 max-h-32 overflow-y-auto">
-                              {items.map((it: any, iIdx: number) => (
-                                <div key={iIdx} className="flex items-center gap-2">
-                                  {it.image && (
-                                    <img src={it.image} alt={it.name} className="h-7 w-7 rounded object-cover ring-1 ring-border shrink-0" />
-                                  )}
-                                  <div className="min-w-0 flex-1">
-                                    <div className="font-medium text-foreground truncate">{it.name}</div>
-                                    <div className="text-[11px] text-muted-foreground">
-                                      Qty: {it.quantity || 1} × ₹{it.price} {it.gstPercent ? `(${it.gstPercent}% GST)` : ""}
+                              {items.map((it: any, iIdx: number) => {
+                                const itemImg = formatImageUrl(
+                                  it.image ||
+                                  it.imageUrl ||
+                                  it.thumbnailUrl ||
+                                  (Array.isArray(it.images) ? it.images[0] : (it.images?.thumbnail || it.images?.primary)) ||
+                                  ""
+                                );
+                                return (
+                                  <div key={iIdx} className="flex items-center gap-2">
+                                    {itemImg ? (
+                                      <div
+                                        className="h-7 w-7 rounded overflow-hidden ring-1 ring-border/80 shrink-0 cursor-pointer bg-muted/40 relative group"
+                                        onClick={() => setSelectedPreviewImage({ url: itemImg, title: it.name || "Product Image" })}
+                                        title="Click to zoom image"
+                                      >
+                                        <img
+                                          src={itemImg}
+                                          alt={it.name}
+                                          className="h-full w-full object-cover group-hover:scale-110 transition-transform"
+                                          referrerPolicy="no-referrer"
+                                          onError={(e) => {
+                                            (e.target as HTMLElement).style.display = "none";
+                                          }}
+                                        />
+                                      </div>
+                                    ) : (
+                                      <div className="h-7 w-7 rounded bg-muted grid place-items-center shrink-0 ring-1 ring-border text-muted-foreground">
+                                        <Package className="h-3.5 w-3.5" />
+                                      </div>
+                                    )}
+                                    <div className="min-w-0 flex-1">
+                                      <div className="font-medium text-foreground truncate">{it.name}</div>
+                                      <div className="text-[11px] text-muted-foreground">
+                                        Qty: {it.quantity || 1} × ₹{it.price} {it.gstPercent ? `(${it.gstPercent}% GST)` : ""}
+                                      </div>
                                     </div>
                                   </div>
-                                </div>
-                              ))}
+                                );
+                              })}
                               {items.length === 0 && <span className="text-muted-foreground">Product Items</span>}
                             </div>
                           </div>
@@ -1994,11 +2396,44 @@ function UserDetail() {
       <Dialog open={isEditFarmOpen} onOpenChange={setIsEditFarmOpen}>
         <DialogContent className="max-w-xl p-6 rounded-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-lg font-bold flex items-center gap-2">
-              <Building className="h-5 w-5 text-primary" /> Edit & Connect Farm Details
+            <DialogTitle className="text-lg font-bold flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-2">
+                <Building className="h-5 w-5 text-primary" />
+                <span>Edit Farm Details</span>
+              </div>
+              {editFarmForm.farmId && (
+                <span className="text-xs font-mono font-normal text-muted-foreground bg-muted/60 px-2 py-0.5 rounded-lg">
+                  ID: {editFarmForm.farmId}
+                </span>
+              )}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 pt-2">
+            {farmsList.length > 1 && (
+              <div className="flex items-center gap-1.5 p-2 rounded-2xl bg-muted/40 border border-border/50 overflow-x-auto">
+                <span className="text-xs font-bold text-muted-foreground whitespace-nowrap pl-1">Select Farm:</span>
+                {farmsList.map((f: any, idx: number) => {
+                  const isSelected =
+                    (selectedFarmToEdit?.id === f.id) ||
+                    (selectedFarmToEdit?.farmId === f.farmId) ||
+                    (editFarmForm.farmId === (f.farmId || f.id));
+                  const fName = getLocalizedText(f.name || f.farmName || `Farm #${idx + 1}`);
+                  return (
+                    <Button
+                      key={idx}
+                      type="button"
+                      size="sm"
+                      variant={isSelected ? "default" : "outline"}
+                      onClick={() => handleOpenEditFarm(f)}
+                      className="rounded-xl text-xs h-7 shrink-0"
+                    >
+                      {fName}
+                    </Button>
+                  );
+                })}
+              </div>
+            )}
+
             <div className="space-y-1">
               <label className="text-xs font-semibold text-muted-foreground">Farm Name</label>
               <input
@@ -2118,8 +2553,9 @@ function UserDetail() {
             <div className="space-y-4">
               <div className="max-h-[70vh] rounded-2xl overflow-hidden bg-black/5 flex items-center justify-center">
                 <img
-                  src={selectedPreviewImage.url}
+                  src={formatImageUrl(selectedPreviewImage.url)}
                   alt={selectedPreviewImage.title}
+                  referrerPolicy="no-referrer"
                   className="max-h-[65vh] w-auto max-w-full object-contain rounded-xl"
                 />
               </div>
@@ -2159,26 +2595,47 @@ function UserDetail() {
                   <Camera className="h-4 w-4 text-primary" /> Camera Proofs
                 </h4>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                  {[
-                    { label: "Face View", url: selectedCattleDetail.faceView },
-                    { label: "Left View", url: selectedCattleDetail.leftView },
-                    { label: "Right View", url: selectedCattleDetail.rightView },
-                    { label: "Muzzle View", url: selectedCattleDetail.muzzleView },
-                    { label: "Udder View", url: selectedCattleDetail.udderView },
-                    { label: "Top/Bottom View", url: selectedCattleDetail.bottomView || selectedCattleDetail.topview },
-                    { label: "Farmer View", url: selectedCattleDetail.farmerView },
-                  ].filter(p => !!p.url).map((p, i) => (
-                    <div
-                      key={i}
-                      className="group rounded-2xl overflow-hidden border border-border/60 bg-muted/40 cursor-pointer hover:shadow-md transition-all"
-                      onClick={() => setSelectedPreviewImage({ url: p.url, title: `${getLocalizedText(selectedCattleDetail.cattleName)} - ${p.label}` })}
-                    >
-                      <div className="h-28 bg-muted overflow-hidden relative">
-                        <img src={p.url} alt={p.label} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                  {(() => {
+                    const rawImgMap = (selectedCattleDetail.images && typeof selectedCattleDetail.images === "object" && !Array.isArray(selectedCattleDetail.images))
+                      ? selectedCattleDetail.images
+                      : (selectedCattleDetail.raw?.images && typeof selectedCattleDetail.raw.images === "object" && !Array.isArray(selectedCattleDetail.raw.images))
+                      ? selectedCattleDetail.raw.images
+                      : {};
+                    const proofs = [
+                      { label: "Face View", rawUrl: selectedCattleDetail.faceView || rawImgMap.frontView || rawImgMap.faceView || rawImgMap.face },
+                      { label: "Left View", rawUrl: selectedCattleDetail.leftView || rawImgMap.leftView },
+                      { label: "Right View", rawUrl: selectedCattleDetail.rightView || rawImgMap.rightView },
+                      { label: "Muzzle View", rawUrl: selectedCattleDetail.muzzleView || rawImgMap.muzzleView },
+                      { label: "Udder View", rawUrl: selectedCattleDetail.udderView || rawImgMap.udderView },
+                      { label: "Top/Bottom View", rawUrl: selectedCattleDetail.bottomView || selectedCattleDetail.topview || rawImgMap.bottomView || rawImgMap.topview || rawImgMap.rearView },
+                      { label: "Farmer View", rawUrl: selectedCattleDetail.farmerView || rawImgMap.farmerView || rawImgMap.farmerWithCattle },
+                      ...(Array.isArray(selectedCattleDetail.images) ? selectedCattleDetail.images.map((img: string, idx: number) => ({ label: `Photo #${idx + 1}`, rawUrl: img })) : []),
+                    ]
+                      .filter((p, idx, self) => !!p.rawUrl && typeof p.rawUrl === "string" && self.findIndex((t) => t.rawUrl === p.rawUrl) === idx)
+                      .map((p) => ({ label: p.label, url: formatImageUrl(p.rawUrl) }));
+
+                    if (proofs.length === 0) {
+                      return <div className="col-span-full text-xs text-muted-foreground p-3 bg-muted/20 rounded-xl text-center">No camera proofs attached</div>;
+                    }
+
+                    return proofs.map((p, i) => (
+                      <div
+                        key={i}
+                        className="group rounded-2xl overflow-hidden border border-border/60 bg-muted/40 cursor-pointer hover:shadow-md transition-all"
+                        onClick={() => setSelectedPreviewImage({ url: p.url, title: `${getLocalizedText(selectedCattleDetail.cattleName)} - ${p.label}` })}
+                      >
+                        <div className="h-28 bg-muted overflow-hidden relative">
+                          <img
+                            src={p.url}
+                            alt={p.label}
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                            referrerPolicy="no-referrer"
+                          />
+                        </div>
+                        <div className="p-2 text-center text-xs font-semibold bg-card">{p.label}</div>
                       </div>
-                      <div className="p-2 text-center text-xs font-semibold bg-card">{p.label}</div>
-                    </div>
-                  ))}
+                    ));
+                  })()}
                 </div>
               </div>
 
@@ -2296,42 +2753,112 @@ function UserDetail() {
 
               {/* Items List for Product Orders */}
               {Array.isArray(selectedOrderDetail.items) && selectedOrderDetail.items.length > 0 && (
-                <div className="space-y-2">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                    Purchased Items ({selectedOrderDetail.items.length})
+                <div className="space-y-2.5">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                    <Package className="h-4 w-4 text-primary" /> Purchased Items ({selectedOrderDetail.items.length})
                   </h4>
-                  <div className="space-y-2 divide-y divide-border/40">
-                    {selectedOrderDetail.items.map((it: any, iIdx: number) => (
-                      <div key={iIdx} className="pt-2 flex items-center justify-between gap-3 text-xs">
-                        <div className="flex items-center gap-3">
-                          {it.image && (
-                            <img src={it.image} alt={it.name} className="h-10 w-10 rounded-lg object-cover ring-1 ring-border" />
-                          )}
-                          <div>
-                            <div className="font-bold text-foreground">{it.name}</div>
-                            <div className="text-muted-foreground">Quantity: {it.quantity || 1} × ₹{it.price}</div>
+                  <div className="space-y-2.5 divide-y divide-border/40 bg-muted/20 p-4 rounded-2xl border">
+                    {selectedOrderDetail.items.map((it: any, iIdx: number) => {
+                      const itemImg = formatImageUrl(
+                        it.image ||
+                        it.imageUrl ||
+                        it.thumbnailUrl ||
+                        (Array.isArray(it.images) ? it.images[0] : (it.images?.thumbnail || it.images?.primary)) ||
+                        ""
+                      );
+                      return (
+                        <div key={iIdx} className="pt-2.5 first:pt-0 flex items-center justify-between gap-3 text-xs">
+                          <div className="flex items-center gap-3 min-w-0 flex-1">
+                            {itemImg ? (
+                              <div
+                                className="h-12 w-12 rounded-xl overflow-hidden ring-1 ring-border shrink-0 cursor-pointer bg-muted relative group shadow-sm"
+                                onClick={() => setSelectedPreviewImage({ url: itemImg, title: it.name || "Product Image" })}
+                                title="Click to zoom image"
+                              >
+                                <img
+                                  src={itemImg}
+                                  alt={it.name}
+                                  className="h-full w-full object-cover group-hover:scale-105 transition-transform"
+                                  referrerPolicy="no-referrer"
+                                />
+                                <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white">
+                                  <Maximize2 className="h-4 w-4" />
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="h-12 w-12 rounded-xl bg-muted ring-1 ring-border grid place-items-center shrink-0 text-muted-foreground">
+                                <Package className="h-5 w-5" />
+                              </div>
+                            )}
+                            <div className="min-w-0 flex-1">
+                              <div className="font-bold text-foreground text-sm truncate">{it.name}</div>
+                              <div className="text-muted-foreground mt-0.5">
+                                Quantity: <span className="font-medium text-foreground">{it.quantity || 1}</span> × ₹{it.price}
+                                {it.gstPercent ? ` • ${it.gstPercent}% GST` : ""}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="font-black text-foreground text-base shrink-0">
+                            ₹{Number((it.price || 0) * (it.quantity || 1)).toLocaleString()}
                           </div>
                         </div>
-                        <div className="font-bold text-foreground text-sm">
-                          ₹{Number((it.price || 0) * (it.quantity || 1)).toLocaleString()}
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}
 
               {/* Cattle Details for Cattle Orders */}
               {selectedOrderDetail.cattleName && (
-                <div className="p-4 rounded-2xl bg-card border space-y-2">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                    Livestock Details
+                <div className="p-4 rounded-2xl bg-card border space-y-3">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                    <Beef className="h-4 w-4 text-primary" /> Livestock & Animal Details
                   </h4>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
-                    <div><span className="text-muted-foreground">Cattle Name:</span> <strong className="text-foreground">{selectedOrderDetail.cattleName}</strong></div>
-                    <div><span className="text-muted-foreground">Breed:</span> <strong className="text-foreground">{selectedOrderDetail.breed || "—"}</strong></div>
-                    <div><span className="text-muted-foreground">Species:</span> <strong className="text-foreground">{selectedOrderDetail.species || "Cow"}</strong></div>
-                    <div><span className="text-muted-foreground">Price:</span> <strong className="text-primary font-bold">₹{Number(selectedOrderDetail.price || 0).toLocaleString()}</strong></div>
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                    {(() => {
+                      const cImg = formatImageUrl(
+                        selectedOrderDetail.image ||
+                        selectedOrderDetail.imageUrl ||
+                        selectedOrderDetail.cattleImage ||
+                        selectedOrderDetail.faceViewImage ||
+                        selectedOrderDetail.faceView ||
+                        (Array.isArray(selectedOrderDetail.images) ? selectedOrderDetail.images[0] : (selectedOrderDetail.images?.frontView || selectedOrderDetail.images?.faceView)) ||
+                        selectedOrderDetail.cattleDetails?.image ||
+                        ""
+                      );
+                      if (cImg) {
+                        return (
+                          <div
+                            className="h-20 w-20 rounded-2xl overflow-hidden ring-2 ring-primary/20 shrink-0 cursor-pointer bg-muted relative group shadow-sm"
+                            onClick={() => setSelectedPreviewImage({ url: cImg, title: selectedOrderDetail.cattleName || "Livestock Cattle" })}
+                            title="Click to zoom"
+                          >
+                            <img
+                              src={cImg}
+                              alt={selectedOrderDetail.cattleName || "Cattle"}
+                              className="h-full w-full object-cover group-hover:scale-105 transition-transform"
+                              referrerPolicy="no-referrer"
+                            />
+                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-xs font-semibold gap-1">
+                              <Maximize2 className="h-4 w-4" /> Zoom
+                            </div>
+                          </div>
+                        );
+                      }
+                      return (
+                        <div className="h-20 w-20 rounded-2xl bg-primary/10 text-primary grid place-items-center shrink-0">
+                          <Beef className="h-8 w-8" />
+                        </div>
+                      );
+                    })()}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 text-xs flex-1">
+                      <div><span className="text-muted-foreground block text-[11px]">Cattle Name:</span> <strong className="text-foreground text-sm font-bold">{selectedOrderDetail.cattleName}</strong></div>
+                      <div><span className="text-muted-foreground block text-[11px]">Breed:</span> <strong className="text-foreground">{selectedOrderDetail.breed || "—"}</strong></div>
+                      <div><span className="text-muted-foreground block text-[11px]">Species:</span> <strong className="text-foreground">{selectedOrderDetail.species || "Cow"}</strong></div>
+                      <div><span className="text-muted-foreground block text-[11px]">Tag / RFID:</span> <strong className="font-mono text-foreground">{selectedOrderDetail.tagNo || selectedOrderDetail.rfid || "—"}</strong></div>
+                      <div><span className="text-muted-foreground block text-[11px]">Milk Yield:</span> <strong className="text-blue-600 font-semibold">{selectedOrderDetail.milkYield ? `${selectedOrderDetail.milkYield} L/day` : "—"}</strong></div>
+                      <div><span className="text-muted-foreground block text-[11px]">Agreed Price:</span> <strong className="text-primary font-black text-sm">₹{Number(selectedOrderDetail.price || selectedOrderDetail.totalAmount || 0).toLocaleString()}</strong></div>
+                    </div>
                   </div>
                 </div>
               )}

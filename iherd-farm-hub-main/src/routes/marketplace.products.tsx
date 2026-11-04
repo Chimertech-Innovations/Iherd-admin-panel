@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { PageHeader } from "@/components/admin/PageHeader";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -137,7 +137,12 @@ export const Route = createFileRoute("/marketplace/products")({
   component: ProductsMarketplacePage,
 });
 
-// Resilient image component with Google Drive CDN fallback and referrer policy
+// Multi-Tier Resilient Product Image Component:
+// 1. Direct formatted URL (handles Google Drive proxy or direct CDN)
+// 2. Direct lh3 Google CDN (for Drive links)
+// 3. Backend image proxy (/api/admin/proxy-image?url=...) (for Firebase Storage, external images, or CORS-restricted URLs)
+// 4. Drive thumbnail endpoint
+// 5. If all fail, seamlessly renders clean FallbackIcon badge without broken image icon
 function ProductImage({
   src,
   alt,
@@ -149,9 +154,54 @@ function ProductImage({
   className?: string;
   fallbackIcon?: any;
 }) {
-  const [errorLevel, setErrorLevel] = useState(0);
+  const [errorIndex, setErrorIndex] = useState(0);
 
-  if (!src || errorLevel >= 3) {
+  // Compute all potential fallback URLs in priority order
+  const candidateUrls = useMemo(() => {
+    if (!src || typeof src !== "string" || !src.trim()) return [];
+    const trimmed = src.trim();
+    const urls: string[] = [];
+
+    // Formatted URL (e.g. via proxy or direct)
+    const formatted = formatImageUrl(trimmed);
+    if (formatted) urls.push(formatted);
+
+    // If Google Drive link: try direct Google lh3 CDN & thumbnail
+    const driveMatch =
+      trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) ||
+      trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/) ||
+      trimmed.match(/\/d\/([a-zA-Z0-9_-]+)/);
+    if (driveMatch && driveMatch[1]) {
+      const id = driveMatch[1];
+      urls.push(`https://lh3.googleusercontent.com/d/${id}=s800`);
+      urls.push(`https://drive.google.com/thumbnail?id=${id}&sz=w800`);
+    }
+
+    // Backend proxy fallback for any image URL (e.g. Firebase Storage with CORS or tokens)
+    const base = getApiBaseUrlSync();
+    const proxyUrl = `${base}/api/admin/proxy-image?url=${encodeURIComponent(trimmed)}`;
+    if (!urls.includes(proxyUrl)) {
+      urls.push(proxyUrl);
+    }
+
+    // Direct raw URL as last resort
+    if (!urls.includes(trimmed)) {
+      urls.push(trimmed);
+    }
+
+    // Deduplicate while preserving order
+    return Array.from(new Set(urls.filter(Boolean)));
+  }, [src]);
+
+  // Reset error index if source changes
+  useEffect(() => {
+    setErrorIndex(0);
+  }, [src]);
+
+  const currentUrl = candidateUrls[errorIndex];
+
+  // If candidate URLs exhausted or invalid source, cleanly display FallbackIcon badge
+  if (!currentUrl || errorIndex >= candidateUrls.length) {
     return (
       <div className={`grid place-items-center bg-primary/10 text-primary ${className}`}>
         <FallbackIcon className="h-1/2 w-1/2" />
@@ -159,32 +209,13 @@ function ProductImage({
     );
   }
 
-  let finalUrl = formatImageUrl(src);
-
-  // Fallback 1: if lh3 fails, try drive.google.com/thumbnail
-  if (errorLevel === 1) {
-    const driveMatch = src.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || src.match(/[?&]id=([a-zA-Z0-9_-]+)/);
-    if (driveMatch && driveMatch[1]) {
-      finalUrl = `https://drive.google.com/thumbnail?id=${driveMatch[1]}&sz=w800`;
-    }
-  }
-
-  // Fallback 2: if thumbnail fails, try direct uc export view
-  if (errorLevel === 2) {
-    const driveMatch = src.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || src.match(/[?&]id=([a-zA-Z0-9_-]+)/);
-    if (driveMatch && driveMatch[1]) {
-      finalUrl = `https://drive.google.com/uc?export=view&id=${driveMatch[1]}`;
-    }
-  }
-
   return (
     <img
-      src={finalUrl}
+      src={currentUrl}
       alt={alt}
       className={className}
       referrerPolicy="no-referrer"
-      crossOrigin="anonymous"
-      onError={() => setErrorLevel((prev) => prev + 1)}
+      onError={() => setErrorIndex((prev) => prev + 1)}
     />
   );
 }
@@ -855,33 +886,14 @@ function ProductsMarketplacePage() {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // 1. Strict Validation across ALL 6 languages
+    // 1. Validation for Required Fields (English is primary; other languages auto-populate if left blank)
     setFieldErrors({});
 
-    const PRODUCT_LANGS = [
-      { code: "en", label: "English" },
-      { code: "hi", label: "Hindi" },
-      { code: "kn", label: "Kannada" },
-      { code: "mr", label: "Marathi" },
-      { code: "pa", label: "Punjabi" },
-      { code: "ta", label: "Tamil" },
-    ];
-
-    const nameMapState: Record<string, string> = {
-      en: nameEn,
-      hi: nameHi,
-      kn: nameKn,
-      mr: nameMr,
-      pa: namePa,
-      ta: nameTa,
-    };
-    for (const lang of PRODUCT_LANGS) {
-      if (!toStr(nameMapState[lang.code])) {
-        setFieldErrors({ [`name_${lang.code}`]: true, name: true });
-        setModalTab("general");
-        toast.error(`Required field missing: Product Name in ${lang.label} (${lang.code.toUpperCase()}). All 6 languages must be filled before saving!`);
-        return;
-      }
+    if (!toStr(nameEn)) {
+      setFieldErrors({ name_en: true, name: true });
+      setModalTab("general");
+      toast.error("Required field missing: Product Name (English). Please enter a name.");
+      return;
     }
 
     const numPrice = Number(price);
@@ -915,72 +927,11 @@ function ProductsMarketplacePage() {
       return;
     }
 
-    const descMapState: Record<string, string> = {
-      en: descriptionEn,
-      hi: descriptionHi,
-      kn: descriptionKn,
-      mr: descriptionMr,
-      pa: descriptionPa,
-      ta: descriptionTa,
-    };
-    for (const lang of PRODUCT_LANGS) {
-      if (!toStr(descMapState[lang.code])) {
-        setFieldErrors({ [`description_${lang.code}`]: true, description: true });
-        setModalTab("specs");
-        toast.error(`Required field missing: Product Description in ${lang.label} (${lang.code.toUpperCase()}). All 6 languages must be filled before saving!`);
-        return;
-      }
-    }
-
-    const specMapState: Record<string, string> = {
-      en: specificationEn,
-      hi: specificationHi,
-      kn: specificationKn,
-      mr: specificationMr,
-      pa: specificationPa,
-      ta: specificationTa,
-    };
-    for (const lang of PRODUCT_LANGS) {
-      if (!toStr(specMapState[lang.code])) {
-        setFieldErrors({ [`specification_${lang.code}`]: true, specification: true });
-        setModalTab("specs");
-        toast.error(`Required field missing: Product Specification in ${lang.label} (${lang.code.toUpperCase()}). All 6 languages must be filled before saving!`);
-        return;
-      }
-    }
-
-    const instMapState: Record<string, string> = {
-      en: instructionsToUseEn,
-      hi: instructionsToUseHi,
-      kn: instructionsToUseKn,
-      mr: instructionsToUseMr,
-      pa: instructionsToUsePa,
-      ta: instructionsToUseTa,
-    };
-    for (const lang of PRODUCT_LANGS) {
-      if (!toStr(instMapState[lang.code])) {
-        setFieldErrors({ [`instructions_${lang.code}`]: true, instructions: true });
-        setModalTab("specs");
-        toast.error(`Required field missing: Usage Instructions in ${lang.label} (${lang.code.toUpperCase()}). All 6 languages must be filled before saving!`);
-        return;
-      }
-    }
-
-    const ingMapState: Record<string, string> = {
-      en: productIngredientsEn,
-      hi: productIngredientsHi,
-      kn: productIngredientsKn,
-      mr: productIngredientsMr,
-      pa: productIngredientsPa,
-      ta: productIngredientsTa,
-    };
-    for (const lang of PRODUCT_LANGS) {
-      if (!toStr(ingMapState[lang.code])) {
-        setFieldErrors({ [`ingredients_${lang.code}`]: true, ingredients: true });
-        setModalTab("specs");
-        toast.error(`Required field missing: Product Ingredients in ${lang.label} (${lang.code.toUpperCase()}). All 6 languages must be filled before saving!`);
-        return;
-      }
+    if (!toStr(descriptionEn)) {
+      setFieldErrors({ description_en: true, description: true });
+      setModalTab("specs");
+      toast.error("Required field missing: Product Description (English).");
+      return;
     }
 
     // Parse image URLs list
@@ -1116,6 +1067,9 @@ function ProductsMarketplacePage() {
       // bool bestSeller & isBestSeller
       bestSeller: Boolean(bestSeller),
       isBestSeller: Boolean(bestSeller),
+
+      // bool isActive (strictly boolean for Flutter mobile app)
+      isActive: true,
 
       // DeliveryConfig? deliveryConfig (null deletes mapping from Firestore, object creates/updates)
       deliveryConfig: deliveryType === "all" ? null : {
@@ -1708,12 +1662,6 @@ function ProductsMarketplacePage() {
                       <span className="font-semibold font-mono">{selectedProductDetail.subCategoryId || "—"}</span>
                     </div>
                     <div className="flex justify-between py-1 border-b border-border/40">
-                      <span className="text-muted-foreground">Rating Score (<code>rating</code>)</span>
-                      <span className="font-bold text-amber-500 flex items-center gap-1">
-                        <Star className="h-3.5 w-3.5 fill-current" /> {selectedProductDetail.rating || 4.5} / 5.0
-                      </span>
-                    </div>
-                    <div className="flex justify-between py-1 border-b border-border/40">
                       <span className="text-muted-foreground">Best Seller (<code>bestSeller</code>)</span>
                       <span className="font-bold text-amber-500">
                         {selectedProductDetail.bestSeller ? "🔥 Featured" : "No"}
@@ -1871,12 +1819,12 @@ function ProductsMarketplacePage() {
                 <div className="p-3 rounded-2xl bg-muted/30 border space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <div className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
-                      Regional Languages (<code>name.hi, kn, mr, pa, ta</code>) *
+                      Regional Languages (<code>name.hi, kn, mr, pa, ta</code>) — <span className="text-muted-foreground font-normal">Optional (auto-fills from English)</span>
                     </div>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-2.5">
                     <div className="space-y-1">
-                      <Label htmlFor="prod-name-hi" className="text-[11px]">Hindi (<code>hi</code>) *</Label>
+                      <Label htmlFor="prod-name-hi" className="text-[11px]">Hindi (<code>hi</code>)</Label>
                       <Input
                         id="prod-name-hi"
                         placeholder="e.g. प्रेगकाइन बोवाइन..."
@@ -1889,7 +1837,7 @@ function ProductsMarketplacePage() {
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label htmlFor="prod-name-kn" className="text-[11px]">Kannada (<code>kn</code>) *</Label>
+                      <Label htmlFor="prod-name-kn" className="text-[11px]">Kannada (<code>kn</code>)</Label>
                       <Input
                         id="prod-name-kn"
                         placeholder="e.g. ಪ್ರೆಗ್‌ಕೈನ್ ಬೋವೈನ್..."
@@ -1902,7 +1850,7 @@ function ProductsMarketplacePage() {
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label htmlFor="prod-name-mr" className="text-[11px]">Marathi (<code>mr</code>) *</Label>
+                      <Label htmlFor="prod-name-mr" className="text-[11px]">Marathi (<code>mr</code>)</Label>
                       <Input
                         id="prod-name-mr"
                         placeholder="e.g. प्रेगकाईन बोव्हाइन..."
@@ -1915,7 +1863,7 @@ function ProductsMarketplacePage() {
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label htmlFor="prod-name-pa" className="text-[11px]">Punjabi (<code>pa</code>) *</Label>
+                      <Label htmlFor="prod-name-pa" className="text-[11px]">Punjabi (<code>pa</code>)</Label>
                       <Input
                         id="prod-name-pa"
                         placeholder="e.g. ਪ੍ਰੇਗਕਾਈਨ ਬੋਵਾਈਨ..."
@@ -1928,7 +1876,7 @@ function ProductsMarketplacePage() {
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label htmlFor="prod-name-ta" className="text-[11px]">Tamil (<code>ta</code>) *</Label>
+                      <Label htmlFor="prod-name-ta" className="text-[11px]">Tamil (<code>ta</code>)</Label>
                       <Input
                         id="prod-name-ta"
                         placeholder="e.g. பிரெக்கைன் போவின்..."
@@ -2008,8 +1956,8 @@ function ProductsMarketplacePage() {
                   </div>
                 </div>
 
-                {/* Pricing, MRP, GST & Rating (double) */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-3.5 rounded-2xl bg-muted/30 border">
+                {/* Pricing, MRP & GST */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3.5 rounded-2xl bg-muted/30 border">
                   <div className="space-y-1.5">
                     <Label htmlFor="prod-price" className="text-primary font-bold">Price (<code>double price</code>) *</Label>
                     <div className="relative">
@@ -2073,60 +2021,26 @@ function ProductsMarketplacePage() {
                       onChange={(e) => setGst(e.target.value)}
                     />
                   </div>
-
-                  <div className="space-y-1.5">
-                    <Label htmlFor="prod-rating">Rating (<code>double? rating</code>)</Label>
-                    <Input
-                      id="prod-rating"
-                      type="number"
-                      step="0.1"
-                      min="1"
-                      max="5"
-                      value={rating}
-                      onChange={(e) => setRating(e.target.value)}
-                    />
-                  </div>
                 </div>
 
-                {/* Best Seller & Cart Added (bool) */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="flex items-center justify-between p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30">
-                    <div className="flex items-center gap-2.5">
-                      <Flame className="h-5 w-5 text-amber-600" />
-                      <div>
-                        <Label htmlFor="prod-bs" className="cursor-pointer font-bold text-xs text-foreground block">
-                          Best Seller (<code>bool bestSeller</code>)
-                        </Label>
-                        <p className="text-[10px] text-muted-foreground">Featured on homepage carousel</p>
-                      </div>
+                {/* Best Seller Toggle */}
+                <div className="flex items-center justify-between p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30">
+                  <div className="flex items-center gap-2.5">
+                    <Flame className="h-5 w-5 text-amber-600" />
+                    <div>
+                      <Label htmlFor="prod-bs" className="cursor-pointer font-bold text-xs text-foreground block">
+                        Best Seller (<code>bool bestSeller</code>)
+                      </Label>
+                      <p className="text-[10px] text-muted-foreground">Featured on homepage carousel</p>
                     </div>
-                    <input
-                      type="checkbox"
-                      id="prod-bs"
-                      checked={bestSeller}
-                      onChange={(e) => setBestSeller(e.target.checked)}
-                      className="h-5 w-5 rounded text-amber-500 cursor-pointer"
-                    />
                   </div>
-
-                  <div className="flex items-center justify-between p-3.5 rounded-2xl bg-primary/10 border border-primary/30">
-                    <div className="flex items-center gap-2.5">
-                      <ShoppingBag className="h-5 w-5 text-primary" />
-                      <div>
-                        <Label htmlFor="prod-cart" className="cursor-pointer font-bold text-xs text-foreground block">
-                          Cart Added (<code>bool? cartAddded</code>)
-                        </Label>
-                        <p className="text-[10px] text-muted-foreground">Enable direct cart button</p>
-                      </div>
-                    </div>
-                    <input
-                      type="checkbox"
-                      id="prod-cart"
-                      checked={cartAddded}
-                      onChange={(e) => setCartAddded(e.target.checked)}
-                      className="h-5 w-5 rounded text-primary cursor-pointer"
-                    />
-                  </div>
+                  <input
+                    type="checkbox"
+                    id="prod-bs"
+                    checked={bestSeller}
+                    onChange={(e) => setBestSeller(e.target.checked)}
+                    className="h-5 w-5 rounded text-amber-500 cursor-pointer"
+                  />
                 </div>
               </TabsContent>
 
@@ -2977,26 +2891,27 @@ function ProductsMarketplacePage() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-3 items-end pt-1">
-                    <div className="space-y-1.5 flex-1">
-                      <Label htmlFor="prod-seller-logo">Seller Logo URL (<code>String sellerLogo</code>)</Label>
+                  <div className="space-y-1.5 pt-1">
+                    <Label htmlFor="prod-seller-logo" className="text-xs font-semibold">Seller Logo URL (<code>String sellerLogo</code>)</Label>
+                    <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-3 items-center">
                       <Input
                         id="prod-seller-logo"
                         placeholder="https://drive.google.com/file/d/1x72e_nlxXlzwHtgzvXc..."
                         value={sellerLogo}
                         onChange={(e) => setSellerLogo(e.target.value)}
+                        className="rounded-xl font-mono text-xs"
                       />
+                      {sellerLogo && (
+                        <div className="h-16 w-36 px-3 py-1.5 rounded-xl border-2 border-border/80 bg-white dark:bg-card shadow-sm flex items-center justify-center shrink-0 overflow-hidden">
+                          <ProductImage
+                            src={sellerLogo}
+                            alt="Seller Logo"
+                            className="max-h-12 w-auto max-w-full object-contain mx-auto"
+                            fallbackIcon={Building}
+                          />
+                        </div>
+                      )}
                     </div>
-                    {sellerLogo && (
-                      <div className="h-10 min-w-[130px] max-w-[180px] px-3 py-1 rounded-xl border bg-white dark:bg-card shadow-2xs flex items-center justify-center shrink-0">
-                        <ProductImage
-                          src={sellerLogo}
-                          alt="Seller Logo"
-                          className="h-full w-full object-contain"
-                          fallbackIcon={Building}
-                        />
-                      </div>
-                    )}
                   </div>
                 </div>
 

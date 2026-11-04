@@ -495,6 +495,26 @@ function Dashboard() {
     return Array.from(map.values());
   }, [allUsers, firestoreUsers, directFarmers, apiFarms, groupFarms, cattleDetails]);
 
+  // Map seller IDs to categories of products they sell
+  const sellerProductCategories = useMemo(() => {
+    const map = new Map<string, string[]>();
+    (products || []).forEach((p: any) => {
+      const sellerId = p.sellerId || p.userId || p.seller?.id || p.seller?.uid;
+      const cat = p.categoryName || p.category || p.subCategory;
+      if (sellerId && cat) {
+        const strCat = typeof cat === "string" ? cat.trim() : getLocalizedText(cat, "").trim();
+        if (strCat) {
+          const existing = map.get(sellerId) || [];
+          if (!existing.includes(strCat)) {
+            existing.push(strCat);
+            map.set(sellerId, existing);
+          }
+        }
+      }
+    });
+    return map;
+  }, [products]);
+
   // Extract only verified sellers
   const allSellers = useMemo(() => {
     const map = new Map<string, any>();
@@ -502,12 +522,23 @@ function Dashboard() {
     directSellers.forEach((ds: any) => {
       const uid = ds.id || ds.uid;
       if (!uid) return;
+      const prodCats = sellerProductCategories.get(uid) || [];
+      const derivedCategory =
+        ds.category ||
+        ds.businessCategory ||
+        ds.shopCategory ||
+        ds.storeCategory ||
+        (prodCats.length > 0 ? prodCats.join(", ") : "") ||
+        "Feed & Nutrition";
+
       map.set(uid, {
         ...ds,
         id: uid,
         uid,
         displayName: ds.name || ds.shopName || ds.sellerName || "Seller",
-        phoneNumber: ds.phone || ds.phoneNumber || ds.sellerPhone || "—",
+        phoneNumber: ds.sellerPhoneNumber || ds.phone || ds.phoneNumber || ds.sellerPhone || "",
+        email: ds.email || ds.sellerEmail || "",
+        category: derivedCategory,
         createdAt: ds.createdAt,
         status: ds.status || "Active",
       });
@@ -527,12 +558,40 @@ function Dashboard() {
       );
 
       if (hasSellerRole || hasSellerProfile) {
+        const prodCats = sellerProductCategories.get(uid) || [];
+        const sellerObj = fsUser?.seller || u.seller || {};
+        const derivedCategory =
+          sellerObj.category ||
+          sellerObj.businessCategory ||
+          sellerObj.shopCategory ||
+          fsUser?.category ||
+          u.category ||
+          (prodCats.length > 0 ? prodCats.join(", ") : "") ||
+          "Feed & Nutrition";
+
+        const contactPhone =
+          sellerObj.sellerPhoneNumber ||
+          sellerObj.sellerPhone ||
+          sellerObj.phoneNumber ||
+          sellerObj.phone ||
+          fsUser?.seller?.sellerPhoneNumber ||
+          fsUser?.seller?.sellerPhone ||
+          fsUser?.seller?.phoneNumber ||
+          fsUser?.seller?.phone ||
+          u.phoneNumber ||
+          fsUser?.phoneNumber ||
+          fsUser?.phone ||
+          "";
+        const contactEmail = u.email || fsUser?.email || sellerObj.email || "";
+
         map.set(uid, {
           ...u,
           id: uid,
           uid,
-          displayName: fsUser?.seller?.name || fsUser?.seller?.shopName || fsUser?.name || u.displayName || "Seller",
-          phoneNumber: u.phoneNumber || fsUser?.phoneNumber || "—",
+          displayName: sellerObj.name || sellerObj.shopName || fsUser?.name || u.displayName || "Seller",
+          phoneNumber: contactPhone,
+          email: contactEmail,
+          category: derivedCategory,
           createdAt: u.createdAt || fsUser?.createdAt,
           status: fsUser?.status || u.status || "Active",
         });
@@ -540,7 +599,7 @@ function Dashboard() {
     });
 
     return Array.from(map.values());
-  }, [allUsers, firestoreUsers, directSellers]);
+  }, [allUsers, firestoreUsers, directSellers, sellerProductCategories]);
 
   // Extract all farms across Firestore users & collectionGroup query
   const allFarms = useMemo(() => {
@@ -1138,7 +1197,9 @@ function Dashboard() {
         if (!q) return true;
         const name = (s.displayName || s.name || s.shopName || "").toLowerCase();
         const phone = (s.phoneNumber || s.phone || "").toLowerCase();
-        return name.includes(q) || phone.includes(q);
+        const email = (s.email || "").toLowerCase();
+        const category = (s.category || "").toLowerCase();
+        return name.includes(q) || phone.includes(q) || email.includes(q) || category.includes(q);
       });
 
       return (
@@ -1147,7 +1208,7 @@ function Dashboard() {
             <div className="relative flex-1">
               <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <Input
-                placeholder="Search seller by shop name or phone..."
+                placeholder="Search seller by shop name, phone, email, or category..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-9 rounded-xl text-xs"
@@ -1162,27 +1223,37 @@ function Dashboard() {
             {list.length === 0 ? (
               <div className="p-8 text-center text-xs text-muted-foreground">No matching sellers found in {periodLabel}.</div>
             ) : (
-              list.map((s: any, i: number) => (
-                <div key={i} className="p-3 flex items-center justify-between gap-3 text-xs hover:bg-muted/20">
-                  <div className="min-w-0">
-                    <div className="font-bold text-foreground truncate">{s.displayName || s.name || s.shopName || "Seller Store"}</div>
-                    <div className="text-[11px] text-muted-foreground flex items-center gap-2 mt-0.5">
-                      <span>{s.phoneNumber || s.phone || "No phone"}</span>
-                      <span>•</span>
-                      <span>Category: {s.category || "General"}</span>
+              list.map((s: any, i: number) => {
+                const hasPhone = Boolean(s.phoneNumber && s.phoneNumber !== "—" && s.phoneNumber !== "undefined");
+                const hasEmail = Boolean(s.email && s.email.trim() && s.email !== "—");
+                const contactDisplay = hasPhone ? s.phoneNumber : (hasEmail ? s.email : "No contact info");
+                const categoryDisplay = s.category && s.category !== "General" ? s.category : "Feed & Nutrition";
+
+                return (
+                  <div key={i} className="p-3 flex items-center justify-between gap-3 text-xs hover:bg-muted/20">
+                    <div className="min-w-0">
+                      <div className="font-bold text-foreground truncate">{s.displayName || s.name || s.shopName || "Seller Store"}</div>
+                      <div className="text-[11px] text-muted-foreground flex items-center gap-2 mt-0.5 flex-wrap">
+                        <span className="font-medium text-foreground/80">{contactDisplay}</span>
+                        {hasPhone && hasEmail && (
+                          <span className="text-muted-foreground">({s.email})</span>
+                        )}
+                        <span>•</span>
+                        <span className="text-primary/90 font-medium">Category: {categoryDisplay}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Link
+                        to="/users/$userId"
+                        params={{ userId: s.uid || s.id }}
+                        className="px-2.5 py-1 rounded-lg bg-primary/10 text-primary font-semibold hover:bg-primary/20 transition-colors"
+                      >
+                        View Seller
+                      </Link>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <Link
-                      to="/users/$userId"
-                      params={{ userId: s.uid || s.id }}
-                      className="px-2.5 py-1 rounded-lg bg-primary/10 text-primary font-semibold hover:bg-primary/20 transition-colors"
-                    >
-                      View Seller
-                    </Link>
-                  </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>
@@ -2077,9 +2148,9 @@ function Dashboard() {
           </div>
         </div>
 
-        {/* 5-Stage Connected Ecosystem Flowchart Grid */}
+        {/* 4-Stage Connected Ecosystem Flowchart Grid */}
         <div className="pt-6 space-y-6">
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4 relative">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 relative">
             {/* Stage 1: Auth & Onboarding */}
             <div
               onClick={() => {
@@ -2222,44 +2293,6 @@ function Dashboard() {
                 <div className="flex justify-between font-medium">
                   <span className="text-muted-foreground">🏷️ Coupons:</span>
                   <span className="font-bold text-foreground">{activeCouponsCount}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Stage 5: Fulfillment & Care */}
-            <div
-              onClick={() => {
-                setSearchQuery("");
-                setModalType("fulfillment");
-              }}
-              className="p-4 rounded-2xl bg-gradient-to-b from-indigo-500/10 via-indigo-500/5 to-transparent border border-indigo-500/20 hover:border-indigo-500/50 hover:shadow-lg transition-all cursor-pointer group flex flex-col justify-between"
-            >
-              <div>
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded-md">
-                    Stage 5 • Care
-                  </span>
-                  <HeartHandshake className="h-3.5 w-3.5 text-indigo-500" />
-                </div>
-                <h4 className="font-bold text-sm text-foreground mt-2 group-hover:text-indigo-600 transition-colors">
-                  Fulfillment & Vet Care
-                </h4>
-                <p className="text-[11px] text-muted-foreground mt-1 leading-snug">
-                  Dispatch, delivery & telemedicine
-                </p>
-              </div>
-              <div className="mt-4 pt-3 border-t border-border/40 space-y-1 text-[11px]">
-                <div className="flex justify-between font-medium">
-                  <span className="text-muted-foreground">🚚 Status:</span>
-                  <span className="font-bold text-indigo-600">Dispatched / Live</span>
-                </div>
-                <div className="flex justify-between font-medium">
-                  <span className="text-muted-foreground">🩺 Tele-Care:</span>
-                  <span className="font-bold text-foreground">Operational</span>
-                </div>
-                <div className="flex justify-between font-medium">
-                  <span className="text-muted-foreground">🧾 Invoicing:</span>
-                  <span className="font-bold text-foreground">Auto GST</span>
                 </div>
               </div>
             </div>

@@ -401,14 +401,20 @@ app.get("/api/admin/user-full-data/:userId", async (req, res) => {
       if (!fDoc || !fDoc.id || farmIdSet.has(fDoc.id)) return;
       farmIdSet.add(fDoc.id);
       const fData = { id: fDoc.id, farmId: fDoc.id, sourcePath, ...fDoc.data() };
-      nestedFarms.push(fData);
 
-      // Check cattles under this farm doc
+      const farmCattles = [];
+      // Check cattles under this farm doc (both 'cattles' and 'cattle' subcollections)
       try {
-        const cattleSnap = await fDoc.ref.collection("cattles").get();
-        cattleSnap.docs.forEach((cd) => {
+        const [cattlesSnap, cattleSnap] = await Promise.all([
+          fDoc.ref.collection("cattles").get().catch(() => ({ docs: [] })),
+          fDoc.ref.collection("cattle").get().catch(() => ({ docs: [] })),
+        ]);
+        const seenCattleIds = new Set();
+        [...cattlesSnap.docs, ...cattleSnap.docs].forEach((cd) => {
+          if (seenCattleIds.has(cd.id)) return;
+          seenCattleIds.add(cd.id);
           const cData = cd.data();
-          nestedCattles.push({
+          const cRecord = {
             id: cd.id,
             cattleId: cData.id || cd.id,
             cattleName: cData.cattleName || cData.name || cData.title || (cData.tagNo ? `Cattle ${cData.tagNo}` : `Cattle #${cd.id.slice(-4)}`),
@@ -439,11 +445,16 @@ app.get("/api/admin/user-full-data/:userId", async (req, res) => {
             farmId: fDoc.id,
             source: "nested_farm_cattle",
             ...cData,
-          });
+          };
+          farmCattles.push(cRecord);
+          nestedCattles.push(cRecord);
         });
       } catch (e) {
         console.warn(`Error fetching cattles under farm ${fDoc.id}:`, e.message);
       }
+      fData.cattles = farmCattles;
+      fData.cattleCount = farmCattles.length;
+      nestedFarms.push(fData);
     };
 
     try {
@@ -477,6 +488,40 @@ app.get("/api/admin/user-full-data/:userId", async (req, res) => {
         .get();
       for (const fDoc of farmersDirectFarmSnap.docs) {
         await processFarmDoc(fDoc, `/farmers/${resolvedDocId}/farms`);
+      }
+
+      // Fallback & comprehensive check: collectionGroup("farms") for this user or phone
+      const groupFarmsSnap = await db.collectionGroup("farms").get().catch(() => ({ docs: [] }));
+      for (const fDoc of groupFarmsSnap.docs) {
+        const path = fDoc.ref.path;
+        const fData = fDoc.data();
+        const owner = fData.ownerUid || fData.userId || "";
+        const matchesUser =
+          isSimilarUid(owner, userId) ||
+          isSimilarUid(owner, resolvedDocId) ||
+          path.includes(`/users/${resolvedDocId}/`) ||
+          path.includes(`/users/${userId}/`) ||
+          path.includes(`/farmers/${resolvedDocId}/`) ||
+          path.includes(`/farmers/${userId}/`) ||
+          (cleanPhone && fData.farmPhoneNumber && fData.farmPhoneNumber.replace(/\D/g, "").slice(-10) === cleanPhone);
+
+        if (matchesUser) {
+          await processFarmDoc(fDoc, path);
+        }
+      }
+
+      // Also check inline farm objects in userDoc (if any)
+      if (userDoc?.farms && typeof userDoc.farms === "object") {
+        const farmEntries = Array.isArray(userDoc.farms) ? userDoc.farms : Object.values(userDoc.farms);
+        farmEntries.forEach((fo, idx) => {
+          if (fo && typeof fo === "object" && (fo.farmName || fo.name || fo.animal || fo.village)) {
+            const fid = fo.id || fo.farmId || `user-farm-${idx}`;
+            if (!farmIdSet.has(fid)) {
+              farmIdSet.add(fid);
+              nestedFarms.push({ id: fid, farmId: fid, sourcePath: `/users/${resolvedDocId}/farms`, ...fo });
+            }
+          }
+        });
       }
     } catch (e) {
       console.warn("Error fetching nested farms:", e.message);
@@ -629,6 +674,21 @@ app.get("/api/admin/user-full-data/:userId", async (req, res) => {
       cattleListings = [...cattleListings, ...farmerSubcollections.cattle];
     }
 
+    // Enrich each farm in farmsList with matching cattle from cattleListings
+    farmsList.forEach((farm) => {
+      const fIds = [farm.id, farm.farmId].filter(Boolean);
+      const matchingCattle = cattleListings.filter((c) => fIds.includes(c.farmId));
+      const existing = farm.cattles || [];
+      const existingIds = new Set(existing.map((c) => c.id || c.cattleId));
+      matchingCattle.forEach((mc) => {
+        if (!existingIds.has(mc.id || mc.cattleId)) {
+          existing.push(mc);
+        }
+      });
+      farm.cattles = existing;
+      farm.cattleCount = existing.length;
+    });
+
     // 5. Fetch Storage Invoices Index (to link PDF download URLs to all orders)
     const invoiceMap = new Map();
     try {
@@ -690,6 +750,23 @@ app.get("/api/admin/user-full-data/:userId", async (req, res) => {
 
           const isSale = sellerUid === targetUid || sellerUid === targetResolvedUid;
 
+          const cImgObj = (o.images && typeof o.images === "object" && !Array.isArray(o.images)) ? o.images : {};
+          const cFace = o.image || o.imageUrl || o.cattleImage || o.faceViewImage || o.faceView || o.frontView || cImgObj.frontView || cImgObj.faceView || (Array.isArray(o.images) && o.images[0]) || o.leftViewImage || o.rightViewImage || o.cattleDetails?.image || o.cattleDetails?.imageUrl || null;
+          const cImages = [
+            cFace,
+            o.image,
+            o.imageUrl,
+            o.cattleImage,
+            o.faceViewImage,
+            o.leftViewImage,
+            o.rightViewImage,
+            ...(Array.isArray(o.images) ? o.images : []),
+            ...(typeof o.images === "object" && o.images ? Object.values(o.images) : []),
+            o.cattleDetails?.image,
+            o.cattleDetails?.imageUrl,
+          ].filter((u) => typeof u === "string" && u.trim().length > 0);
+          const uniqueCImages = Array.from(new Set(cImages));
+
           cattleOrders.push({
             id: o.id,
             orderId: o.orderId || o.id,
@@ -698,12 +775,16 @@ app.get("/api/admin/user-full-data/:userId", async (req, res) => {
             cattleName: o.cattleName || o.name || "Cattle",
             breed: o.breed || "—",
             species: o.species || "Cow",
+            tagNo: o.tagNo || o.rfid || o.tagNumber || "—",
+            age: o.age || "—",
+            milkYield: o.milkYield || "—",
             price: Number(o.price || o.totalAmount || o.amount || 0),
             totalAmount: Number(o.price || o.totalAmount || o.amount || 0),
             status: o.status || "Completed",
             invoiceNumber: o.invoiceNo || o.invoiceNumber || (invoiceUrl ? `INV-${orderKey.slice(-8)}` : "—"),
             invoiceUrl,
-            image: o.image || o.faceViewImage || o.leftViewImage || o.rightViewImage || null,
+            image: cFace,
+            images: uniqueCImages,
             createdAt: o.createdAt || o.date || null,
             updatedAt: o.updatedAt || null,
             buyerName: o.buyerName || o.shippingAddress?.name || "—",
@@ -2078,7 +2159,9 @@ app.get("/api/admin/product-orders", async (req, res) => {
           buyerName,
           buyerPhone,
           buyerAddress,
-          sellerName: po.sellerName || po.shopName || "iHerd Marketplace Store",
+          sellerName: po.sellerName || po.shopName || po.storeName || "—",
+          paymentStatus: po.paymentStatus || po.payment?.status || po.payment_status || (po.status === "Delivered" || po.status === "Completed" ? "Paid" : (po.totalAmount ? "Paid" : "—")),
+          paymentMethod: po.paymentMethod || po.paymentMode || po.payment?.method || po.payment_method || "—",
           items,
           itemCount: items.length || 1,
           totalAmount,
@@ -2488,13 +2571,30 @@ app.get("/api/admin/cattle", async (req, res) => {
         "—"
       );
 
-      const faceView = item.faceViewImagePath || item.faceView || item.face || (Array.isArray(item.images) && item.images[0]) || item.imageUrl || null;
-      const leftView = item.leftViewImagePath || item.leftView || (Array.isArray(item.images) && item.images[1]) || null;
-      const rightView = item.rightViewImagePath || item.rightView || (Array.isArray(item.images) && item.images[2]) || null;
-      const muzzleView = item.muzzleViewImagePath || item.muzzleView || null;
-      const udderView = item.udderViewImagePath || item.udderView || null;
-      const bottomView = item.topViewImagePath || item.bottomView || item.topview || null;
-      const farmerView = item.farmerViewImagePath || item.farmerView || null;
+      const rawImgObj = (item.images && typeof item.images === "object" && !Array.isArray(item.images)) ? item.images : {};
+      const faceView = item.faceViewImagePath || item.faceView || item.face || item.frontView || rawImgObj.frontView || rawImgObj.faceView || rawImgObj.face || (Array.isArray(item.images) && item.images[0]) || item.imageUrl || null;
+      const leftView = item.leftViewImagePath || item.leftView || rawImgObj.leftView || (Array.isArray(item.images) && item.images[1]) || null;
+      const rightView = item.rightViewImagePath || item.rightView || rawImgObj.rightView || (Array.isArray(item.images) && item.images[2]) || null;
+      const muzzleView = item.muzzleViewImagePath || item.muzzleView || rawImgObj.muzzleView || null;
+      const udderView = item.udderViewImagePath || item.udderView || rawImgObj.udderView || null;
+      const bottomView = item.topViewImagePath || item.bottomView || item.topview || item.rearView || rawImgObj.bottomView || rawImgObj.topview || rawImgObj.rearView || null;
+      const farmerView = item.farmerViewImagePath || item.farmerView || item.farmerWithCattle || rawImgObj.farmerView || rawImgObj.farmerWithCattle || null;
+
+      const allCattleImages = [
+        faceView,
+        leftView,
+        rightView,
+        muzzleView,
+        udderView,
+        bottomView,
+        farmerView,
+        ...(Array.isArray(item.images) ? item.images : []),
+        ...(Array.isArray(item.photos) ? item.photos : []),
+        ...(typeof item.images === "object" && item.images ? Object.values(item.images) : []),
+        item.imageUrl,
+        item.image,
+      ].filter((u) => typeof u === "string" && u.trim().length > 0 && !u.startsWith("data:"));
+      const uniqueCattleImages = Array.from(new Set(allCattleImages));
 
       const title = extractCleanString(item.cattleName || item.title || item.name, item.tagNo ? `Cattle #${item.tagNo}` : "Dairy Cattle");
       const breed = extractCleanString(item.breed, "—");
@@ -2554,7 +2654,7 @@ app.get("/api/admin/cattle", async (req, res) => {
         udderView,
         bottomView,
         farmerView,
-        images: [faceView, leftView, rightView, muzzleView, udderView, bottomView, farmerView, item.imageUrl, item.image].filter(Boolean),
+        images: uniqueCattleImages,
         source: sourceName,
         _path: item._path || item.path || "",
         createdAt: rawDate,
@@ -2679,19 +2779,39 @@ app.get("/api/admin/cattle-marketplace", async (req, res) => {
         item.sellerPhone ||
         item.phone ||
         item.phoneNumber ||
+        item.contactPhone ||
         item.mobile ||
+        ownerUser.sellerPhoneNumber ||
+        ownerUser.farmerPhoneNumber ||
         ownerUser.phoneNumber ||
         ownerUser.phone,
         "—"
       );
 
-      const faceView = item.faceViewImagePath || item.faceView || item.face || item.frontView || (Array.isArray(item.images) && item.images[0]) || item.imageUrl || null;
-      const leftView = item.leftViewImagePath || item.leftView || (Array.isArray(item.images) && item.images[1]) || null;
-      const rightView = item.rightViewImagePath || item.rightView || (Array.isArray(item.images) && item.images[2]) || null;
-      const muzzleView = item.muzzleViewImagePath || item.muzzleView || null;
-      const udderView = item.udderViewImagePath || item.udderView || null;
-      const bottomView = item.topViewImagePath || item.bottomView || item.topview || item.rearView || null;
-      const farmerView = item.farmerViewImagePath || item.farmerView || item.farmerWithCattle || null;
+      const rawImgObj = (item.images && typeof item.images === "object" && !Array.isArray(item.images)) ? item.images : {};
+      const faceView = item.faceViewImagePath || item.faceView || item.face || item.frontView || rawImgObj.frontView || rawImgObj.faceView || rawImgObj.face || (Array.isArray(item.images) && item.images[0]) || item.imageUrl || null;
+      const leftView = item.leftViewImagePath || item.leftView || rawImgObj.leftView || (Array.isArray(item.images) && item.images[1]) || null;
+      const rightView = item.rightViewImagePath || item.rightView || rawImgObj.rightView || (Array.isArray(item.images) && item.images[2]) || null;
+      const muzzleView = item.muzzleViewImagePath || item.muzzleView || rawImgObj.muzzleView || null;
+      const udderView = item.udderViewImagePath || item.udderView || rawImgObj.udderView || null;
+      const bottomView = item.topViewImagePath || item.bottomView || item.topview || item.rearView || rawImgObj.bottomView || rawImgObj.topview || rawImgObj.rearView || null;
+      const farmerView = item.farmerViewImagePath || item.farmerView || item.farmerWithCattle || rawImgObj.farmerView || rawImgObj.farmerWithCattle || null;
+
+      const allCattleImages = [
+        faceView,
+        leftView,
+        rightView,
+        muzzleView,
+        udderView,
+        bottomView,
+        farmerView,
+        ...(Array.isArray(item.images) ? item.images : []),
+        ...(Array.isArray(item.photos) ? item.photos : []),
+        ...(typeof item.images === "object" && item.images ? Object.values(item.images) : []),
+        item.imageUrl,
+        item.image,
+      ].filter((u) => typeof u === "string" && u.trim().length > 0 && !u.startsWith("data:"));
+      const images = Array.from(new Set(allCattleImages));
 
       const title = extractCleanString(item.title || item.cattleName || item.name, item.tagNo ? `Cattle #${item.tagNo}` : "Dairy Cattle");
       const breed = extractCleanString(item.breed, "—");
@@ -2699,12 +2819,6 @@ app.get("/api/admin/cattle-marketplace", async (req, res) => {
       const rfid = extractCleanString(item.rfid || item.tagNo || item.rfidTag, cattleKey);
       const status = extractCleanString(item.status || (item.onSale ? "On Sale" : "Available"), "On Sale");
       const price = extractPriceFromDoc(item);
-
-      const images = Array.isArray(item.images) && item.images.length > 0
-        ? item.images
-        : Array.isArray(item.photos) && item.photos.length > 0
-        ? item.photos
-        : [faceView, leftView, rightView, muzzleView, udderView, bottomView, farmerView, item.imageUrl, item.image].filter(Boolean);
 
       return {
         id: d.id,
@@ -3489,8 +3603,10 @@ app.post("/api/admin/vets", async (req, res) => {
 // REST API for Products CRUD
 app.get("/api/admin/products", async (req, res) => {
   try {
-    const cached = getCached("admin_products", 600000);
-    if (cached) return res.json(cached);
+    if (!req.query.refresh && !req.query.force) {
+      const cached = getCached("admin_products", 600000);
+      if (cached) return res.json(cached);
+    }
 
     const db = getFirestore();
     const snap = await db.collection("product_marketplace").doc("main").collection("products").get();
@@ -3551,13 +3667,17 @@ app.post("/api/admin/products", async (req, res) => {
       thumbnailUrl: thumbnailUrl || null,
       imageUrls: Array.isArray(imageUrls) ? imageUrls.filter(Boolean) : thumbnailUrl ? [thumbnailUrl] : [],
       bestSeller: Boolean(bestSeller),
+      isBestSeller: Boolean(bestSeller),
+      isActive: req.body.isActive === undefined ? true : Boolean(req.body.isActive),
       status: status || "Approved",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
 
-    if (body.deliveryConfig === null) {
+    if (req.body.deliveryConfig === null) {
       delete productData.deliveryConfig;
+    } else if (req.body.deliveryConfig) {
+      productData.deliveryConfig = req.body.deliveryConfig;
     }
 
     await db.collection("product_marketplace").doc("main").collection("products").doc(prodId).set(productData, { merge: true });
@@ -3565,6 +3685,9 @@ app.post("/api/admin/products", async (req, res) => {
     if (productData.bestSeller) {
       await db.collection("product_marketplace").doc("main").collection("best_seller").doc(prodId).set({ ...productData, featuredAt: new Date().toISOString() }, { merge: true });
     }
+
+    clearCache("admin_products");
+    clearCache("admin_best_sellers");
 
     console.log(`Created/Updated product ${prodId}`);
     res.json({ success: true, id: prodId, product: productData });
@@ -3600,6 +3723,10 @@ app.put("/api/admin/products/:id", async (req, res) => {
     if (body.gst !== undefined) updateData.gst = Number(body.gst);
     if (body.bestSeller !== undefined) {
       updateData.bestSeller = Boolean(body.bestSeller);
+      updateData.isBestSeller = Boolean(body.bestSeller);
+    }
+    if (body.isActive !== undefined) {
+      updateData.isActive = Boolean(body.isActive);
     }
     if (body.thumbnailUrl === "") updateData.thumbnailUrl = null;
 
@@ -3618,6 +3745,9 @@ app.put("/api/admin/products/:id", async (req, res) => {
     } else if (body.bestSeller === false) {
       await bsRef.delete().catch(() => {});
     }
+
+    clearCache("admin_products");
+    clearCache("admin_best_sellers");
 
     console.log(`Updated product ${id}: price=${updateData.price}, bestSeller=${updateData.bestSeller}`);
     res.json({ success: true, id, updated: updateData });
@@ -3671,6 +3801,9 @@ app.delete("/api/admin/products/:id", async (req, res) => {
     
     await db.collection("product_marketplace").doc("main").collection("products").doc(id).delete();
     await db.collection("product_marketplace").doc("main").collection("best_seller").doc(id).delete().catch(() => {});
+    
+    clearCache("admin_products");
+    clearCache("admin_best_sellers");
     
     console.log(`Deleted product ${id}`);
     res.json({ success: true, id });
@@ -3906,6 +4039,7 @@ app.post("/api/admin/upload-banner-image", async (req, res) => {
         },
       },
     });
+    await file.makePublic().catch(() => {});
 
     const bucketName = bucket.name;
     const downloadUrl = `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodeURIComponent(storagePath)}?alt=media&token=${uuid}`;
@@ -3957,6 +4091,7 @@ app.post("/api/admin/upload-image", async (req, res) => {
         },
       },
     });
+    await file.makePublic().catch(() => {});
 
     const bucketName = bucket.name || defaultBucketName;
     const downloadUrl = `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodeURIComponent(storagePath)}?alt=media&token=${uuid}`;
@@ -4277,6 +4412,7 @@ app.delete(PASHUPRENEUR_ID_ROUTES, async (req, res) => {
 
 // High-Speed Image Proxy (handles Google Drive thumbnail CDN requests cleanly)
 app.get("/api/admin/proxy-image", (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
   const { url } = req.query;
   if (!url) return res.status(400).send("Missing url query param");
 
@@ -4296,10 +4432,16 @@ app.get("/api/admin/proxy-image", (req, res) => {
   client.get(targetUrl, { headers: { "User-Agent": "Mozilla/5.0" } }, (proxyRes) => {
     if (proxyRes.statusCode >= 300 && proxyRes.statusCode < 400 && proxyRes.headers.location) {
       return https.get(proxyRes.headers.location, { headers: { "User-Agent": "Mozilla/5.0" } }, (redirRes) => {
+        if (redirRes.statusCode >= 400) {
+          return res.status(redirRes.statusCode).send("Image fetch error");
+        }
         res.setHeader("Content-Type", redirRes.headers["content-type"] || "image/png");
         res.setHeader("Cache-Control", "public, max-age=86400");
         redirRes.pipe(res);
       }).on("error", (err) => res.status(502).send(err.message));
+    }
+    if (proxyRes.statusCode >= 400) {
+      return res.status(proxyRes.statusCode).send("Image fetch error");
     }
     res.setHeader("Content-Type", proxyRes.headers["content-type"] || "image/png");
     res.setHeader("Cache-Control", "public, max-age=86400");

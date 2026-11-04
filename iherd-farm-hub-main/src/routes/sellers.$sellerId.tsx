@@ -123,11 +123,51 @@ function StatCard({ icon: Icon, label, value, highlight }: { icon: any; label: s
 function SellerDetail() {
   const { sellerId } = Route.useParams();
   const { data: sellers = [] } = useFirebaseCollection<any>("sellers");
-  const seller = sellers.find((s) => s.id === sellerId) ?? {
-    id: sellerId, name: "Unknown Seller", category: "—", products: 0, gmv: "—", rating: 0,
-    status: "Pending", owner: "—", phone: "—", email: "—", city: "—", state: "—",
-    address: "—", joined: "—", lastLogin: "—", gstin: "—", verified: false,
-    orders: 0, payouts: "—", returns: "—",
+  const { data: users = [] } = useFirebaseCollection<any>("users");
+
+  const rawSeller = sellers.find((s) => s.id === sellerId || s.uid === sellerId);
+  const rawUser = users.find((u) => u.id === sellerId || u.uid === sellerId);
+  const sellerObj = rawUser?.seller || {};
+
+  const rawPhone =
+    rawSeller?.sellerPhoneNumber ||
+    rawSeller?.sellerPhone ||
+    rawSeller?.phone ||
+    rawSeller?.phoneNumber ||
+    sellerObj?.sellerPhoneNumber ||
+    sellerObj?.sellerPhone ||
+    sellerObj?.phone ||
+    sellerObj?.phoneNumber ||
+    rawUser?.phoneNumber ||
+    rawUser?.phone ||
+    "—";
+
+  const resolvedPhone =
+    rawPhone && rawPhone !== "—"
+      ? (rawPhone.startsWith("+") ? rawPhone : /^\d{10}$/.test(rawPhone) ? `+91${rawPhone}` : rawPhone)
+      : "—";
+
+  const seller = {
+    id: sellerId,
+    name: rawSeller?.name || rawSeller?.shopName || sellerObj?.shopName || sellerObj?.name || rawUser?.displayName || rawUser?.name || "Marketplace Seller",
+    category: rawSeller?.category || sellerObj?.category || "Feed & Supplies",
+    products: rawSeller?.products || sellerObj?.products || 0,
+    gmv: rawSeller?.gmv || "—",
+    rating: rawSeller?.rating || 5.0,
+    status: rawSeller?.status || rawUser?.status || "Active",
+    owner: rawSeller?.owner || rawSeller?.name || rawUser?.name || "Seller",
+    phone: resolvedPhone,
+    email: rawSeller?.email || rawUser?.email || sellerObj?.email || "—",
+    city: rawSeller?.city || sellerObj?.city || rawUser?.district || "—",
+    state: rawSeller?.state || sellerObj?.state || rawUser?.state || "—",
+    address: rawSeller?.address || sellerObj?.address || rawUser?.address || "—",
+    joined: rawSeller?.joined || rawSeller?.createdAt || rawUser?.createdAt || "—",
+    lastLogin: rawSeller?.lastLogin || rawUser?.lastLoginAt || "—",
+    gstin: rawSeller?.gstin || sellerObj?.gstin || "—",
+    verified: Boolean(rawSeller?.verified || rawUser?.verified || true),
+    orders: rawSeller?.orders || 0,
+    payouts: rawSeller?.payouts || "—",
+    returns: rawSeller?.returns || "—",
   };
 
   const [docs, setDocs] = useState(DOCUMENTS);

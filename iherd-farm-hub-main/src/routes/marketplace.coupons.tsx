@@ -394,6 +394,7 @@ function CouponsPage() {
 
         <Card className="p-4 rounded-2xl bg-card border-border relative overflow-hidden">
           <div className="flex items-center justify-between">
+            
             <div className="grid h-8 w-8 place-items-center rounded-xl bg-amber-500/10 text-amber-600">
               <Percent className="h-4 w-4" />
             </div>
