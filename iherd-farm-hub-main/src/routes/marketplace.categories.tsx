@@ -2,7 +2,8 @@ import { useState, useMemo, useRef } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { collection, doc, getDocs, setDoc, deleteDoc } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { db, storage } from "@/lib/firebase";
 import { getApiBaseUrlSync } from "@/lib/apiClient";
 import { PageHeader } from "@/components/admin/PageHeader";
 import { Card, CardContent } from "@/components/ui/card";
@@ -58,6 +59,21 @@ import { formatImageUrl, getLocalizedText } from "@/lib/utils";
 import { validateImageFile, processSquareImage } from "@/lib/imageProcessor";
 import { PRODUCT_CATEGORIES } from "@/lib/categories";
 
+// Converts any Google Drive preview/sharing link to direct high-speed CDN image stream
+// Compatible with Flutter Image.network, Android, iOS, and Web browsers
+export function convertToDirectImageUrl(raw: string): string {
+  if (!raw) return "";
+  const trimmed = raw.trim();
+  const driveMatch =
+    trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) ||
+    trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/) ||
+    trimmed.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  if (driveMatch && driveMatch[1]) {
+    return `https://lh3.googleusercontent.com/d/${driveMatch[1]}=s800`;
+  }
+  return trimmed;
+}
+
 export const Route = createFileRoute("/marketplace/categories")({
   head: () => ({ meta: [{ title: "Categories & Subcategories — iHerd Admin" }] }),
   component: CategoriesPage,
@@ -76,6 +92,10 @@ export interface MultiLangName {
 export interface CategoryItem {
   id: string;
   image?: string;
+  imageUrl?: string;
+  icon?: string;
+  iconUrl?: string;
+  categoryImage?: string;
   name: MultiLangName;
   order: number;
   createdAt?: string;
@@ -121,6 +141,7 @@ function CategoriesPage() {
   const [catNames, setCatNames] = useState<MultiLangName>(emptyMultiLang());
   const [catFileError, setCatFileError] = useState<string | null>(null);
   const [isUploadingCatImage, setIsUploadingCatImage] = useState(false);
+  const [isCatIdCustom, setIsCatIdCustom] = useState(false);
 
   // Subcategory Modal State
   const [subModalOpen, setSubModalOpen] = useState(false);
@@ -129,6 +150,8 @@ function CategoriesPage() {
   const [subParentId, setSubParentId] = useState("");
   const [subOrder, setSubOrder] = useState<number>(1);
   const [subNames, setSubNames] = useState<MultiLangName>(emptyMultiLang());
+  const [isSubIdCustom, setIsSubIdCustom] = useState(false);
+  const [subPrefix, setSubPrefix] = useState<"subcat_" | "sub_">("subcat_");
 
   // Image Zoom State
   const [previewImage, setPreviewImage] = useState<{ url: string; title: string } | null>(null);
@@ -145,9 +168,15 @@ function CategoriesPage() {
             const data = d.data();
             const rawName = data.name || {};
             const enName = typeof rawName === "object" ? (rawName.en || "") : String(rawName || d.id);
+            const rawImg = data.image || data.imageUrl || data.icon || data.iconUrl || data.categoryImage || "";
+            const directImg = convertToDirectImageUrl(rawImg);
             return {
               id: d.id,
-              image: data.image || "",
+              image: directImg,
+              imageUrl: directImg,
+              icon: directImg,
+              iconUrl: directImg,
+              categoryImage: directImg,
               name: {
                 en: enName,
                 hi: rawName.hi || enName,
@@ -313,15 +342,31 @@ function CategoriesPage() {
   // 3. Category Mutations (Save / Delete)
   const saveCategoryMutation = useMutation({
     mutationFn: async (payload: CategoryItem) => {
-      // 1. Direct Firestore write
+      // 1. If editing and ID was changed, remove the old document key
+      if (editingCategory && editingCategory.id !== payload.id) {
+        try {
+          await deleteDoc(doc(db, "product_marketplace", "main", "categories", editingCategory.id));
+          await deleteDoc(doc(db, "categories", editingCategory.id)).catch(() => {});
+          await deleteDoc(doc(db, "product_categories", editingCategory.id)).catch(() => {});
+          await fetch(`${API_BASE}/api/admin/categories/${encodeURIComponent(editingCategory.id)}`, { method: "DELETE" }).catch(() => {});
+        } catch (cleanupErr) {
+          console.warn("Cleanup old category id warning:", cleanupErr);
+        }
+      }
+
+      // 2. Direct Firestore write (Primary: /product_marketplace/main/categories, Mirror: /categories and /product_categories)
       try {
         const docRef = doc(db, "product_marketplace", "main", "categories", payload.id);
-        await setDoc(docRef, { ...payload, updatedAt: new Date().toISOString() }, { merge: true });
+        const updateData = { ...payload, updatedAt: new Date().toISOString() };
+        await setDoc(docRef, updateData, { merge: true });
+        // Mirror to root paths for full compatibility with Flutter app models
+        await setDoc(doc(db, "categories", payload.id), updateData, { merge: true }).catch(() => {});
+        await setDoc(doc(db, "product_categories", payload.id), updateData, { merge: true }).catch(() => {});
       } catch (clientErr) {
         console.warn("Client Firestore category save warning:", clientErr);
       }
 
-      // 2. Backend REST API
+      // 3. Backend REST API
       const res = await fetch(`${API_BASE}/api/admin/categories`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -336,6 +381,8 @@ function CategoriesPage() {
     onSuccess: (data) => {
       toast.success(`Category "${data.name.en || data.id}" saved successfully!`);
       queryClient.invalidateQueries({ queryKey: ["product_categories"] });
+      queryClient.invalidateQueries({ queryKey: ["product_marketplace_categories"] });
+      queryClient.invalidateQueries({ queryKey: ["product_marketplace/main/categories"] });
       setCatModalOpen(false);
     },
     onError: (err: any) => {
@@ -345,10 +392,12 @@ function CategoriesPage() {
 
   const deleteCategoryMutation = useMutation({
     mutationFn: async (catId: string) => {
-      // 1. Direct Firestore delete
+      // 1. Direct Firestore delete (Primary + Mirrors)
       try {
         const docRef = doc(db, "product_marketplace", "main", "categories", catId);
         await deleteDoc(docRef);
+        await deleteDoc(doc(db, "categories", catId)).catch(() => {});
+        await deleteDoc(doc(db, "product_categories", catId)).catch(() => {});
       } catch (clientErr) {
         console.warn("Client Firestore category delete warning:", clientErr);
       }
@@ -366,6 +415,8 @@ function CategoriesPage() {
     onSuccess: (deletedId) => {
       toast.success(`Category "${deletedId}" deleted.`);
       queryClient.invalidateQueries({ queryKey: ["product_categories"] });
+      queryClient.invalidateQueries({ queryKey: ["product_marketplace_categories"] });
+      queryClient.invalidateQueries({ queryKey: ["product_marketplace/main/categories"] });
     },
     onError: (err: any) => {
       toast.error(err.message || "Failed to delete category.");
@@ -375,7 +426,17 @@ function CategoriesPage() {
   // 4. Subcategory Mutations (Save / Delete)
   const saveSubCategoryMutation = useMutation({
     mutationFn: async (payload: SubCategoryItem) => {
-      // 1. Direct Firestore write
+      // 1. If editing and ID was changed, remove the old document key
+      if (editingSubCategory && editingSubCategory.id !== payload.id) {
+        try {
+          await deleteDoc(doc(db, "product_marketplace", "main", "subcategories", editingSubCategory.id));
+          await fetch(`${API_BASE}/api/admin/subcategories/${encodeURIComponent(editingSubCategory.id)}`, { method: "DELETE" }).catch(() => {});
+        } catch (cleanupErr) {
+          console.warn("Cleanup old subcategory id warning:", cleanupErr);
+        }
+      }
+
+      // 2. Direct Firestore write
       try {
         const docRef = doc(db, "product_marketplace", "main", "subcategories", payload.id);
         await setDoc(docRef, { ...payload, updatedAt: new Date().toISOString() }, { merge: true });
@@ -383,7 +444,7 @@ function CategoriesPage() {
         console.warn("Client Firestore subcategory save warning:", clientErr);
       }
 
-      // 2. Backend REST API
+      // 3. Backend REST API
       const res = await fetch(`${API_BASE}/api/admin/subcategories`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -398,6 +459,8 @@ function CategoriesPage() {
     onSuccess: (data) => {
       toast.success(`Subcategory "${data.name.en || data.id}" saved successfully!`);
       queryClient.invalidateQueries({ queryKey: ["product_subcategories"] });
+      queryClient.invalidateQueries({ queryKey: ["product_marketplace_subcategories"] });
+      queryClient.invalidateQueries({ queryKey: ["product_marketplace/main/subcategories"] });
       setSubModalOpen(false);
     },
     onError: (err: any) => {
@@ -428,6 +491,8 @@ function CategoriesPage() {
     onSuccess: (deletedId) => {
       toast.success(`Subcategory "${deletedId}" deleted.`);
       queryClient.invalidateQueries({ queryKey: ["product_subcategories"] });
+      queryClient.invalidateQueries({ queryKey: ["product_marketplace_subcategories"] });
+      queryClient.invalidateQueries({ queryKey: ["product_marketplace/main/subcategories"] });
     },
     onError: (err: any) => {
       toast.error(err.message || "Failed to delete subcategory.");
@@ -437,21 +502,24 @@ function CategoriesPage() {
   // Handlers for Category Modal
   const handleOpenAddCategory = () => {
     setEditingCategory(null);
-    setCatId(`cat_${Date.now()}`);
+    setCatId("");
     setCatImage("");
     setCatOrder(categories.length + 1);
     setCatNames(emptyMultiLang());
     setCatFileError(null);
+    setIsCatIdCustom(false);
     setCatModalOpen(true);
   };
 
   const handleOpenEditCategory = (c: CategoryItem) => {
     setEditingCategory(c);
     setCatId(c.id);
-    setCatImage(c.image || "");
+    const existingImg = c.image || c.imageUrl || c.icon || c.iconUrl || c.categoryImage || "";
+    setCatImage(convertToDirectImageUrl(existingImg));
     setCatOrder(c.order || 1);
     setCatNames({ ...c.name });
     setCatFileError(null);
+    setIsCatIdCustom(true);
     setCatModalOpen(true);
   };
 
@@ -474,6 +542,7 @@ function CategoriesPage() {
   };
 
   // Category Image Upload with strict PDF / non-image rejection
+  // Supports both Backend API upload and direct Firebase Storage client SDK fallback
   const handleCategoryImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -497,25 +566,51 @@ function CategoriesPage() {
     try {
       // Process to 1:1 square & compress
       const processed = await processSquareImage(file, false);
-      const res = await fetch(`${API_BASE}/api/admin/upload-image`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          base64: processed.base64,
-          filename: processed.file.name,
-          contentType: processed.file.type || "image/webp",
-          folder: "marketplace/categories",
-        }),
-      });
+      let uploadedUrl = "";
 
-      if (res.ok) {
-        const data = await res.json();
-        if (data.url) {
-          setCatImage(data.url);
-          toast.success("Category image uploaded successfully to Firebase Storage!");
+      // 1. Try Backend Upload
+      try {
+        const res = await fetch(`${API_BASE}/api/admin/upload-image`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            base64: processed.base64,
+            filename: processed.file.name,
+            contentType: processed.file.type || "image/webp",
+            folder: "product_marketplace/categories",
+          }),
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.url) {
+            uploadedUrl = data.url;
+          }
         }
+      } catch (backendErr) {
+        console.warn("Backend upload failed, trying direct Firebase Storage SDK:", backendErr);
+      }
+
+      // 2. Direct Firebase Storage Client SDK Fallback
+      if (!uploadedUrl) {
+        try {
+          const safeName = `${Date.now()}_${processed.file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+          const storageRef = ref(storage, `product_marketplace/categories/${safeName}`);
+          await uploadBytes(storageRef, processed.file, {
+            contentType: processed.file.type || "image/webp",
+          });
+          uploadedUrl = await getDownloadURL(storageRef);
+        } catch (storageErr: any) {
+          console.error("Direct storage SDK upload failed:", storageErr);
+        }
+      }
+
+      if (uploadedUrl) {
+        const direct = convertToDirectImageUrl(uploadedUrl);
+        setCatImage(direct);
+        toast.success("Category image uploaded successfully!");
       } else {
-        toast.error("Server upload failed. You can paste a direct image URL.");
+        toast.error("Upload failed. You can paste a direct image URL or Google Drive link below.");
       }
     } catch (err: any) {
       toast.error("Upload error: " + (err.message || "Failed to upload image."));
@@ -535,9 +630,14 @@ function CategoriesPage() {
       return;
     }
 
+    const finalImageUrl = convertToDirectImageUrl(catImage.trim());
     const payload: CategoryItem = {
       id: catId.trim(),
-      image: catImage.trim(),
+      image: finalImageUrl,
+      imageUrl: finalImageUrl,
+      icon: finalImageUrl,
+      iconUrl: finalImageUrl,
+      categoryImage: finalImageUrl,
       name: {
         en: catNames.en.trim(),
         hi: catNames.hi.trim() || catNames.en.trim(),
@@ -556,10 +656,12 @@ function CategoriesPage() {
   // Handlers for Subcategory Modal
   const handleOpenAddSubCategory = (defaultParentId?: string) => {
     setEditingSubCategory(null);
-    setSubId(`subcat_${Date.now()}`);
+    setSubId("");
     setSubParentId(defaultParentId || categories[0]?.id || "cat_breeding");
     setSubOrder(subcategories.length + 1);
     setSubNames(emptyMultiLang());
+    setIsSubIdCustom(false);
+    setSubPrefix("subcat_");
     setSubModalOpen(true);
   };
 
@@ -569,6 +671,8 @@ function CategoriesPage() {
     setSubParentId(s.categoryId);
     setSubOrder(s.order || 1);
     setSubNames({ ...s.name });
+    setIsSubIdCustom(true);
+    setSubPrefix(s.id.startsWith("sub_") ? "sub_" : "subcat_");
     setSubModalOpen(true);
   };
 
@@ -1055,16 +1159,48 @@ function CategoriesPage() {
             {/* Basic ID & Order */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-muted/20 p-3.5 rounded-2xl border">
               <div className="space-y-1">
-                <Label className="text-xs font-semibold">Category ID (String) *</Label>
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-semibold">Category ID (String) *</Label>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const clean = catId.replace(/^cat_/, "");
+                        const base = clean || catNames.en.toLowerCase().replace(/[^a-z0-9]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "").slice(0, 35);
+                        setCatId(base ? `cat_${base}` : "cat_");
+                        setIsCatIdCustom(true);
+                      }}
+                      className="text-[10px] text-primary hover:underline font-mono"
+                      title="Add cat_ prefix"
+                    >
+                      + cat_
+                    </button>
+                    <span>•</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const slug = catNames.en.toLowerCase().replace(/[^a-z0-9]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "").slice(0, 35);
+                        setCatId(slug ? `cat_${slug}` : "cat_");
+                        setIsCatIdCustom(false);
+                      }}
+                      className="text-[10px] text-emerald-600 hover:underline font-semibold"
+                      title="Regenerate ID from English Name"
+                    >
+                      Auto from Name
+                    </button>
+                  </div>
+                </div>
                 <Input
                   value={catId}
-                  onChange={(e) => setCatId(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, "_"))}
+                  onChange={(e) => {
+                    setCatId(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, "_"));
+                    setIsCatIdCustom(true);
+                  }}
                   placeholder="e.g. cat_breeding"
                   className="font-mono text-xs"
-                  disabled={!!editingCategory}
                   required
                 />
-                <span className="text-[10px] text-muted-foreground">Unique doc key (e.g. cat_breeding, cat_nutrition)</span>
+                <span className="text-[10px] text-muted-foreground">Unique doc key: formatted with <code>cat_</code> prefix (fully editable).</span>
               </div>
 
               <div className="space-y-1">
@@ -1084,7 +1220,7 @@ function CategoriesPage() {
             <div className="space-y-2 bg-muted/20 p-3.5 rounded-2xl border">
               <div className="flex items-center justify-between">
                 <Label className="text-xs font-semibold flex items-center gap-1.5">
-                  <ImageIcon className="h-3.5 w-3.5 text-primary" /> Category Icon / Image
+                  <ImageIcon className="h-3.5 w-3.5 text-primary" /> Category Icon / Image (1:1 Ratio image)
                 </Label>
                 <label className="cursor-pointer text-xs font-semibold text-primary hover:underline flex items-center gap-1">
                   <Upload className="h-3 w-3" />
@@ -1103,15 +1239,16 @@ function CategoriesPage() {
               <Input
                 value={catImage}
                 onChange={(e) => setCatImage(e.target.value)}
-                placeholder="Paste Google Drive link, Storage URL, or upload image above..."
+                onBlur={() => setCatImage((prev) => convertToDirectImageUrl(prev.trim()))}
+                placeholder="Paste Google Drive link, Firebase Storage URL, or upload image above..."
                 className="text-xs font-mono"
               />
 
               {catImage && (
                 <div className="flex items-center gap-3 pt-1">
-                  <div className="h-14 w-14 rounded-xl overflow-hidden border bg-background shrink-0">
+                  <div className="h-14 w-14 rounded-xl overflow-hidden border bg-background shrink-0 shadow-xs">
                     <img
-                      src={formatImageUrl(catImage)}
+                      src={convertToDirectImageUrl(catImage) || formatImageUrl(catImage)}
                       alt="Category Preview"
                       className="h-full w-full object-cover"
                       onError={(e: any) => {
@@ -1120,9 +1257,15 @@ function CategoriesPage() {
                       }}
                     />
                   </div>
-                  <span className="text-xs text-muted-foreground truncate">
-                    Preview ready. Google Drive links are automatically converted and proxied.
-                  </span>
+                  <div className="space-y-0.5 text-xs">
+                    <div className="font-semibold text-foreground flex items-center gap-1.5">
+                      <Check className="h-3.5 w-3.5 text-emerald-600" />
+                      <span>Direct Image Stream Ready</span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      Compatible with Flutter mobile app, Android, iOS & Web (Google Drive links are automatically converted).
+                    </p>
+                  </div>
                 </div>
               )}
             </div>
@@ -1133,15 +1276,6 @@ function CategoriesPage() {
                 <Label className="text-xs font-bold uppercase tracking-wider text-foreground">
                   Multilingual Name Map (<code>name</code>) *
                 </Label>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={handleCopyCategoryEnglishToAll}
-                  className="h-7 text-xs gap-1 rounded-xl text-primary font-semibold"
-                >
-                  <Sparkles className="h-3 w-3" /> Copy English to All
-                </Button>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
@@ -1152,8 +1286,9 @@ function CategoriesPage() {
                     onChange={(e) => {
                       const val = e.target.value;
                       setCatNames((prev) => ({ ...prev, en: val }));
-                      if (!editingCategory && (!catId || catId.startsWith("cat_"))) {
-                        setCatId(`cat_${val.toLowerCase().replace(/[^a-z0-9]/g, "_").slice(0, 30)}`);
+                      if (!isCatIdCustom || !catId || catId.startsWith("cat_")) {
+                        const slug = val.toLowerCase().replace(/[^a-z0-9]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "").slice(0, 35);
+                        setCatId(slug ? `cat_${slug}` : "");
                       }
                     }}
                     placeholder="e.g. Breeding"
@@ -1270,15 +1405,70 @@ function CategoriesPage() {
               </div>
 
               <div className="space-y-1 sm:col-span-1">
-                <Label className="text-xs font-semibold">Subcategory ID *</Label>
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-semibold">Subcategory ID *</Label>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSubPrefix("sub_");
+                        const clean = subId.replace(/^(subcat_|sub_|cat_)/, "");
+                        const base = clean || subNames.en.toLowerCase().replace(/[^a-z0-9]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "").slice(0, 35);
+                        setSubId(base ? `sub_${base}` : "sub_");
+                        setIsSubIdCustom(true);
+                      }}
+                      className={`text-[10px] font-mono px-1 rounded transition-colors ${
+                        subPrefix === "sub_" ? "bg-primary/20 text-primary font-bold" : "text-muted-foreground hover:text-foreground"
+                      }`}
+                      title="Use sub_ prefix"
+                    >
+                      sub_
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSubPrefix("subcat_");
+                        const clean = subId.replace(/^(subcat_|sub_|cat_)/, "");
+                        const base = clean || subNames.en.toLowerCase().replace(/[^a-z0-9]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "").slice(0, 35);
+                        setSubId(base ? `subcat_${base}` : "subcat_");
+                        setIsSubIdCustom(true);
+                      }}
+                      className={`text-[10px] font-mono px-1 rounded transition-colors ${
+                        subPrefix === "subcat_" ? "bg-primary/20 text-primary font-bold" : "text-muted-foreground hover:text-foreground"
+                      }`}
+                      title="Use subcat_ prefix"
+                    >
+                      subcat_
+                    </button>
+                    <span>•</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const slug = subNames.en.toLowerCase().replace(/[^a-z0-9]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "").slice(0, 35);
+                        setSubId(slug ? `${subPrefix}${slug}` : subPrefix);
+                        setIsSubIdCustom(false);
+                      }}
+                      className="text-[10px] text-emerald-600 hover:underline font-semibold"
+                      title="Regenerate ID from English Name"
+                    >
+                      Auto
+                    </button>
+                  </div>
+                </div>
                 <Input
                   value={subId}
-                  onChange={(e) => setSubId(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, "_"))}
-                  placeholder="e.g. subcat_ai_equipment"
+                  onChange={(e) => {
+                    const val = e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, "_");
+                    setSubId(val);
+                    setIsSubIdCustom(true);
+                    if (val.startsWith("sub_")) setSubPrefix("sub_");
+                    else if (val.startsWith("subcat_")) setSubPrefix("subcat_");
+                  }}
+                  placeholder="e.g. subcat_ai_equipment or sub_ai_equipment"
                   className="font-mono text-xs"
-                  disabled={!!editingSubCategory}
                   required
                 />
+                <span className="text-[10px] text-muted-foreground">Unique doc key: fully editable with <code>sub_</code> or <code>subcat_</code> prefix.</span>
               </div>
 
               <div className="space-y-1 sm:col-span-1">
@@ -1299,15 +1489,6 @@ function CategoriesPage() {
                 <Label className="text-xs font-bold uppercase tracking-wider text-foreground">
                   Multilingual Name Map (<code>name</code>) *
                 </Label>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={handleCopySubEnglishToAll}
-                  className="h-7 text-xs gap-1 rounded-xl text-emerald-600 font-semibold"
-                >
-                  <Sparkles className="h-3 w-3" /> Copy English to All
-                </Button>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
@@ -1318,8 +1499,9 @@ function CategoriesPage() {
                     onChange={(e) => {
                       const val = e.target.value;
                       setSubNames((prev) => ({ ...prev, en: val }));
-                      if (!editingSubCategory && (!subId || subId.startsWith("subcat_"))) {
-                        setSubId(`subcat_${val.toLowerCase().replace(/[^a-z0-9]/g, "_").slice(0, 30)}`);
+                      if (!isSubIdCustom || !subId || subId.startsWith("subcat_") || subId.startsWith("sub_")) {
+                        const slug = val.toLowerCase().replace(/[^a-z0-9]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "").slice(0, 35);
+                        setSubId(slug ? `${subPrefix}${slug}` : "");
                       }
                     }}
                     placeholder="e.g. AI Equipment"

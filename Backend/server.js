@@ -4569,6 +4569,20 @@ app.get("/api/admin/proxy-image", (req, res) => {
 // - /product_marketplace/main/subcategories/{id}
 // ==========================================
 
+// Helper: Normalize direct image URL (converts Google Drive links to raw image streams)
+function normalizeDirectImageUrl(raw) {
+  if (!raw) return "";
+  const trimmed = String(raw).trim();
+  const driveMatch =
+    trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) ||
+    trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/) ||
+    trimmed.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  if (driveMatch && driveMatch[1]) {
+    return `https://lh3.googleusercontent.com/d/${driveMatch[1]}=s800`;
+  }
+  return trimmed;
+}
+
 // Helper: Normalize multilingual map for category/subcategory names
 function normalizeCategoryNameMap(val, fallbackName = "") {
   if (typeof val === "object" && val !== null) {
@@ -4602,9 +4616,16 @@ app.get("/api/admin/categories", async (req, res) => {
     const snap = await db.collection("product_marketplace").doc("main").collection("categories").get();
     const categories = snap.docs.map((doc) => {
       const data = doc.data();
+      const rawImg = data.image || data.imageUrl || data.icon || data.iconUrl || data.categoryImage || "";
+      const directImg = normalizeDirectImageUrl(rawImg);
       return {
         id: doc.id,
         ...data,
+        image: directImg,
+        imageUrl: directImg,
+        icon: directImg,
+        iconUrl: directImg,
+        categoryImage: directImg,
         name: normalizeCategoryNameMap(data.name, doc.id),
         order: typeof data.order === "number" ? data.order : parseInt(data.order, 10) || 0,
       };
@@ -4627,9 +4648,16 @@ app.post("/api/admin/categories", async (req, res) => {
       return res.status(400).json({ error: "Category ID (e.g. cat_breeding) is required." });
     }
 
+    const rawImg = body.image || body.imageUrl || body.icon || body.iconUrl || body.categoryImage || "";
+    const directImg = normalizeDirectImageUrl(rawImg);
+
     const payload = {
       id: catId,
-      image: String(body.image || "").trim(),
+      image: directImg,
+      imageUrl: directImg,
+      icon: directImg,
+      iconUrl: directImg,
+      categoryImage: directImg,
       name: normalizeCategoryNameMap(body.name, body.name?.en || catId),
       order: typeof body.order === "number" ? body.order : parseInt(body.order, 10) || 0,
       updatedAt: new Date().toISOString(),
@@ -4639,10 +4667,17 @@ app.post("/api/admin/categories", async (req, res) => {
       payload.createdAt = new Date().toISOString();
     }
 
+    // Save to primary /product_marketplace/main/categories
     const docRef = db.collection("product_marketplace").doc("main").collection("categories").doc(catId);
     await docRef.set(payload, { merge: true });
 
-    console.log(`Saved category ${catId} to /product_marketplace/main/categories`);
+    // Also mirror to root /categories and /product_categories in case mobile app reads there
+    try {
+      await db.collection("categories").doc(catId).set(payload, { merge: true });
+      await db.collection("product_categories").doc(catId).set(payload, { merge: true });
+    } catch (_) {}
+
+    console.log(`Saved category ${catId} to /product_marketplace/main/categories (with image: ${directImg ? "yes" : "none"})`);
     res.json({ success: true, message: `Category "${catId}" saved successfully`, category: payload });
   } catch (error) {
     console.error("Error in POST /api/admin/categories:", error);
@@ -4656,6 +4691,10 @@ app.delete("/api/admin/categories/:id", async (req, res) => {
     const db = getFirestore();
     const catId = req.params.id;
     await db.collection("product_marketplace").doc("main").collection("categories").doc(catId).delete();
+    try {
+      await db.collection("categories").doc(catId).delete();
+      await db.collection("product_categories").doc(catId).delete();
+    } catch (_) {}
     console.log(`Deleted category ${catId} from /product_marketplace/main/categories`);
     res.json({ success: true, message: `Category "${catId}" deleted successfully` });
   } catch (error) {

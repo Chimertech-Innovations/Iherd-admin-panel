@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { collection, collectionGroup, getDocs, doc, getDoc, setDoc, updateDoc, deleteDoc, deleteField } from "firebase/firestore";
 import { db } from "../lib/firebase";
 import { getApiBaseUrlSync } from "../lib/apiClient";
+import { PRODUCT_CATEGORIES } from "../lib/categories";
 
 export const API_BASE = getApiBaseUrlSync();
 
@@ -1360,6 +1361,192 @@ export function usePashuprenuerCourses() {
     saveCourse,
     deleteCourse,
     toggleCourseActive,
+  };
+}
+
+// ==========================================
+// 8. DYNAMIC PRODUCT CATEGORIES & SUBCATEGORIES
+// Collections:
+//   product_marketplace/main/categories
+//   product_marketplace/main/subcategories
+// ==========================================
+export interface DynamicCategoryItem {
+  id: string;
+  image?: string;
+  imageUrl?: string;
+  icon?: string;
+  name: Record<string, string> | string;
+  order: number;
+}
+
+export interface DynamicSubcategoryItem {
+  id: string;
+  categoryId: string;
+  name: Record<string, string> | string;
+  order: number;
+}
+
+export function useProductCategories() {
+  const query = useQuery<DynamicCategoryItem[]>({
+    queryKey: ["product_marketplace_categories"],
+    queryFn: async () => {
+      const results: DynamicCategoryItem[] = [];
+      const seenIds = new Set<string>();
+
+      // 1. Direct Client Firestore SDK
+      try {
+        const colRef = collection(db, "product_marketplace", "main", "categories");
+        const snap = await getDocs(colRef);
+        if (!snap.empty) {
+          snap.forEach((d) => {
+            const data = d.data();
+            seenIds.add(d.id);
+            const img = data.image || data.imageUrl || data.icon || data.iconUrl || data.categoryImage || "";
+            results.push({
+              id: d.id,
+              image: img,
+              imageUrl: img,
+              icon: img,
+              name: data.name || d.id,
+              order: typeof data.order === "number" ? data.order : parseInt(data.order, 10) || 0,
+            });
+          });
+        }
+      } catch (err) {
+        console.warn("Client Firestore categories error, trying backend:", err);
+      }
+
+      // 2. Try Backend API if empty
+      if (results.length === 0) {
+        try {
+          const base = getApiBaseUrlSync();
+          const res = await fetch(`${base}/api/admin/categories`);
+          if (res.ok) {
+            const json = await res.json();
+            if (Array.isArray(json.categories) && json.categories.length > 0) {
+              json.categories.forEach((cat: any) => {
+                seenIds.add(cat.id);
+                const img = cat.image || cat.imageUrl || cat.icon || cat.iconUrl || cat.categoryImage || "";
+                results.push({
+                  id: cat.id,
+                  image: img,
+                  imageUrl: img,
+                  icon: img,
+                  name: cat.name || cat.id,
+                  order: typeof cat.order === "number" ? cat.order : parseInt(cat.order, 10) || 0,
+                });
+              });
+            }
+          }
+        } catch (err) {
+          console.warn("Backend API categories error:", err);
+        }
+      }
+
+      // 3. Merge with default static PRODUCT_CATEGORIES so defaults are always available
+      PRODUCT_CATEGORIES.forEach((staticCat, idx) => {
+        if (!seenIds.has(staticCat.id)) {
+          seenIds.add(staticCat.id);
+          results.push({
+            id: staticCat.id,
+            name: {
+              en: staticCat.name,
+              hi: staticCat.nameHi || staticCat.name,
+            },
+            order: 100 + idx,
+          });
+        }
+      });
+
+      results.sort((a, b) => (a.order || 0) - (b.order || 0));
+      return results;
+    },
+    staleTime: 30_000,
+    gcTime: 300_000,
+  });
+
+  return {
+    ...query,
+    categories: query.data || [],
+  };
+}
+
+export function useProductSubcategories() {
+  const query = useQuery<DynamicSubcategoryItem[]>({
+    queryKey: ["product_marketplace_subcategories"],
+    queryFn: async () => {
+      const results: DynamicSubcategoryItem[] = [];
+      const seenIds = new Set<string>();
+
+      // 1. Direct Client Firestore SDK
+      try {
+        const colRef = collection(db, "product_marketplace", "main", "subcategories");
+        const snap = await getDocs(colRef);
+        if (!snap.empty) {
+          snap.forEach((d) => {
+            const data = d.data();
+            seenIds.add(d.id);
+            results.push({
+              id: d.id,
+              categoryId: data.categoryId || "",
+              name: data.name || d.id,
+              order: typeof data.order === "number" ? data.order : parseInt(data.order, 10) || 0,
+            });
+          });
+        }
+      } catch (err) {
+        console.warn("Client Firestore subcategories error, trying backend:", err);
+      }
+
+      // 2. Try Backend API if empty
+      if (results.length === 0) {
+        try {
+          const base = getApiBaseUrlSync();
+          const res = await fetch(`${base}/api/admin/subcategories`);
+          if (res.ok) {
+            const json = await res.json();
+            if (Array.isArray(json.subcategories) && json.subcategories.length > 0) {
+              json.subcategories.forEach((sub: any) => {
+                seenIds.add(sub.id);
+                results.push({
+                  id: sub.id,
+                  categoryId: sub.categoryId || "",
+                  name: sub.name || sub.id,
+                  order: typeof sub.order === "number" ? sub.order : parseInt(sub.order, 10) || 0,
+                });
+              });
+            }
+          }
+        } catch (err) {
+          console.warn("Backend API subcategories error:", err);
+        }
+      }
+
+      // 3. Merge with default static subcategories from PRODUCT_CATEGORIES
+      PRODUCT_CATEGORIES.forEach((cat) => {
+        cat.subcategories.forEach((sub, idx) => {
+          if (!seenIds.has(sub.id)) {
+            seenIds.add(sub.id);
+            results.push({
+              id: sub.id,
+              categoryId: cat.id,
+              name: { en: sub.name },
+              order: 100 + idx,
+            });
+          }
+        });
+      });
+
+      results.sort((a, b) => (a.order || 0) - (b.order || 0));
+      return results;
+    },
+    staleTime: 30_000,
+    gcTime: 300_000,
+  });
+
+  return {
+    ...query,
+    subcategories: query.data || [],
   };
 }
 

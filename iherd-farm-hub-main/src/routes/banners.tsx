@@ -104,7 +104,11 @@ import {
   getCategoryName,
   getSubcategoryName,
 } from "@/lib/categories";
-import { useAdminProducts } from "@/hooks/useFirebaseData";
+import {
+  useAdminProducts,
+  useProductCategories,
+  useProductSubcategories,
+} from "@/hooks/useFirebaseData";
 import { toast } from "sonner";
 import { exportToCsv } from "@/lib/csvExport";
 
@@ -202,6 +206,20 @@ function BannersPage() {
 
   // Live Products for Offer Banner selector (shows ALL products with rich details)
   const { data: marketplaceProducts = [] } = useAdminProducts();
+  const { categories = [] } = useProductCategories();
+  const { subcategories = [] } = useProductSubcategories();
+
+  const availableBannerSubcategories = useMemo(() => {
+    if (!selectedCategory) return [];
+    const matching = subcategories.filter((s) => s.categoryId === selectedCategory);
+    if (matching.length > 0) return matching;
+    return getSubcategoriesForCategory(selectedCategory).map((s) => ({
+      id: s.id,
+      categoryId: selectedCategory,
+      name: s.name,
+      order: 0,
+    }));
+  }, [subcategories, selectedCategory]);
 
   const filteredProducts = useMemo(() => {
     if (!productSearch.trim()) return marketplaceProducts;
@@ -2083,7 +2101,7 @@ function BannersPage() {
                       <span>Select Target Marketplace Category & Subcategory</span>
                     </span>
                     <Badge variant="outline" className="text-[10px] bg-background">
-                      {PRODUCT_CATEGORIES.length} Categories
+                      {categories.length} Categories
                     </Badge>
                   </div>
 
@@ -2095,24 +2113,32 @@ function BannersPage() {
                         onValueChange={(val) => {
                           setSelectedCategory(val);
                           setActionValue(val);
-                          const subs = getSubcategoriesForCategory(val);
-                          if (subs.length > 0) {
-                            setSelectedSubCategory(subs[0].id);
+                          const matching = subcategories.filter((s: any) => s.categoryId === val);
+                          if (matching.length > 0) {
+                            setSelectedSubCategory(matching[0].id);
+                          } else {
+                            const staticSubs = getSubcategoriesForCategory(val);
+                            if (staticSubs.length > 0) {
+                              setSelectedSubCategory(staticSubs[0].id);
+                            }
                           }
                         }}
                       >
                         <SelectTrigger className="h-10 text-xs rounded-xl bg-background">
                           <SelectValue placeholder="Select Category" />
                         </SelectTrigger>
-                        <SelectContent className="rounded-xl">
-                          {PRODUCT_CATEGORIES.map((c) => (
-                            <SelectItem key={c.id} value={c.id}>
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="font-semibold">{c.name}</span>
-                                <span className="text-[10px] text-muted-foreground font-mono">({c.id})</span>
-                              </div>
-                            </SelectItem>
-                          ))}
+                        <SelectContent className="rounded-xl max-h-64">
+                          {categories.map((c: any) => {
+                            const cName = getLocalizedText(c.name, c.id);
+                            return (
+                              <SelectItem key={c.id} value={c.id}>
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="font-semibold">{cName}</span>
+                                  <span className="text-[10px] text-muted-foreground font-mono">({c.id})</span>
+                                </div>
+                              </SelectItem>
+                            );
+                          })}
                         </SelectContent>
                       </Select>
                     </div>
@@ -2129,15 +2155,18 @@ function BannersPage() {
                         <SelectTrigger className="h-10 text-xs rounded-xl bg-background">
                           <SelectValue placeholder="Select Subcategory" />
                         </SelectTrigger>
-                        <SelectContent className="rounded-xl">
-                          {getSubcategoriesForCategory(selectedCategory).map((s) => (
-                            <SelectItem key={s.id} value={s.id}>
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="font-semibold">{s.name}</span>
-                                <span className="text-[10px] text-muted-foreground font-mono">({s.id})</span>
-                              </div>
-                            </SelectItem>
-                          ))}
+                        <SelectContent className="rounded-xl max-h-64">
+                          {availableBannerSubcategories.map((s: any) => {
+                            const sName = getLocalizedText(s.name, s.id);
+                            return (
+                              <SelectItem key={s.id} value={s.id}>
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="font-semibold">{sName}</span>
+                                  <span className="text-[10px] text-muted-foreground font-mono">({s.id})</span>
+                                </div>
+                              </SelectItem>
+                            );
+                          })}
                         </SelectContent>
                       </Select>
                     </div>

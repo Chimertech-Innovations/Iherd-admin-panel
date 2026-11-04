@@ -71,7 +71,13 @@ import {
   FolderTree,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useAdminProducts, useFirebaseCollection, useBestSellers } from "@/hooks/useFirebaseData";
+import {
+  useAdminProducts,
+  useFirebaseCollection,
+  useBestSellers,
+  useProductCategories,
+  useProductSubcategories,
+} from "@/hooks/useFirebaseData";
 import { getLocalizedText, formatImageUrl } from "@/lib/utils";
 import { getApiBaseUrlSync } from "@/lib/apiClient";
 
@@ -232,7 +238,8 @@ function ProductImage({
 
 function ProductsMarketplacePage() {
   const { data: products = [], isLoading, saveProduct, deleteProduct } = useAdminProducts();
-  const { data: categories = [] } = useFirebaseCollection<any>("product_marketplace/main/categories");
+  const { categories = [] } = useProductCategories();
+  const { subcategories = [] } = useProductSubcategories();
   const { toggleBestSeller } = useBestSellers();
 
   const [q, setQ] = useState("");
@@ -500,7 +507,7 @@ function ProductsMarketplacePage() {
     }
   };
 
-  // Category mapping
+  // Category and Subcategory mapping from dynamic Firebase data
   const categoryMap = useMemo(() => {
     const map = new Map<string, string>();
     categories.forEach((cat) => {
@@ -508,6 +515,27 @@ function ProductsMarketplacePage() {
     });
     return map;
   }, [categories]);
+
+  const subcategoryMap = useMemo(() => {
+    const map = new Map<string, string>();
+    subcategories.forEach((sub) => {
+      map.set(sub.id, getLocalizedText(sub.name, sub.id));
+    });
+    return map;
+  }, [subcategories]);
+
+  // Dynamic available subcategories for currently selected categoryId
+  const availableSubcategories = useMemo(() => {
+    if (!categoryId) return [];
+    const matching = subcategories.filter((s) => s.categoryId === categoryId);
+    if (matching.length > 0) return matching;
+    return getSubcategoriesForCategory(categoryId).map((s) => ({
+      id: s.id,
+      categoryId,
+      name: s.name,
+      order: 0,
+    }));
+  }, [subcategories, categoryId]);
 
   const openAddModal = () => {
     setFieldErrors({});
@@ -520,8 +548,14 @@ function ProductsMarketplacePage() {
     setNamePa("");
     setNameTa("");
 
-    setCategoryId(categories[0]?.id || "cat_breeding");
-    setSubCategoryId("subcat_breeding_detection");
+    const firstCat = categories[0]?.id || "cat_breeding";
+    setCategoryId(firstCat);
+    const matchingSubs = subcategories.filter((s) => s.categoryId === firstCat);
+    if (matchingSubs.length > 0) {
+      setSubCategoryId(matchingSubs[0].id);
+    } else {
+      setSubCategoryId("subcat_breeding_detection");
+    }
 
     setPrice("360");
     setMrp("519");
@@ -989,9 +1023,12 @@ function ProductsMarketplacePage() {
       return;
     }
 
-    const selectedCategoryObj = categories.find((c) => c.id === categoryId);
+    const selectedCategoryObj: any = categories.find((c) => c.id === categoryId);
     const categoryNameEn = selectedCategoryObj ? getLocalizedText(selectedCategoryObj.name, categoryId) : "Breeding";
-    const subCategoryNameEn = toStr(subCategoryId).replace(/^subcat_/, "").replace(/_/g, " ");
+    const selectedSubCategoryObj: any = subcategories.find((s) => s.id === subCategoryId);
+    const subCategoryNameEn = selectedSubCategoryObj
+      ? getLocalizedText(selectedSubCategoryObj.name, subCategoryId)
+      : toStr(subCategoryId).replace(/^subcat_/, "").replace(/_/g, " ");
 
     const makeMultiLang = (enVal: string, hiVal: string, knVal: string, mrVal: string, paVal: string, taVal: string, fallback = "", ex?: any) => {
       const e = toStr(enVal) || toStr(hiVal) || fallback;
@@ -1085,7 +1122,16 @@ function ProductsMarketplacePage() {
       category: makeMultiLang(categoryNameEn, selectedCategoryObj?.name?.hi || categoryNameEn, selectedCategoryObj?.name?.kn || categoryNameEn, selectedCategoryObj?.name?.mr || categoryNameEn, selectedCategoryObj?.name?.pa || categoryNameEn, selectedCategoryObj?.name?.ta || categoryNameEn, "Breeding", editingProduct?.category),
 
       // Map<String, String>? subCategory (en, hi, kn, mr, pa, ta)
-      subCategory: makeMultiLang(subCategoryNameEn, subCategoryNameEn, subCategoryNameEn, subCategoryNameEn, subCategoryNameEn, subCategoryNameEn, "breeding detection", editingProduct?.subCategory),
+      subCategory: makeMultiLang(
+        subCategoryNameEn,
+        selectedSubCategoryObj?.name?.hi || subCategoryNameEn,
+        selectedSubCategoryObj?.name?.kn || subCategoryNameEn,
+        selectedSubCategoryObj?.name?.mr || subCategoryNameEn,
+        selectedSubCategoryObj?.name?.pa || subCategoryNameEn,
+        selectedSubCategoryObj?.name?.ta || subCategoryNameEn,
+        "Detection",
+        editingProduct?.subCategory
+      ),
 
       // String sellerType
       sellerType: toStr(sellerType) || editingProduct?.sellerType || "seller",
@@ -1971,24 +2017,32 @@ function ProductsMarketplacePage() {
                       onValueChange={(newCatId) => {
                         setCategoryId(newCatId);
                         clearFieldError("categoryId");
-                        const subs = getSubcategoriesForCategory(newCatId);
-                        if (subs.length > 0) {
-                          setSubCategoryId(subs[0].id);
+                        const matching = subcategories.filter((s: any) => s.categoryId === newCatId);
+                        if (matching.length > 0) {
+                          setSubCategoryId(matching[0].id);
+                        } else {
+                          const staticSubs = getSubcategoriesForCategory(newCatId);
+                          if (staticSubs.length > 0) {
+                            setSubCategoryId(staticSubs[0].id);
+                          }
                         }
                       }}
                     >
                       <SelectTrigger id="prod-cat" className="rounded-xl text-xs h-10 bg-background">
                         <SelectValue placeholder="Select Category" />
                       </SelectTrigger>
-                      <SelectContent className="rounded-xl">
-                        {PRODUCT_CATEGORIES.map((cat) => (
-                          <SelectItem key={cat.id} value={cat.id}>
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="font-semibold">{cat.name}</span>
-                              <span className="text-[10px] text-muted-foreground font-mono">({cat.id})</span>
-                            </div>
-                          </SelectItem>
-                        ))}
+                      <SelectContent className="rounded-xl max-h-64">
+                        {categories.map((cat: any) => {
+                          const catName = getLocalizedText(cat.name, cat.id);
+                          return (
+                            <SelectItem key={cat.id} value={cat.id}>
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-semibold">{catName}</span>
+                                <span className="text-[10px] text-muted-foreground font-mono">({cat.id})</span>
+                              </div>
+                            </SelectItem>
+                          );
+                        })}
                       </SelectContent>
                     </Select>
                     {fieldErrors.categoryId && (
@@ -2008,15 +2062,18 @@ function ProductsMarketplacePage() {
                       <SelectTrigger id="prod-subcat" className="rounded-xl text-xs h-10 bg-background">
                         <SelectValue placeholder="Select Subcategory" />
                       </SelectTrigger>
-                      <SelectContent className="rounded-xl">
-                        {getSubcategoriesForCategory(categoryId).map((sub) => (
-                          <SelectItem key={sub.id} value={sub.id}>
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="font-semibold">{sub.name}</span>
-                              <span className="text-[10px] text-muted-foreground font-mono">({sub.id})</span>
-                            </div>
-                          </SelectItem>
-                        ))}
+                      <SelectContent className="rounded-xl max-h-64">
+                        {availableSubcategories.map((sub: any) => {
+                          const subName = getLocalizedText(sub.name, sub.id);
+                          return (
+                            <SelectItem key={sub.id} value={sub.id}>
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-semibold">{subName}</span>
+                                <span className="text-[10px] text-muted-foreground font-mono">({sub.id})</span>
+                              </div>
+                            </SelectItem>
+                          );
+                        })}
                       </SelectContent>
                     </Select>
                   </div>

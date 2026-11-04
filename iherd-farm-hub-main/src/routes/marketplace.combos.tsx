@@ -56,7 +56,12 @@ import {
   Globe,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useCombos, type ComboProduct } from "@/hooks/useFirebaseData";
+import {
+  useCombos,
+  type ComboProduct,
+  useProductCategories,
+  useProductSubcategories,
+} from "@/hooks/useFirebaseData";
 import { getLocalizedText, formatImageUrl } from "@/lib/utils";
 import { getApiBaseUrlSync } from "@/lib/apiClient";
 import {
@@ -100,6 +105,8 @@ const LANG_CONFIG: { code: LangCode; label: string; flag: string }[] = [
 
 function CombosPage() {
   const { combos, isLoading, refetch, saveCombo, deleteCombo, toggleComboActive } = useCombos();
+  const { categories = [] } = useProductCategories();
+  const { subcategories = [] } = useProductSubcategories();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -121,6 +128,18 @@ function CombosPage() {
   const [id, setId] = useState("");
   const [categoryId, setCategoryId] = useState("cat_disease_management");
   const [subCategoryId, setSubCategoryId] = useState("subcat_disease_detection");
+
+  const availableSubcategories = useMemo(() => {
+    if (!categoryId) return [];
+    const matching = subcategories.filter((s) => s.categoryId === categoryId);
+    if (matching.length > 0) return matching;
+    return getSubcategoriesForCategory(categoryId).map((s) => ({
+      id: s.id,
+      categoryId,
+      name: s.name,
+      order: 0,
+    }));
+  }, [subcategories, categoryId]);
   const [price, setPrice] = useState("725");
   const [mrp, setMrp] = useState("1400");
   const [gst, setGst] = useState("5");
@@ -1324,24 +1343,32 @@ function CombosPage() {
                       value={categoryId}
                       onValueChange={(newCatId) => {
                         setCategoryId(newCatId);
-                        const subs = getSubcategoriesForCategory(newCatId);
-                        if (subs.length > 0) {
-                          setSubCategoryId(subs[0].id);
+                        const matching = subcategories.filter((s: any) => s.categoryId === newCatId);
+                        if (matching.length > 0) {
+                          setSubCategoryId(matching[0].id);
+                        } else {
+                          const staticSubs = getSubcategoriesForCategory(newCatId);
+                          if (staticSubs.length > 0) {
+                            setSubCategoryId(staticSubs[0].id);
+                          }
                         }
                       }}
                     >
                       <SelectTrigger className="rounded-xl text-xs h-9 bg-background">
                         <SelectValue placeholder="Select Category" />
                       </SelectTrigger>
-                      <SelectContent className="rounded-xl">
-                        {PRODUCT_CATEGORIES.map((cat) => (
-                          <SelectItem key={cat.id} value={cat.id}>
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="font-semibold">{cat.name}</span>
-                              <span className="text-[10px] text-muted-foreground font-mono">({cat.id})</span>
-                            </div>
-                          </SelectItem>
-                        ))}
+                      <SelectContent className="rounded-xl max-h-64">
+                        {categories.map((cat: any) => {
+                          const catName = getLocalizedText(cat.name, cat.id);
+                          return (
+                            <SelectItem key={cat.id} value={cat.id}>
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-semibold">{catName}</span>
+                                <span className="text-[10px] text-muted-foreground font-mono">({cat.id})</span>
+                              </div>
+                            </SelectItem>
+                          );
+                        })}
                       </SelectContent>
                     </Select>
                   </div>
@@ -1355,15 +1382,18 @@ function CombosPage() {
                       <SelectTrigger className="rounded-xl text-xs h-9 bg-background">
                         <SelectValue placeholder="Select Subcategory" />
                       </SelectTrigger>
-                      <SelectContent className="rounded-xl">
-                        {getSubcategoriesForCategory(categoryId).map((sub) => (
-                          <SelectItem key={sub.id} value={sub.id}>
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="font-semibold">{sub.name}</span>
-                              <span className="text-[10px] text-muted-foreground font-mono">({sub.id})</span>
-                            </div>
-                          </SelectItem>
-                        ))}
+                      <SelectContent className="rounded-xl max-h-64">
+                        {availableSubcategories.map((sub: any) => {
+                          const subName = getLocalizedText(sub.name, sub.id);
+                          return (
+                            <SelectItem key={sub.id} value={sub.id}>
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-semibold">{subName}</span>
+                                <span className="text-[10px] text-muted-foreground font-mono">({sub.id})</span>
+                              </div>
+                            </SelectItem>
+                          );
+                        })}
                       </SelectContent>
                     </Select>
                   </div>
