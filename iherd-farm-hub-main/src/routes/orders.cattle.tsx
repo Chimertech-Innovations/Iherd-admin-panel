@@ -2,6 +2,9 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { DataPage } from "@/components/admin/DataPage";
 import { useQuery } from "@tanstack/react-query";
+import { collection, getDocs } from "firebase/firestore";
+import { db } from "@/lib/firebase";
+import { getApiBaseUrlSync } from "@/lib/apiClient";
 import { getLocalizedText } from "@/lib/utils";
 import { StatusBadge } from "@/components/admin/StatusBadge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -24,6 +27,7 @@ import {
   FileCheck,
   ShieldCheck,
   Image as ImageIcon,
+  Coins,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -32,20 +36,78 @@ export const Route = createFileRoute("/orders/cattle")({
   component: CattleOrdersPage,
 });
 
-const API_BASE =
-  (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ||
-  "https://iherdadminpanel.onrender.com";
-
 async function fetchCattleOrders() {
+  const ordersMap = new Map<string, any>();
+
+  // 1. Backend REST API (with ?fresh=true to bypass stale cache)
   try {
-    const res = await fetch(`${API_BASE}/api/admin/cattle-orders`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    return data.orders || [];
+    const API_BASE = getApiBaseUrlSync();
+    const res = await fetch(`${API_BASE}/api/admin/cattle-orders?fresh=true`);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data.orders)) {
+        data.orders.forEach((o: any) => {
+          const key = o.orderId || o.cattleOrderId || o.id;
+          ordersMap.set(key, o);
+        });
+      }
+    }
   } catch (err) {
-    console.warn("Error fetching cattle orders from backend:", err);
-    return [];
+    console.warn("Backend cattle orders error, trying client SDK:", err);
   }
+
+  // 2. Direct Firestore SDK fallback (CattleOrders, cattle_orders, received_orders)
+  try {
+    const [cSnap, legacySnap, rSnap] = await Promise.all([
+      getDocs(collection(db, "CattleOrders")).catch(() => null),
+      getDocs(collection(db, "cattle_orders")).catch(() => null),
+      getDocs(collection(db, "received_orders")).catch(() => null),
+    ]);
+
+    const processDoc = (docSnap: any) => {
+      if (!docSnap) return;
+      docSnap.docs?.forEach((d: any) => {
+        const o = { id: d.id, ...d.data() };
+        const key = o.orderId || o.cattleOrderId || o.id;
+        if (!ordersMap.has(key)) {
+          const totalAmount = Number(o.price || o.totalAmount || o.amount || 0);
+          const tokenAmount = Number(o.tokenAmount || o.advanceAmount || 0);
+          const balanceAmount = Number(o.balanceAmount || (totalAmount > tokenAmount ? totalAmount - tokenAmount : 0));
+          ordersMap.set(key, {
+            ...o,
+            id: key,
+            orderId: key,
+            cattleName: o.cattleName || o.name || o.title || o.animal || "Livestock Cattle",
+            breed: o.breed || o.cattleBreed || "Amritmahal",
+            species: o.species || o.animalType || "Cow",
+            tagNo: o.tagNo || o.tagNumber || o.earTagNo || o.rfid || "—",
+            buyerName: o.buyerName || o.userName || o.shippingAddress?.name || "Buyer",
+            buyerPhone: o.buyerPhone || o.phone || o.phoneNumber || o.shippingAddress?.phone || "—",
+            buyerLocation: o.buyerLocation || (o.shippingAddress ? [o.shippingAddress.line1, o.shippingAddress.district, o.shippingAddress.state].filter(Boolean).join(", ") : "—"),
+            sellerName: o.sellerName || o.owner || "Verified Seller",
+            price: totalAmount,
+            totalAmount,
+            amount: totalAmount,
+            tokenAmount,
+            balanceAmount,
+            paymentMethod: o.paymentMethod || o.paymentMode || "Escrow / Online",
+            status: o.status || "Ordered",
+            createdAt: o.createdAt || o.date || null,
+          });
+        }
+      });
+    };
+
+    processDoc(cSnap);
+    processDoc(legacySnap);
+    processDoc(rSnap);
+  } catch (clientErr) {
+    console.warn("Client Firestore cattle orders fallback warning:", clientErr);
+  }
+
+  const list = Array.from(ordersMap.values());
+  list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  return list;
 }
 
 function formatDateTime(val: any) {
@@ -227,12 +289,13 @@ function CattleOrdersPage() {
             label: "Livestock Cattle",
             render: (r) => {
               const displayImg = formatImageUrl(r.image || r.cattleImage || r.imageUrl || r.thumbnail || r.faceViewImage || r.leftViewImage);
+              const tag = r.tagNo || r.tagNumber || r.rfid;
               return (
-                <div className="flex items-center gap-2.5 min-w-[180px]">
+                <div className="flex items-center gap-2.5 min-w-[190px]">
                   <img
                     src={displayImg}
                     alt={r.cattleName || "Cattle"}
-                    className="h-9 w-9 rounded-xl object-cover ring-1 ring-border cursor-pointer shrink-0 hover:scale-105 transition-all"
+                    className="h-10 w-10 rounded-xl object-cover ring-1 ring-border cursor-pointer shrink-0 hover:scale-105 transition-all"
                     onError={(e) => {
                       if (e.currentTarget.src !== DEFAULT_CATTLE_IMAGE) {
                         e.currentTarget.src = DEFAULT_CATTLE_IMAGE;
@@ -243,6 +306,11 @@ function CattleOrdersPage() {
                   <div className="min-w-0">
                     <div className="font-bold text-xs text-foreground truncate">{r.cattleName || "Livestock"}</div>
                     <div className="text-[11px] text-muted-foreground truncate">{r.breed || "Amritmahal"} • {r.species || "Cow"}</div>
+                    {tag && tag !== "—" && (
+                      <span className="inline-block mt-0.5 text-[10px] font-mono font-semibold bg-muted px-1.5 py-0.2 rounded border text-muted-foreground">
+                        Tag: {tag}
+                      </span>
+                    )}
                   </div>
                 </div>
               );
@@ -253,8 +321,21 @@ function CattleOrdersPage() {
             label: "Order Price",
             render: (r) => {
               const amt = Number(r.totalAmount || r.price || r.amount || 0);
+              const tok = Number(r.tokenAmount || r.advanceAmount || 0);
+              const due = Number(r.balanceAmount || (amt > tok && tok > 0 ? amt - tok : 0));
               return (
-                <div className="font-bold text-sm text-primary">₹{amt.toLocaleString()}</div>
+                <div className="space-y-0.5">
+                  <div className="font-bold text-sm text-primary">₹{amt.toLocaleString()}</div>
+                  {tok > 0 && (
+                    <div className="flex items-center gap-1 text-[11px] font-semibold text-emerald-600">
+                      <Coins className="h-3 w-3" />
+                      <span>Token: ₹{tok.toLocaleString()}</span>
+                    </div>
+                  )}
+                  {due > 0 && tok > 0 && (
+                    <div className="text-[10px] text-muted-foreground">Due: ₹{due.toLocaleString()}</div>
+                  )}
+                </div>
               );
             },
           },
@@ -377,13 +458,21 @@ function CattleOrdersPage() {
                       <Beef className="h-8 w-8" />
                     </div>
                   )}
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs min-w-0 flex-1">
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs min-w-0 flex-1">
                     <div><span className="text-muted-foreground">Name:</span> <strong className="text-foreground">{selectedOrder.cattleName || "—"}</strong></div>
                     <div><span className="text-muted-foreground">Breed:</span> <strong className="text-foreground">{selectedOrder.breed || "—"}</strong></div>
                     <div><span className="text-muted-foreground">Species:</span> <strong className="text-foreground">{selectedOrder.species || "Cow"}</strong></div>
+                    <div><span className="text-muted-foreground">Tag / RFID:</span> <strong className="font-mono text-foreground">{selectedOrder.tagNo || selectedOrder.tagNumber || selectedOrder.rfid || "—"}</strong></div>
                     <div><span className="text-muted-foreground">Price:</span> <strong className="text-primary font-bold">₹{Number(selectedOrder.totalAmount || selectedOrder.price || 0).toLocaleString()}</strong></div>
+                    {selectedOrder.tokenAmount > 0 && (
+                      <div><span className="text-muted-foreground">Token Paid:</span> <strong className="text-emerald-600 font-bold">₹{Number(selectedOrder.tokenAmount).toLocaleString()}</strong></div>
+                    )}
+                    {selectedOrder.balanceAmount > 0 && (
+                      <div><span className="text-muted-foreground">Balance Due:</span> <strong className="text-amber-600 font-bold">₹{Number(selectedOrder.balanceAmount).toLocaleString()}</strong></div>
+                    )}
                     {selectedOrder.age && <div><span className="text-muted-foreground">Age:</span> <strong className="text-foreground">{selectedOrder.age}</strong></div>}
                     {selectedOrder.milkYield && <div><span className="text-muted-foreground">Milk Yield:</span> <strong className="text-foreground">{selectedOrder.milkYield} L/day</strong></div>}
+                    <div><span className="text-muted-foreground">Payment Mode:</span> <strong className="text-foreground">{selectedOrder.paymentMethod || "Escrow / Online"}</strong></div>
                   </div>
                 </div>
               </div>
@@ -400,14 +489,32 @@ function CattleOrdersPage() {
                 <div className="p-4 rounded-2xl bg-muted/20 border space-y-1">
                   <div className="font-bold text-muted-foreground uppercase text-[10px] tracking-wider">Seller Information</div>
                   <div className="font-semibold text-foreground text-sm">{selectedOrder.sellerName}</div>
+                  {selectedOrder.sellerPhone && selectedOrder.sellerPhone !== "—" && (
+                    <div className="text-muted-foreground">Phone: {selectedOrder.sellerPhone}</div>
+                  )}
+                  {selectedOrder.farmName && selectedOrder.farmName !== "—" && (
+                    <div className="text-muted-foreground">Farm: {selectedOrder.farmName}</div>
+                  )}
                   <div className="text-muted-foreground">Verified Seller / Farm Owner</div>
                 </div>
               </div>
 
               {/* Total Billing */}
-              <div className="p-4 rounded-2xl bg-primary/5 border border-primary/20 flex items-center justify-between font-black text-base text-foreground">
-                <span>Total Transaction Amount</span>
-                <span className="text-primary text-lg">₹{Number(selectedOrder.totalAmount || selectedOrder.price || 0).toLocaleString()}</span>
+              <div className="p-4 rounded-2xl bg-primary/5 border border-primary/20 space-y-2">
+                <div className="flex items-center justify-between font-black text-base text-foreground">
+                  <span>Total Transaction Amount</span>
+                  <span className="text-primary text-lg">₹{Number(selectedOrder.totalAmount || selectedOrder.price || 0).toLocaleString()}</span>
+                </div>
+                {selectedOrder.tokenAmount > 0 && (
+                  <div className="flex items-center justify-between text-xs pt-1 border-t border-primary/10">
+                    <span className="text-emerald-700 font-semibold flex items-center gap-1">
+                      <Coins className="h-3.5 w-3.5" /> Token Deposit Paid: ₹{Number(selectedOrder.tokenAmount).toLocaleString()}
+                    </span>
+                    <span className="text-amber-700 font-semibold">
+                      Remaining Balance: ₹{Number(selectedOrder.balanceAmount || ((selectedOrder.totalAmount || 0) - selectedOrder.tokenAmount)).toLocaleString()}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           )}

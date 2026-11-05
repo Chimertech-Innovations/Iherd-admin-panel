@@ -882,15 +882,29 @@ app.get("/api/admin/user-full-data/:userId", async (req, res) => {
       console.warn("Error fetching product orders:", e.message);
     }
 
-    // 8. Fetch Token Advances (Filter out system settings documents)
+    // 8. Fetch Token Advances & Cattle Reservation Deposits (Multi-collection scan)
     let tokenAdvances = [];
     try {
-      const [tSnap, userSubTA] = await Promise.all([
+      const [tSnap1, tSnap2, tSnap3, userSubTA1, userSubTA2, userSubTA3, paymentsSnap] = await Promise.all([
         db.collection("token-advance").get().catch(() => ({ docs: [] })),
+        db.collection("token_advance").get().catch(() => ({ docs: [] })),
+        db.collection("token_payments").get().catch(() => ({ docs: [] })),
         db.collection("users").doc(resolvedDocId).collection("token_advance").get().catch(() => ({ docs: [] })),
+        db.collection("users").doc(resolvedDocId).collection("token-advance").get().catch(() => ({ docs: [] })),
+        db.collection("users").doc(resolvedDocId).collection("token_payments").get().catch(() => ({ docs: [] })),
+        db.collection("payments").get().catch(() => ({ docs: [] })),
       ]);
 
-      const allTADocs = [...tSnap.docs, ...userSubTA.docs];
+      const seenTokenKeys = new Set();
+      const allTADocs = [
+        ...tSnap1.docs,
+        ...tSnap2.docs,
+        ...tSnap3.docs,
+        ...userSubTA1.docs,
+        ...userSubTA2.docs,
+        ...userSubTA3.docs,
+      ];
+
       allTADocs.forEach((doc) => {
         if (doc.id === "token-advance" && !doc.data().userId && !doc.data().farmerId) {
           // Skip global settings doc
@@ -898,30 +912,108 @@ app.get("/api/admin/user-full-data/:userId", async (req, res) => {
         }
 
         const t = { id: doc.id, ...doc.data() };
-        const u = (t.userId || t.farmerId || t.uid || "").toLowerCase();
+        const u = (t.userId || t.farmerId || t.uid || t.buyerId || "").toLowerCase();
         let match = u === userId.toLowerCase() || u === resolvedDocId.toLowerCase();
         if (!match && resolvedPhone) {
-          const tPhone = (t.phone || t.phoneNumber || "").replace(/\D/g, "").slice(-10);
+          const tPhone = (t.phone || t.phoneNumber || t.buyerPhone || "").replace(/\D/g, "").slice(-10);
           if (tPhone && tPhone === resolvedPhone) match = true;
         }
 
         if (match) {
-          const invKey = (t.orderId || t.id || "").toLowerCase();
+          const orderKey = t.orderId || t.cattleOrderId || t.id;
+          if (seenTokenKeys.has(orderKey)) return;
+          seenTokenKeys.add(orderKey);
+
+          const invKey = (orderKey || "").toLowerCase();
           const invoiceUrl = invoiceMap.get(invKey) || t.invoiceUrl || null;
 
           tokenAdvances.push({
             id: t.id,
-            orderId: t.orderId || t.id,
-            cattleType: t.cattleType || t.animal || "Livestock",
-            amount: Number(t.amount || t.advanceAmount || t.tokenAmount || 0),
-            status: t.status || "Approved",
-            invoiceNumber: t.invoiceNumber || t.invoiceNo || (invoiceUrl ? `INV-${t.id.slice(-8)}` : "—"),
+            orderId: orderKey,
+            cattleType: t.cattleType || t.cattleName || t.animal || t.breed || "Livestock Cattle",
+            amount: Number(t.amount || t.advanceAmount || t.tokenAmount || t.price || 0),
+            balanceAmount: Number(t.balanceAmount || t.remainingAmount || 0),
+            totalAmount: Number(t.totalAmount || t.price || 0),
+            paymentMethod: t.paymentMethod || t.paymentMode || t.method || "UPI / Token Payment",
+            transactionId: t.transactionId || t.paymentId || t.txnId || "—",
+            status: t.status || (t.paid ? "Paid" : "Approved"),
+            invoiceNumber: t.invoiceNumber || t.invoiceNo || (invoiceUrl ? `INV-${orderKey.slice(-8)}` : "—"),
             invoiceUrl,
-            createdAt: t.createdAt || t.date || null,
+            createdAt: t.createdAt || t.date || t.timestamp || null,
             updatedAt: t.updatedAt || null,
           });
         }
       });
+
+      // Also check payments collection for token payments belonging to this user
+      paymentsSnap.docs.forEach((doc) => {
+        const p = { id: doc.id, ...doc.data() };
+        const pType = String(p.type || p.category || "").toLowerCase();
+        const isToken = pType.includes("token") || pType.includes("advance") || p.isTokenPayment === true;
+        if (!isToken) return;
+
+        const u = (p.userId || p.uid || p.buyerId || "").toLowerCase();
+        let match = u === userId.toLowerCase() || u === resolvedDocId.toLowerCase();
+        if (!match && resolvedPhone) {
+          const pPhone = (p.phone || p.phoneNumber || "").replace(/\D/g, "").slice(-10);
+          if (pPhone && pPhone === resolvedPhone) match = true;
+        }
+
+        if (match) {
+          const orderKey = p.orderId || p.id;
+          if (seenTokenKeys.has(orderKey)) return;
+          seenTokenKeys.add(orderKey);
+
+          const invKey = (orderKey || "").toLowerCase();
+          const invoiceUrl = invoiceMap.get(invKey) || p.invoiceUrl || null;
+
+          tokenAdvances.push({
+            id: p.id,
+            orderId: orderKey,
+            cattleType: p.cattleType || p.animal || p.title || "Livestock Cattle",
+            amount: Number(p.amount || p.tokenAmount || p.advanceAmount || 0),
+            balanceAmount: Number(p.balanceAmount || 0),
+            totalAmount: Number(p.totalAmount || p.amount || 0),
+            paymentMethod: p.method || p.paymentMethod || "Direct Payment",
+            transactionId: p.transactionId || p.id || "—",
+            status: p.status || "Paid",
+            invoiceNumber: p.invoiceNumber || (invoiceUrl ? `INV-${orderKey.slice(-8)}` : "—"),
+            invoiceUrl,
+            createdAt: p.createdAt || p.date || null,
+            updatedAt: p.updatedAt || null,
+          });
+        }
+      });
+
+      // Also check cattleOrders if any contain advance/token amounts
+      if (Array.isArray(cattleOrders)) {
+        cattleOrders.forEach((co) => {
+          const tokAmt = Number(co.tokenAmount || co.advanceAmount || 0);
+          if (tokAmt > 0) {
+            const orderKey = `TA-${co.orderId || co.id}`;
+            if (!seenTokenKeys.has(orderKey)) {
+              seenTokenKeys.add(orderKey);
+              tokenAdvances.push({
+                id: orderKey,
+                orderId: co.orderId || co.id,
+                cattleType: co.cattleName || co.breed || "Livestock Cattle",
+                amount: tokAmt,
+                totalAmount: Number(co.totalAmount || co.price || 0),
+                balanceAmount: Number(co.balanceAmount || 0),
+                paymentMethod: co.paymentMethod || "Token Deposit",
+                transactionId: co.transactionId || "—",
+                status: co.status || "Paid",
+                invoiceNumber: co.invoiceNumber || "—",
+                invoiceUrl: co.invoiceUrl || null,
+                createdAt: co.createdAt || null,
+                updatedAt: co.updatedAt || null,
+              });
+            }
+          }
+        });
+      }
+
+      tokenAdvances.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
     } catch (e) {
       console.warn("Error fetching token advance:", e.message);
     }
@@ -2420,17 +2512,22 @@ app.put(["/api/admin/product-orders/:id"], async (req, res) => {
 // REST API to list all Cattle Orders (bypasses client security rules)
 app.get("/api/admin/cattle-orders", async (req, res) => {
   try {
-    const cached = getCached("admin_cattle_orders", 600000);
-    if (cached) return res.json(cached);
+    const isFresh = req.query.fresh === "true" || req.query.fresh === "1";
+    if (!isFresh) {
+      const cached = getCached("admin_cattle_orders", 15000); // 15-second cache for fast updates
+      if (cached) return res.json(cached);
+    }
 
     const db = getFirestore();
     const defaultBucketName = process.env.VITE_FIREBASE_STORAGE_BUCKET || "auth-b404a.appspot.com";
     const bucket = getStorage().bucket(defaultBucketName);
 
-    const [cSnap, rSnap, legacySnap, usersSnap, invoiceFiles] = await Promise.all([
+    const [cSnap, rSnap, legacySnap, genericOrdersSnap, groupCattleOrdersSnap, usersSnap, invoiceFiles] = await Promise.all([
       db.collection("CattleOrders").get().catch(() => ({ docs: [] })),
       db.collection("received_orders").get().catch(() => ({ docs: [] })),
       db.collection("cattle_orders").get().catch(() => ({ docs: [] })),
+      db.collection("orders").get().catch(() => ({ docs: [] })),
+      db.collectionGroup("cattle_orders").get().catch(() => ({ docs: [] })),
       db.collection("users").get().catch(() => ({ docs: [] })),
       listFilesUnderPrefix(bucket, "invoices/").catch(() => []),
     ]);
@@ -2458,11 +2555,11 @@ app.get("/api/admin/cattle-orders", async (req, res) => {
     const ordersMap = new Map();
     const addDoc = (doc) => {
       const o = { id: doc.id, ...doc.data() };
-      const orderKey = o.orderId || o.id;
+      const orderKey = o.orderId || o.cattleOrderId || o.id;
       if (ordersMap.has(orderKey)) return;
 
-      const buyerUid = (o.userId || o.buyerId || o.farmerId || "").toLowerCase();
-      const sellerUid = (o.sellerId || o.ownerUid || "").toLowerCase();
+      const buyerUid = (o.userId || o.buyerId || o.farmerId || o.uid || "").toLowerCase();
+      const sellerUid = (o.sellerId || o.ownerUid || o.postedBy || "").toLowerCase();
 
       const buyerUser = usersMap.get(buyerUid) || {};
       const sellerUser = usersMap.get(sellerUid) || {};
@@ -2471,6 +2568,7 @@ app.get("/api/admin/cattle-orders", async (req, res) => {
         o.shippingAddress?.name ||
         o.buyerName ||
         o.userName ||
+        o.customerName ||
         buyerUser.name ||
         buyerUser.displayName ||
         (buyerUid ? `Buyer (${buyerUid.slice(0, 8)}...)` : "Buyer");
@@ -2478,6 +2576,7 @@ app.get("/api/admin/cattle-orders", async (req, res) => {
       const buyerPhone =
         o.shippingAddress?.phone ||
         o.phoneNumber ||
+        o.buyerPhone ||
         o.phone ||
         buyerUser.phoneNumber ||
         buyerUser.phone ||
@@ -2485,20 +2584,35 @@ app.get("/api/admin/cattle-orders", async (req, res) => {
 
       const buyerLocation =
         o.buyerLocation ||
-        (o.shippingAddress ? [o.shippingAddress.line1, o.shippingAddress.line2, o.shippingAddress.district, o.shippingAddress.state, o.shippingAddress.pincode].filter(Boolean).join(", ") : "—");
+        o.deliveryAddress ||
+        (o.shippingAddress ? [o.shippingAddress.line1, o.shippingAddress.line2, o.shippingAddress.village, o.shippingAddress.taluk, o.shippingAddress.district, o.shippingAddress.state, o.shippingAddress.pincode].filter(Boolean).join(", ") : "—");
 
       const sellerName =
         o.sellerName ||
+        o.ownerName ||
         o.owner ||
+        o.farmerName ||
         sellerUser.name ||
         sellerUser.displayName ||
         "Verified Farmer / Seller";
 
+      const sellerPhone =
+        o.sellerPhone ||
+        o.farmerPhone ||
+        sellerUser.phoneNumber ||
+        sellerUser.phone ||
+        "—";
+
       const totalAmount = Number(o.price || o.totalAmount || o.amount || 0);
+      const tokenAmount = Number(o.tokenAmount || o.advanceAmount || o.tokenPayment || 0);
+      const balanceAmount = Number(o.balanceAmount || o.remainingAmount || (totalAmount > tokenAmount ? totalAmount - tokenAmount : 0));
 
       const invKey = (orderKey || "").toLowerCase();
       const invNoKey = (o.invoiceNo || o.invoiceNumber || "").toLowerCase();
       const invoiceUrl = invoiceMap.get(invKey) || invoiceMap.get(invNoKey) || o.invoiceUrl || null;
+
+      const rawImg = o.image || o.cattleImage || o.imageUrl || o.thumbnail || o.photo || o.faceViewImage || o.leftViewImage || o.rightViewImage || (Array.isArray(o.images) ? o.images[0] : null) || null;
+      const formattedImg = rawImg ? normalizeDirectImageUrl(rawImg) : null;
 
       ordersMap.set(orderKey, {
         ...o,
@@ -2506,21 +2620,28 @@ app.get("/api/admin/cattle-orders", async (req, res) => {
         orderId: orderKey,
         userId: o.userId || buyerUser.id || null,
         sellerId: o.sellerId || sellerUser.id || null,
-        cattleName: o.cattleName || o.name || "Livestock Cattle",
-        breed: o.breed || "Amritmahal",
-        species: o.species || "Cow",
-        image: o.image || o.faceViewImage || o.leftViewImage || o.rightViewImage || null,
+        cattleName: o.cattleName || o.name || o.title || o.animal || "Livestock Cattle",
+        breed: o.breed || o.cattleBreed || "Amritmahal",
+        species: o.species || o.animalType || o.category || "Cow",
+        tagNo: o.tagNo || o.tagNumber || o.earTagNo || o.rfid || o.cattleTag || "—",
+        image: formattedImg,
         buyerName,
         buyerPhone,
         buyerLocation,
         sellerName,
+        sellerPhone,
+        farmName: o.farmName || "—",
         price: totalAmount,
         totalAmount,
         amount: totalAmount,
+        tokenAmount,
+        balanceAmount,
+        paymentMethod: o.paymentMethod || o.paymentMode || o.method || "Escrow / Online",
+        paymentStatus: o.paymentStatus || o.paymentState || o.status || "Ordered",
         invoiceNumber: o.invoiceNo || o.invoiceNumber || (invoiceUrl ? `INV-${orderKey.slice(-8)}` : "—"),
         invoiceUrl,
         status: o.status || "Ordered",
-        createdAt: o.createdAt || o.date || null,
+        createdAt: o.createdAt || o.date || o.timestamp || null,
         updatedAt: o.updatedAt || null,
       });
     };
@@ -2528,6 +2649,16 @@ app.get("/api/admin/cattle-orders", async (req, res) => {
     cSnap.docs?.forEach(addDoc);
     rSnap.docs?.forEach(addDoc);
     legacySnap.docs?.forEach(addDoc);
+    groupCattleOrdersSnap.docs?.forEach(addDoc);
+
+    // Also include orders from generic 'orders' collection if they are cattle orders
+    genericOrdersSnap.docs?.forEach((doc) => {
+      const data = doc.data() || {};
+      const type = String(data.orderType || data.type || data.category || "").toLowerCase();
+      if (type.includes("cattle") || type.includes("livestock") || data.cattleId || data.animal) {
+        addDoc(doc);
+      }
+    });
 
     const sortedOrders = Array.from(ordersMap.values()).sort(
       (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()

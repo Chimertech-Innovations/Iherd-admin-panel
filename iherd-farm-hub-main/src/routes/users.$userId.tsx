@@ -560,14 +560,30 @@ function UserDetail() {
     });
   }, [allUserCattle, farmsList]);
 
-  // Selected farm filter in Cattle tab
+  // Selected farm & category filter in Cattle tab
   const [selectedFarmFilter, setSelectedFarmFilter] = useState<string>("all");
+  const [cattleCategoryFilter, setCattleCategoryFilter] = useState<"all" | "farm" | "marketplace">("all");
+
+  const farmHerdCattle = useMemo(() => {
+    return allUserCattle.filter((c: any) => c.source !== "cattle-marketplace" && !c.isMarketplace);
+  }, [allUserCattle]);
+
+  const marketplaceListedCattle = useMemo(() => {
+    return allUserCattle.filter((c: any) => c.source === "cattle-marketplace" || c.isMarketplace || Number(c.sellingPrice || c.price || 0) > 0);
+  }, [allUserCattle]);
 
   const filteredCattleList = useMemo(() => {
-    if (selectedFarmFilter === "all") return allUserCattle;
-    if (selectedFarmFilter === "unassigned") return unassignedCattle;
-    return allUserCattle.filter((c: any) => String(c.farmId || "") === selectedFarmFilter);
-  }, [allUserCattle, unassignedCattle, selectedFarmFilter]);
+    let base = allUserCattle;
+    if (cattleCategoryFilter === "farm") {
+      base = farmHerdCattle;
+    } else if (cattleCategoryFilter === "marketplace") {
+      base = marketplaceListedCattle;
+    }
+
+    if (selectedFarmFilter === "all") return base;
+    if (selectedFarmFilter === "unassigned") return base.filter((c: any) => !c.farmId);
+    return base.filter((c: any) => String(c.farmId || "") === selectedFarmFilter);
+  }, [allUserCattle, farmHerdCattle, marketplaceListedCattle, cattleCategoryFilter, selectedFarmFilter]);
 
   // Consolidate ONLY Valid Images for This User
   const allMediaImages = useMemo(() => {
@@ -1536,8 +1552,38 @@ function UserDetail() {
                   <Beef className="h-5 w-5 text-primary" /> Registered Cattle Records ({filteredCattleList.length}{filteredCattleList.length !== allUserCattle.length ? ` of ${allUserCattle.length}` : ""})
                 </h3>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  All cattle registered by this user with multi-angle photo proofs, RFID tags, and assigned farm facility
+                  Categorized into <strong>Farm Herd Data</strong> (Dairy & Farm facilities) and <strong>Marketplace Listings</strong> (Commercial Livestock for sale)
                 </p>
+              </div>
+
+              {/* Topic / Category Switcher Pills */}
+              <div className="flex items-center gap-1.5 p-1 rounded-2xl bg-muted/50 border">
+                <Button
+                  size="sm"
+                  variant={cattleCategoryFilter === "all" ? "default" : "ghost"}
+                  onClick={() => setCattleCategoryFilter("all")}
+                  className="rounded-xl text-xs h-8 px-3 font-semibold"
+                >
+                  All ({allUserCattle.length})
+                </Button>
+                <Button
+                  size="sm"
+                  variant={cattleCategoryFilter === "farm" ? "default" : "ghost"}
+                  onClick={() => setCattleCategoryFilter("farm")}
+                  className="rounded-xl text-xs h-8 px-3 font-semibold gap-1"
+                >
+                  <Building className="h-3.5 w-3.5 text-emerald-600" />
+                  Farm Herd ({farmHerdCattle.length})
+                </Button>
+                <Button
+                  size="sm"
+                  variant={cattleCategoryFilter === "marketplace" ? "default" : "ghost"}
+                  onClick={() => setCattleCategoryFilter("marketplace")}
+                  className="rounded-xl text-xs h-8 px-3 font-semibold gap-1"
+                >
+                  <Store className="h-3.5 w-3.5 text-amber-600" />
+                  Marketplace Listings ({marketplaceListedCattle.length})
+                </Button>
               </div>
             </div>
 
@@ -1591,6 +1637,7 @@ function UserDetail() {
                   const primaryImg = cattle.faceView || cattle.leftView || cattle.rightView || (Array.isArray(cattle.images) && cattle.images[0]) || cattle.imageUrl;
                   const assignedFarm = farmsList.find((f: any) => String(f.id || f.farmId) === String(cattle.farmId));
                   const assignedFarmName = assignedFarm ? getLocalizedText(assignedFarm.name || assignedFarm.farmName) : cattle.farmId;
+                  const isMarketplace = cattle.source === "cattle-marketplace" || cattle.isMarketplace || Number(cattle.sellingPrice || cattle.price || 0) > 0;
 
                   const anglePhotos = [
                     { name: "Face", url: cattle.faceView },
@@ -1618,6 +1665,17 @@ function UserDetail() {
                             className="w-full h-full object-cover cursor-pointer group-hover:scale-105 transition-transform duration-300"
                             onClick={() => setSelectedPreviewImage({ url: primaryImg, title: `${title} - Front View` })}
                           />
+                          <div className="absolute top-3 left-3">
+                            {isMarketplace ? (
+                              <span className="bg-amber-600/90 text-white text-xs font-bold px-3 py-1 rounded-full backdrop-blur-md shadow flex items-center gap-1">
+                                <Store className="h-3 w-3" /> Marketplace Listing
+                              </span>
+                            ) : (
+                              <span className="bg-emerald-600/90 text-white text-xs font-bold px-3 py-1 rounded-full backdrop-blur-md shadow flex items-center gap-1">
+                                <Building className="h-3 w-3" /> Farm Herd Data
+                              </span>
+                            )}
+                          </div>
                           <div className="absolute top-3 right-3 flex items-center gap-2">
                             {cattle.rfid && (
                               <span className="bg-black/75 text-white text-xs font-mono font-bold px-3 py-1 rounded-full backdrop-blur-md border border-white/20 shadow-sm">
@@ -1633,7 +1691,14 @@ function UserDetail() {
                         <div className="space-y-3">
                           <div className="flex items-start justify-between gap-2">
                             <div>
-                              <h4 className="font-bold text-xl text-foreground capitalize">{title}</h4>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <h4 className="font-bold text-xl text-foreground capitalize">{title}</h4>
+                                {isMarketplace && (cattle.price || cattle.sellingPrice) && (
+                                  <span className="font-bold text-sm text-emerald-600 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-lg">
+                                    ₹{Number(cattle.price || cattle.sellingPrice).toLocaleString()}
+                                  </span>
+                                )}
+                              </div>
                               <p className="text-xs text-muted-foreground font-mono">ID: {getLocalizedText(cattle.cattleId || cattle.id)}</p>
                             </div>
                             <div className="flex items-center gap-1.5 flex-wrap justify-end">
@@ -2506,39 +2571,61 @@ function UserDetail() {
             {/* 3. Token Advance Records */}
             <Card className="p-6 rounded-3xl border shadow-sm space-y-4">
               <div className="flex items-center justify-between flex-wrap gap-2">
-                <h3 className="text-base font-bold flex items-center gap-2 text-foreground">
-                  <Coins className="h-5 w-5 text-primary" /> Token Advance Records ({allTokenAdvances.length})
-                </h3>
-                <span className="text-xs text-muted-foreground">Advance payments for cattle reservations</span>
+                <div>
+                  <h3 className="text-base font-bold flex items-center gap-2 text-foreground">
+                    <Coins className="h-5 w-5 text-emerald-600" /> Token Payments & Advance Records ({allTokenAdvances.length})
+                  </h3>
+                  <span className="text-xs text-muted-foreground">Token reservation deposits and advance payments for livestock purchases</span>
+                </div>
+                {allTokenAdvances.length > 0 && (
+                  <div className="text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-1 rounded-xl">
+                    Total Token Paid: ₹{allTokenAdvances.reduce((sum: number, t: any) => sum + Number(t.amount || 0), 0).toLocaleString()}
+                  </div>
+                )}
               </div>
 
               {allTokenAdvances.length > 0 ? (
                 <div className="space-y-3">
                   {allTokenAdvances.map((tok: any, idx: number) => (
-                    <div key={idx} className="p-4 rounded-2xl border bg-muted/15 flex flex-wrap items-center justify-between gap-4">
-                      <div className="space-y-1">
+                    <div key={idx} className="p-4 rounded-2xl border bg-muted/15 flex flex-wrap items-center justify-between gap-4 hover:border-primary/40 transition-all">
+                      <div className="space-y-1 min-w-[200px]">
                         <div className="flex items-center gap-2">
                           <span className="font-mono text-xs font-bold text-foreground bg-primary/10 text-primary px-2.5 py-1 rounded-lg">
                             #{tok.orderId || tok.id}
                           </span>
-                          <span className="font-bold text-sm text-foreground">{tok.cattleType || "Livestock"} Advance</span>
+                          <span className="font-bold text-sm text-foreground">{tok.cattleType || "Livestock Cattle"} Advance</span>
                         </div>
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <Clock className="h-3.5 w-3.5" />
-                          <span>{formatDateTime(tok.createdAt)}</span>
+                        <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
+                          <div className="flex items-center gap-1">
+                            <Clock className="h-3.5 w-3.5" />
+                            <span>{formatDateTime(tok.createdAt)}</span>
+                          </div>
+                          {tok.paymentMethod && (
+                            <span className="bg-muted px-2 py-0.5 rounded border text-[11px]">
+                              Mode: {tok.paymentMethod}
+                            </span>
+                          )}
+                          {tok.transactionId && tok.transactionId !== "—" && (
+                            <span className="font-mono text-[10px] text-muted-foreground">
+                              Txn: {tok.transactionId}
+                            </span>
+                          )}
                         </div>
                       </div>
                       <div className="flex items-center gap-3">
                         <div className="text-right">
-                          <div className="font-black text-primary text-base">₹{Number(tok.amount || 0).toLocaleString()}</div>
-                          <StatusBadge status={tok.status || "Approved"} />
+                          <div className="font-black text-emerald-600 text-lg">₹{Number(tok.amount || 0).toLocaleString()}</div>
+                          {Number(tok.totalAmount || 0) > Number(tok.amount || 0) && (
+                            <div className="text-[11px] text-muted-foreground">Total: ₹{Number(tok.totalAmount).toLocaleString()}</div>
+                          )}
+                          <StatusBadge status={tok.status || "Paid"} />
                         </div>
                         {tok.invoiceUrl && (
                           <a
                             href={tok.invoiceUrl}
                             target="_blank"
                             rel="noreferrer"
-                            className="p-2 rounded-xl bg-success text-success-foreground hover:opacity-90"
+                            className="p-2 rounded-xl bg-success text-success-foreground hover:opacity-90 transition-all"
                             title="Download Invoice PDF"
                           >
                             <FileText className="h-4 w-4" />

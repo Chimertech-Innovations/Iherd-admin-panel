@@ -365,6 +365,8 @@ function ProductsMarketplacePage() {
 
   const [status, setStatus] = useState("Approved");
   const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [isUploadingThumbnail, setIsUploadingThumbnail] = useState(false);
+  const [isUploadingGallery, setIsUploadingGallery] = useState(false);
   const [productFileFormatError, setProductFileFormatError] = useState<string | null>(null);
 
   // Field Validation Errors State (Highlights empty fields in red and shows alerts)
@@ -385,6 +387,127 @@ function ProductsMarketplacePage() {
   const [quickPriceVal, setQuickPriceVal] = useState("");
   const [quickMrpVal, setQuickMrpVal] = useState("");
   const [isUpdatingPrice, setIsUpdatingPrice] = useState(false);
+
+  // Dedicated Primary Thumbnail Upload handler (≤ 20 KB Auto-Compress)
+  const handleThumbnailUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+    const val = validateImageFile(file);
+    if (!val.valid || isPdf) {
+      const errMsg = isPdf
+        ? `PDF format is not supported for product thumbnail! Please upload only image files (PNG, JPG, WebP).`
+        : (val.error || "Unsupported file format! Please upload only image files.");
+      setProductFileFormatError(errMsg);
+      toast.error(errMsg);
+      e.target.value = "";
+      return;
+    }
+    setProductFileFormatError(null);
+    setIsUploadingThumbnail(true);
+
+    try {
+      const base = getApiBaseUrlSync();
+      // Auto-compress strictly to <= 20 KB
+      const processed = await processSquareImage(file, true, 20);
+
+      const res = await fetch(`${base}/api/admin/upload-image`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          base64: processed.base64,
+          filename: processed.file.name,
+          contentType: processed.file.type || "image/webp",
+          folder: "marketplace/products",
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.url) {
+          const direct = convertToDirectImageUrl(data.url);
+          setThumbnailUrl(direct);
+          clearFieldError("images");
+          toast.success(`Thumbnail auto-compressed to ${processed.sizeKB} KB (≤ 20 KB limit) and uploaded!`);
+        }
+      } else {
+        toast.error("Thumbnail upload failed. Please verify the backend connection.");
+      }
+    } catch (err: any) {
+      toast.error("Thumbnail upload error: " + (err.message || "Failed to upload"));
+    } finally {
+      setIsUploadingThumbnail(false);
+      e.target.value = "";
+    }
+  };
+
+  // Dedicated Gallery / Additional Images Upload handler
+  const handleGalleryUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setIsUploadingGallery(true);
+    let successCount = 0;
+    const newUrls: string[] = [];
+
+    try {
+      const base = getApiBaseUrlSync();
+
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+        const val = validateImageFile(file);
+        if (!val.valid || isPdf) {
+          const errMsg = isPdf
+            ? `PDF format is not supported for gallery images (${file.name})! Please upload only image files.`
+            : (val.error || "Unsupported file format!");
+          setProductFileFormatError(errMsg);
+          toast.error(errMsg);
+          continue;
+        }
+
+        let processed;
+        try {
+          processed = await processSquareImage(file, false, 80);
+        } catch (procErr: any) {
+          toast.error(`Image error for ${file.name}: ${procErr.message}`);
+          continue;
+        }
+
+        const res = await fetch(`${base}/api/admin/upload-image`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            base64: processed.base64,
+            filename: processed.file.name,
+            contentType: processed.file.type || "image/webp",
+            folder: "marketplace/products",
+          }),
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.url) {
+            newUrls.push(convertToDirectImageUrl(data.url));
+            successCount++;
+          }
+        }
+      }
+
+      if (newUrls.length > 0) {
+        const extra = newUrls.join("\n");
+        setImageUrlsText((prev) => (prev ? `${prev}\n${extra}` : extra));
+        clearFieldError("images");
+        toast.success(`Successfully uploaded ${successCount} gallery image(s)!`);
+      }
+    } catch (err: any) {
+      toast.error("Gallery upload error: " + (err.message || "Failed to upload"));
+    } finally {
+      setIsUploadingGallery(false);
+      e.target.value = "";
+    }
+  };
 
   // Image File Upload handler - Uploads to Firebase Storage via backend service account
   // Supports uploading one or multiple images simultaneously
@@ -416,7 +539,7 @@ function ProductsMarketplacePage() {
         const isPrimary = i === 0 && !thumbnailUrl.trim();
         let processed;
         try {
-          processed = await processSquareImage(file, isPrimary);
+          processed = await processSquareImage(file, isPrimary, isPrimary ? 20 : 80);
         } catch (procErr: any) {
           toast.error(`Image error for ${file.name}: ${procErr.message}`);
           continue;
@@ -2857,68 +2980,149 @@ function ProductsMarketplacePage() {
                   </div>
                 )}
 
-                {/* Image Gallery and Multi-Upload Section */}
+                {/* 1. PRIMARY THUMBNAIL IMAGE (≤ 20 KB AUTO-COMPRESSED) */}
                 <div
-                  className={`p-4 rounded-2xl border space-y-4 transition-all ${
-                    fieldErrors.images ? "border-destructive ring-2 ring-destructive/50 bg-destructive/5" : "bg-muted/20"
+                  className={`p-4 rounded-2xl border space-y-3 transition-all ${
+                    fieldErrors.images && !thumbnailUrl.trim() ? "border-destructive ring-2 ring-destructive/50 bg-destructive/5" : "bg-muted/20"
                   }`}
                 >
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <div>
                       <h4 className="font-semibold text-xs text-foreground flex items-center gap-1.5">
-                        <ImageIcon className="h-4 w-4 text-primary" /> Product Images *
+                        <ImageIcon className="h-4 w-4 text-primary" /> Primary Thumbnail Image *
+                        <span className="bg-emerald-600/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                          Auto-Compressed to ≤ 20 KB
+                        </span>
                       </h4>
                       <p className="text-[11px] text-muted-foreground mt-0.5">
-                        Upload images to Firebase Storage (<code>marketplace/products</code>). <strong>1st image: 1:1 square ratio &lt;= 20 KB</strong> (auto-compressed). Other images: 1:1 square ratio &lt;= 1 MB. Click any image to set as Primary Thumbnail.
+                        Main product cover image displayed across catalog and app feeds. Auto-cropped to 1:1 square ratio and compressed to ~20 KB for instant mobile loading.
                       </p>
                     </div>
 
                     <div className="flex items-center gap-2">
                       <label
                         className={`cursor-pointer inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-primary/20 bg-primary text-primary-foreground text-xs font-bold shadow-xs hover:bg-primary/90 transition-all ${
-                          isUploadingImage ? "opacity-60 cursor-not-allowed" : ""
+                          isUploadingThumbnail ? "opacity-60 cursor-not-allowed" : ""
                         }`}
                       >
                         <Upload className="h-3.5 w-3.5" />
-                        <span>{isUploadingImage ? "Compressing & Uploading..." : "Upload Image(s)"}</span>
+                        <span>{isUploadingThumbnail ? "Compressing ≤ 20KB..." : "Upload Thumbnail (≤ 20KB)"}</span>
                         <input
                           type="file"
                           accept="image/png,image/jpeg,image/jpg,image/webp"
-                          multiple
                           className="hidden"
-                          onChange={handleImageFileUpload}
-                          disabled={isUploadingImage}
+                          onChange={handleThumbnailUpload}
+                          disabled={isUploadingThumbnail}
                         />
                       </label>
                     </div>
                   </div>
 
-                  {fieldErrors.images && (
-                    <p className="text-xs font-semibold text-destructive flex items-center gap-1 animate-pulse">
-                      <AlertCircle className="h-4 w-4" />
-                      <span>Product image is required! Please upload at least one image or provide an image link.</span>
-                    </p>
-                  )}
+                  {/* Thumbnail Preview & URL */}
+                  <div className="flex flex-col sm:flex-row items-start gap-4 pt-1">
+                    {thumbnailUrl.trim() ? (
+                      <div className="relative group rounded-2xl border-2 border-primary overflow-hidden bg-card aspect-square h-28 w-28 shrink-0 shadow-sm">
+                        <img
+                          src={formatImageUrl(convertToDirectImageUrl(thumbnailUrl.trim()))}
+                          alt="Primary Thumbnail"
+                          referrerPolicy="no-referrer"
+                          className="h-full w-full object-cover"
+                        />
+                        <div className="absolute top-1 left-1 pointer-events-none">
+                          <span className="bg-emerald-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow">
+                            ≤ 20 KB
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setThumbnailUrl("");
+                            toast.info("Thumbnail removed");
+                          }}
+                          className="absolute top-1 right-1 bg-destructive text-white p-1 rounded-md opacity-0 group-hover:opacity-100 transition-opacity shadow-xs"
+                          title="Remove Thumbnail"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="h-28 w-28 rounded-2xl border-2 border-dashed flex flex-col items-center justify-center bg-card/60 text-muted-foreground/60 shrink-0">
+                        <ImageIcon className="h-6 w-6" />
+                        <span className="text-[10px] mt-1 font-semibold">No Thumbnail</span>
+                      </div>
+                    )}
 
-                  {/* Render Visual Image Previews for All Uploaded Images */}
+                    <div className="flex-1 w-full space-y-1">
+                      <Label htmlFor="prod-thumb" className="text-[11px] font-semibold text-muted-foreground">
+                        Thumbnail Direct URL or Google Drive Link:
+                      </Label>
+                      <Input
+                        id="prod-thumb"
+                        value={thumbnailUrl}
+                        onChange={(e) => {
+                          setThumbnailUrl(e.target.value);
+                          clearFieldError("images");
+                        }}
+                        onBlur={() => setThumbnailUrl((prev) => convertToDirectImageUrl(prev.trim()))}
+                        placeholder="Paste image URL, Google Drive link, or upload above..."
+                        className="rounded-xl font-mono text-xs"
+                      />
+                      <p className="text-[10px] text-muted-foreground">
+                        Google Drive sharing links are automatically converted to raw high-speed image streams.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. ADDITIONAL / GALLERY IMAGES (2nd, 3rd, etc.) */}
+                <div className="p-4 rounded-2xl border space-y-3 bg-muted/20">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <h4 className="font-semibold text-xs text-foreground flex items-center gap-1.5">
+                        <ImageIcon className="h-4 w-4 text-primary" /> Additional Gallery Images (2nd, 3rd, etc.)
+                        <span className="bg-muted text-muted-foreground border text-[10px] font-bold px-2 py-0.5 rounded-full">
+                          Multi-Image Gallery
+                        </span>
+                      </h4>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">
+                        Upload additional angles, packaging shots, and specification infographics.
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <label
+                        className={`cursor-pointer inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-border bg-card hover:bg-muted text-foreground text-xs font-bold shadow-xs transition-all ${
+                          isUploadingGallery ? "opacity-60 cursor-not-allowed" : ""
+                        }`}
+                      >
+                        <Upload className="h-3.5 w-3.5 text-primary" />
+                        <span>{isUploadingGallery ? "Uploading Gallery..." : "Upload Gallery Images"}</span>
+                        <input
+                          type="file"
+                          accept="image/png,image/jpeg,image/jpg,image/webp"
+                          multiple
+                          className="hidden"
+                          onChange={handleGalleryUpload}
+                          disabled={isUploadingGallery}
+                        />
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Render Gallery Images Grid */}
                   {(() => {
-                    const allImgs = Array.from(
-                      new Set([
-                        thumbnailUrl.trim() ? convertToDirectImageUrl(thumbnailUrl.trim()) : "",
-                        ...imageUrlsText
-                          .split(/[\n,]/)
-                          .map((s) => convertToDirectImageUrl(s.trim()))
-                          .filter(Boolean),
-                      ])
-                    ).filter(Boolean);
+                    const extraImgs = imageUrlsText
+                      .split(/[\n,]/)
+                      .map((s) => convertToDirectImageUrl(s.trim()))
+                      .filter((s) => s && s !== convertToDirectImageUrl(thumbnailUrl.trim()));
 
-                    if (allImgs.length === 0) {
+                    if (extraImgs.length === 0) {
                       return (
-                        <div className="p-6 border-2 border-dashed rounded-2xl text-center bg-card/50">
-                          <ImageIcon className="h-8 w-8 text-muted-foreground/40 mx-auto" />
-                          <p className="text-xs text-muted-foreground mt-2 font-medium">No images uploaded yet</p>
-                          <p className="text-[11px] text-muted-foreground/70 mt-0.5">
-                            Click "Upload Image(s)" above to upload 1 or more images directly to Firebase Storage.
+                        <div className="p-5 border-2 border-dashed rounded-2xl text-center bg-card/40">
+                          <ImageIcon className="h-6 w-6 text-muted-foreground/40 mx-auto" />
+                          <p className="text-xs text-muted-foreground mt-1 font-medium">No additional gallery images</p>
+                          <p className="text-[10px] text-muted-foreground/70">
+                            Click "Upload Gallery Images" above to add secondary and angle photos.
                           </p>
                         </div>
                       );
@@ -2927,112 +3131,74 @@ function ProductsMarketplacePage() {
                     return (
                       <div className="space-y-2">
                         <div className="text-[11px] font-semibold text-muted-foreground flex items-center justify-between">
-                          <span>Uploaded Images ({allImgs.length}):</span>
-                          <span className="text-[10px] text-emerald-600 font-bold">Auto-saved to Storage</span>
+                          <span>Gallery Photos ({extraImgs.length}):</span>
                         </div>
                         <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3">
-                          {allImgs.map((imgUrl, idx) => {
-                            const isPrimary = idx === 0 || convertToDirectImageUrl(thumbnailUrl) === imgUrl;
-                            return (
-                              <div
-                                key={idx}
-                                className={`relative group rounded-2xl border-2 overflow-hidden bg-card aspect-square flex flex-col justify-between shadow-xs transition-all ${
-                                  isPrimary ? "border-primary ring-2 ring-primary/30" : "border-border hover:border-primary/50"
-                                }`}
-                              >
-                                <img
-                                  src={formatImageUrl(imgUrl)}
-                                  alt={`Product Image ${idx + 1}`}
-                                  referrerPolicy="no-referrer"
-                                  className="h-full w-full object-cover"
-                                />
-
-                                {isPrimary ? (
-                                  <div className="absolute top-1.5 left-1.5 flex flex-col gap-0.5 pointer-events-none">
-                                    <span className="bg-primary text-primary-foreground text-[9px] font-bold px-1.5 py-0.5 rounded-md shadow-xs">
-                                      Primary 1:1
-                                    </span>
-                                    <span className="bg-emerald-600/90 text-white text-[8px] font-bold px-1 py-0.2 rounded shadow-xs">
-                                      &le; 20 KB
-                                    </span>
-                                  </div>
-                                ) : (
-                                  <div className="absolute top-1.5 left-1.5 flex flex-col gap-0.5">
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setThumbnailUrl(imgUrl);
-                                        const others = allImgs.filter((u) => u !== imgUrl);
-                                        setImageUrlsText(others.join("\n"));
-                                        toast.success("Set as Primary Thumbnail!");
-                                      }}
-                                      className="bg-black/75 hover:bg-black text-white text-[9px] font-semibold px-1.5 py-0.5 rounded-md opacity-0 group-hover:opacity-100 transition-opacity"
-                                    >
-                                      Make Main
-                                    </button>
-                                    <span className="bg-black/60 text-white text-[8px] px-1 py-0.2 rounded opacity-0 group-hover:opacity-100 transition-opacity">
-                                      1:1 &le; 1 MB
-                                    </span>
-                                  </div>
-                                )}
-
+                          {extraImgs.map((imgUrl, idx) => (
+                            <div
+                              key={idx}
+                              className="relative group rounded-2xl border overflow-hidden bg-card aspect-square flex flex-col justify-between shadow-xs hover:border-primary/50 transition-all"
+                            >
+                              <img
+                                src={formatImageUrl(imgUrl)}
+                                alt={`Gallery ${idx + 2}`}
+                                referrerPolicy="no-referrer"
+                                className="h-full w-full object-cover"
+                              />
+                              <div className="absolute top-1 left-1">
+                                <span className="bg-black/75 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow">
+                                  #{idx + 2}
+                                </span>
+                              </div>
+                              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5">
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    const remaining = allImgs.filter((u) => u !== imgUrl);
-                                    setThumbnailUrl(remaining[0] || "");
-                                    setImageUrlsText(remaining.slice(1).join("\n"));
+                                    const oldThumb = thumbnailUrl;
+                                    setThumbnailUrl(imgUrl);
+                                    const nextOthers = [oldThumb, ...extraImgs.filter((u) => u !== imgUrl)].filter(Boolean);
+                                    setImageUrlsText(nextOthers.join("\n"));
+                                    toast.success("Set as Primary Thumbnail!");
+                                  }}
+                                  className="bg-primary text-primary-foreground text-[10px] font-bold px-2 py-1 rounded-lg shadow hover:bg-primary/90"
+                                >
+                                  Make Main
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const remaining = extraImgs.filter((u) => u !== imgUrl);
+                                    setImageUrlsText(remaining.join("\n"));
                                     toast.info("Image removed");
                                   }}
-                                  className="absolute top-1.5 right-1.5 bg-destructive text-white p-1 rounded-md opacity-0 group-hover:opacity-100 transition-opacity shadow-xs"
+                                  className="bg-destructive text-white p-1 rounded-lg shadow hover:bg-destructive/90"
                                   title="Remove Image"
                                 >
-                                  <Trash2 className="h-3 w-3" />
+                                  <Trash2 className="h-3.5 w-3.5" />
                                 </button>
                               </div>
-                            );
-                          })}
+                            </div>
+                          ))}
                         </div>
                       </div>
                     );
                   })()}
 
-                  {/* Manual URL Input Fields */}
-                  <div className="pt-2 border-t border-border/40 space-y-2">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <Label htmlFor="prod-thumb" className="text-[11px] font-semibold text-muted-foreground">
-                          Primary Thumbnail URL (Firebase Storage or Google Drive):
-                        </Label>
-                        <Input
-                          id="prod-thumb"
-                          value={thumbnailUrl}
-                          onChange={(e) => {
-                            setThumbnailUrl(e.target.value);
-                            clearFieldError("images");
-                          }}
-                          placeholder="https://firebasestorage.googleapis.com/... or Google Drive URL"
-                          className="rounded-xl font-mono text-xs"
-                        />
-                      </div>
-
-                      <div className="space-y-1">
-                        <Label htmlFor="prod-images" className="text-[11px] font-semibold text-muted-foreground">
-                          Additional Image URLs List (One URL per line):
-                        </Label>
-                        <Textarea
-                          id="prod-images"
-                          rows={1}
-                          value={imageUrlsText}
-                          onChange={(e) => {
-                            setImageUrlsText(e.target.value);
-                            clearFieldError("images");
-                          }}
-                          placeholder="https://firebasestorage.googleapis.com/..."
-                          className="font-mono text-xs rounded-xl"
-                        />
-                      </div>
-                    </div>
+                  <div className="space-y-1 pt-1">
+                    <Label htmlFor="prod-images" className="text-[11px] font-semibold text-muted-foreground">
+                      Additional Image URLs List (One URL per line):
+                    </Label>
+                    <Textarea
+                      id="prod-images"
+                      rows={2}
+                      value={imageUrlsText}
+                      onChange={(e) => {
+                        setImageUrlsText(e.target.value);
+                        clearFieldError("images");
+                      }}
+                      placeholder="https://firebasestorage.googleapis.com/...&#10;https://firebasestorage.googleapis.com/..."
+                      className="font-mono text-xs rounded-xl"
+                    />
                   </div>
                 </div>
 

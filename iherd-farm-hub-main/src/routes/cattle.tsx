@@ -30,12 +30,15 @@ import {
   Layers,
   Sparkles,
   Camera,
+  Building,
+  Store,
 } from "lucide-react";
 import {
   useFirebaseCollection,
   useFirebaseCollectionGroup,
 } from "../hooks/useFirebaseData";
-import { getLocalizedText } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
+import { getLocalizedText, cn } from "@/lib/utils";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/cattle")({
@@ -202,6 +205,10 @@ function CattleDetailsPage() {
     useFirebaseCollectionGroup<any>("cattles");
   const { data: groupCattleSingular = [], refetch: refetchGroupCattleSingular } =
     useFirebaseCollectionGroup<any>("cattle");
+  const { data: marketplaceCattles = [] } = useFirebaseCollection<any>("cattle-marketplace");
+
+  // Topic filter: "all" | "farm" (Farm Herd Data) | "marketplace" (Marketplace Listed Cattle)
+  const [cattleTopicFilter, setCattleTopicFilter] = useState<"all" | "farm" | "marketplace">("all");
 
   // 2. User & Farm lookups for owner details enrichment
   const { data: usersList = [] } = useFirebaseCollection<any>("users");
@@ -481,30 +488,50 @@ function CattleDetailsPage() {
     };
 
     // 1. Process nested farm cattles strictly: /users/{uid}/roles/farmer/farms/{farmId}/cattles/{cattleId}
-    groupCattles.forEach((c) => processItem(c, "nested_farm_cattle"));
-    groupCattleSingular.forEach((c) => processItem(c, "nested_farm_cattle"));
+    groupCattles.forEach((c) => processItem(c, "farm_data"));
+    groupCattleSingular.forEach((c) => processItem(c, "farm_data"));
 
-    // 2. Merge backend-enriched cattle
+    // 2. Process marketplace cattles
+    marketplaceCattles.forEach((c) => processItem(c, "marketplace_data"));
+
+    // 3. Merge backend-enriched cattle
     backendCattle.forEach((bc) => {
       const tag = getLocalizedText(bc.tagNo || bc.rfid || "", "");
       const key = tag && tag !== "—" ? tag : (bc.id || bc.cattleId || bc.docId);
       if (!key) return;
-      processItem(bc, bc.source || "nested_farm_cattle");
+      processItem(bc, bc.source || (Number(bc.price || 0) > 0 ? "marketplace_data" : "farm_data"));
     });
 
     return Array.from(cattleMap.values());
-  }, [groupCattles, groupCattleSingular, backendCattle, usersLookup, farmsLookup]);
+  }, [groupCattles, groupCattleSingular, marketplaceCattles, backendCattle, usersLookup, farmsLookup]);
+
+  const farmCattlesCount = useMemo(() => {
+    return allCattle.filter((c) => c.source !== "marketplace_data" && !(Number(c.price || 0) > 0)).length;
+  }, [allCattle]);
+
+  const marketplaceCattlesCount = useMemo(() => {
+    return allCattle.filter((c) => c.source === "marketplace_data" || Number(c.price || 0) > 0).length;
+  }, [allCattle]);
 
   // Filtered and Sorted Cattle
   const filteredCattle = useMemo(() => {
     return allCattle
+      .filter((c) => {
+        if (cattleTopicFilter === "farm") {
+          return c.source !== "marketplace_data" && !(Number(c.price || 0) > 0);
+        }
+        if (cattleTopicFilter === "marketplace") {
+          return c.source === "marketplace_data" || Number(c.price || 0) > 0;
+        }
+        return true;
+      })
       .filter((c) => isWithinTimeFilter(c.createdAt, timeFilter))
       .sort((a, b) => {
         const timeA = parseTime(a.createdAt);
         const timeB = parseTime(b.createdAt);
         return sortOrder === "newest" ? timeB - timeA : timeA - timeB;
       });
-  }, [allCattle, timeFilter, sortOrder]);
+  }, [allCattle, cattleTopicFilter, timeFilter, sortOrder]);
 
   const totalCattleCount = allCattle.length;
   const highYieldCattleCount = allCattle.filter((c) => {
@@ -533,11 +560,57 @@ function CattleDetailsPage() {
         </div>
 
         {/* Filter & Sort Controls */}
-        <div className="flex items-center flex-wrap gap-2">
+        <div className="flex items-center flex-wrap gap-2.5">
+          {/* Topic Filter Tabs (Farm Herd Data vs Marketplace) */}
+          <div className="flex items-center gap-1 bg-muted/60 p-1 rounded-2xl border">
+            <Button
+              type="button"
+              size="sm"
+              variant={cattleTopicFilter === "all" ? "default" : "ghost"}
+              onClick={() => setCattleTopicFilter("all")}
+              className={cn(
+                "h-8 rounded-xl px-3 text-xs font-semibold",
+                cattleTopicFilter === "all" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              All ({allCattle.length})
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={cattleTopicFilter === "farm" ? "default" : "ghost"}
+              onClick={() => setCattleTopicFilter("farm")}
+              className={cn(
+                "h-8 rounded-xl px-3 text-xs font-semibold flex items-center gap-1.5",
+                cattleTopicFilter === "farm" ? "bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm" : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <span>🏡 Farm Herd</span>
+              <Badge variant="outline" className={cn("text-[10px] px-1.5 py-0 h-4 rounded-md font-mono", cattleTopicFilter === "farm" ? "bg-emerald-700 text-white border-transparent" : "")}>
+                {farmCattlesCount}
+              </Badge>
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={cattleTopicFilter === "marketplace" ? "default" : "ghost"}
+              onClick={() => setCattleTopicFilter("marketplace")}
+              className={cn(
+                "h-8 rounded-xl px-3 text-xs font-semibold flex items-center gap-1.5",
+                cattleTopicFilter === "marketplace" ? "bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm" : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <span>🏷️ Marketplace</span>
+              <Badge variant="outline" className={cn("text-[10px] px-1.5 py-0 h-4 rounded-md font-mono", cattleTopicFilter === "marketplace" ? "bg-indigo-700 text-white border-transparent" : "")}>
+                {marketplaceCattlesCount}
+              </Badge>
+            </Button>
+          </div>
+
           <Button asChild size="sm" variant="outline" className="rounded-xl h-9 text-xs gap-1.5 border-dashed">
             <Link to="/marketplace/cattle">
               <ShoppingBag className="h-3.5 w-3.5 text-primary" />
-              <span>Go to Cattle Marketplace</span>
+              <span>Go to Marketplace</span>
               <ExternalLink className="h-3 w-3" />
             </Link>
           </Button>
@@ -650,15 +723,26 @@ function CattleDetailsPage() {
                   </div>
                 )}
                 <div className="space-y-0.5">
-                  <div
-                    className="font-bold text-sm text-foreground hover:text-primary transition-colors cursor-pointer flex items-center gap-1.5"
-                    onClick={() => setSelectedCattleDetail(r)}
-                  >
-                    <span>{r.title}</span>
-                    {r.insurance && (
-                      <span title="Insured Livestock" className="inline-flex">
-                        <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
-                      </span>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <div
+                      className="font-bold text-sm text-foreground hover:text-primary transition-colors cursor-pointer flex items-center gap-1"
+                      onClick={() => setSelectedCattleDetail(r)}
+                    >
+                      <span>{r.title}</span>
+                      {r.insurance && (
+                        <span title="Insured Livestock" className="inline-flex">
+                          <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
+                        </span>
+                      )}
+                    </div>
+                    {r.source === "marketplace_data" || Number(r.price || 0) > 0 ? (
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 border-indigo-200">
+                        Marketplace
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border-emerald-200">
+                        Farm Herd
+                      </Badge>
                     )}
                   </div>
                   <div className="text-xs text-muted-foreground font-mono">

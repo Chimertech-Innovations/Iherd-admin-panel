@@ -41,12 +41,13 @@ export function validateImageFile(file: File): { valid: boolean; error?: string 
 
 /**
  * Center-crops an image into a 1:1 square canvas and compresses it to meet target KB limit.
- * - Primary thumbnail: target <= 20 KB
- * - Additional images: target <= 1 MB (1024 KB)
+ * - Primary thumbnail: target <= 20 KB (auto-compressed to ~20 KB for blazing fast mobile app performance)
+ * - Additional images: target <= 80 KB
  */
 export async function processSquareImage(
   file: File,
-  isPrimaryThumbnail: boolean = false
+  isPrimaryThumbnail: boolean = false,
+  overrideMaxKB?: number
 ): Promise<ProcessedImageResult> {
   const validation = validateImageFile(file);
   if (!validation.valid) {
@@ -54,8 +55,8 @@ export async function processSquareImage(
   }
 
   const originalSizeKB = Math.round(file.size / 1024);
-  const targetMaxKB = isPrimaryThumbnail ? 20 : 1024;
-  const targetDim = isPrimaryThumbnail ? 400 : 800; // 400x400 for <20KB, 800x800 for <1MB
+  const targetMaxKB = overrideMaxKB ?? (isPrimaryThumbnail ? 20 : 80);
+  const targetDim = isPrimaryThumbnail ? 400 : 600; // 400x400 for <=20KB, 600x600 for additional images
 
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -73,10 +74,10 @@ export async function processSquareImage(
         const startX = (srcW - cropSize) / 2;
         const startY = (srcH - cropSize) / 2;
 
-        const canvas = document.createElement("canvas");
+        let canvas = document.createElement("canvas");
         canvas.width = targetDim;
         canvas.height = targetDim;
-        const ctx = canvas.getContext("2d");
+        let ctx = canvas.getContext("2d");
 
         if (!ctx) {
           throw new Error("Unable to create canvas rendering context");
@@ -88,7 +89,7 @@ export async function processSquareImage(
         ctx.drawImage(img, startX, startY, cropSize, cropSize, 0, 0, targetDim, targetDim);
 
         // Iterative compression to satisfy targetMaxKB
-        let quality = 0.85;
+        let quality = 0.82;
         let mime = "image/webp";
         let dataUrl = canvas.toDataURL(mime, quality);
 
@@ -103,15 +104,15 @@ export async function processSquareImage(
 
         // Reduce quality iteratively until within target limit
         let attempts = 0;
-        while (currentKB > targetMaxKB && quality > 0.15 && attempts < 8) {
+        while (currentKB > targetMaxKB && quality > 0.15 && attempts < 10) {
           attempts++;
-          quality -= 0.1;
-          dataUrl = canvas.toDataURL(mime, Math.max(0.1, quality));
+          quality -= 0.08;
+          dataUrl = canvas.toDataURL(mime, Math.max(0.12, quality));
           base64Bytes = Math.round((dataUrl.length * 3) / 4);
           currentKB = Math.round(base64Bytes / 1024);
         }
 
-        // If still over 20KB for primary image, scale canvas resolution down to 300x300
+        // If still over 20KB for primary image, scale canvas resolution down to 320x320 and 280x280
         if (isPrimaryThumbnail && currentKB > targetMaxKB) {
           const smallCanvas = document.createElement("canvas");
           smallCanvas.width = 300;
@@ -121,10 +122,18 @@ export async function processSquareImage(
             sCtx.imageSmoothingEnabled = true;
             sCtx.imageSmoothingQuality = "high";
             sCtx.drawImage(canvas, 0, 0, 300, 300);
-            dataUrl = smallCanvas.toDataURL(mime, 0.65);
+            dataUrl = smallCanvas.toDataURL(mime, 0.60);
             base64Bytes = Math.round((dataUrl.length * 3) / 4);
             currentKB = Math.round(base64Bytes / 1024);
+            canvas = smallCanvas;
           }
+        }
+
+        // Final safety pass for 20KB limit
+        if (isPrimaryThumbnail && currentKB > targetMaxKB) {
+          dataUrl = canvas.toDataURL(mime, 0.40);
+          base64Bytes = Math.round((dataUrl.length * 3) / 4);
+          currentKB = Math.round(base64Bytes / 1024);
         }
 
         // Convert base64 back to a File object
