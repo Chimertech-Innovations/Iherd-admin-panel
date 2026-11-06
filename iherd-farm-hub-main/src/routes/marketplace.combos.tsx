@@ -54,7 +54,9 @@ import {
   AlertCircle,
   X,
   Globe,
+  FileSpreadsheet,
 } from "lucide-react";
+import { BulkCsvUploadDialog } from "@/components/admin/BulkCsvUploadDialog";
 import { toast } from "sonner";
 import {
   useCombos,
@@ -110,6 +112,15 @@ function CombosPage() {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+
+  // Bulk CSV Upload State
+  const [bulkCsvOpen, setBulkCsvOpen] = useState(false);
+
+  const handleSaveBulkCombos = async (items: any[]) => {
+    for (const item of items) {
+      await saveCombo.mutateAsync(item);
+    }
+  };
 
   // Add / Edit Dialog State
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -1103,6 +1114,15 @@ function CombosPage() {
             >
               <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
               Refresh
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setBulkCsvOpen(true)}
+              className="gap-2 rounded-xl border-primary/30 text-primary hover:bg-primary/10 font-medium"
+              title="Upload multiple combo bundles from CSV"
+            >
+              <FileSpreadsheet className="h-4 w-4" /> Bulk CSV Import
             </Button>
             <Button
               size="sm"
@@ -3019,6 +3039,15 @@ function CombosPage() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Bulk CSV Upload Modal */}
+      <BulkCsvUploadDialog
+        open={bulkCsvOpen}
+        onOpenChange={setBulkCsvOpen}
+        type="combos"
+        onSaveBatch={handleSaveBulkCombos}
+        categories={categories}
+      />
     </div>
   );
 }

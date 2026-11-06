@@ -69,7 +69,9 @@ import {
   MapPin,
   Upload,
   FolderTree,
+  FileSpreadsheet,
 } from "lucide-react";
+import { BulkCsvUploadDialog } from "@/components/admin/BulkCsvUploadDialog";
 import { toast } from "sonner";
 import {
   useAdminProducts,
@@ -379,6 +381,15 @@ function ProductsMarketplacePage() {
       delete next[f];
       return next;
     });
+  };
+
+  // Bulk CSV Upload State
+  const [bulkCsvOpen, setBulkCsvOpen] = useState(false);
+
+  const handleSaveBulkProducts = async (items: any[]) => {
+    for (const item of items) {
+      await saveProduct.mutateAsync(item);
+    }
   };
 
   // Quick Price Edit Dialog State
@@ -1427,6 +1438,15 @@ function ProductsMarketplacePage() {
             title={`Export ${filteredProducts.length} products to CSV`}
           >
             <Download className="h-4 w-4" /> Export CSV
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setBulkCsvOpen(true)}
+            className="rounded-2xl gap-1.5 border-primary/30 text-primary hover:bg-primary/10 font-medium"
+            title="Upload multiple products at once from CSV"
+          >
+            <FileSpreadsheet className="h-4 w-4" /> Bulk CSV Import
           </Button>
           <Button onClick={openAddModal} className="bg-gradient-to-br from-primary to-primary-glow shadow-md gap-1.5 rounded-2xl font-bold">
             <Plus className="h-4 w-4" /> Add New Product
@@ -3571,6 +3591,15 @@ function ProductsMarketplacePage() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Bulk CSV Upload Modal */}
+      <BulkCsvUploadDialog
+        open={bulkCsvOpen}
+        onOpenChange={setBulkCsvOpen}
+        type="products"
+        onSaveBatch={handleSaveBulkProducts}
+        categories={categories}
+      />
     </div>
   );
 }

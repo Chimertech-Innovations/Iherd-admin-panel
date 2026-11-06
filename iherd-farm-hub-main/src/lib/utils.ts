@@ -78,4 +78,20 @@ export function formatImageUrl(url: any): string {
   return trimmed;
 }
 
+/**
+ * Converts Google Drive sharing links into high-speed lh3 direct CDN stream URLs.
+ */
+export function convertToDirectImageUrl(raw: string): string {
+  if (!raw) return "";
+  const trimmed = raw.trim();
+  const driveMatch =
+    trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) ||
+    trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/) ||
+    trimmed.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  if (driveMatch && driveMatch[1]) {
+    return `https://lh3.googleusercontent.com/d/${driveMatch[1]}=s800`;
+  }
+  return trimmed;
+}
+
 
