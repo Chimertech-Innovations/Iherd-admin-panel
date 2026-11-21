@@ -5,6 +5,13 @@ let lastCapturedError: { error: unknown; at: number } | undefined;
 const TTL_MS = 5_000;
 
 function record(error: unknown) {
+  if (
+    error &&
+    typeof error === "object" &&
+    ((error as any).code === "ECONNRESET" || (error as any).message === "aborted" || String((error as any).message).includes("aborted"))
+  ) {
+    return;
+  }
   lastCapturedError = { error, at: Date.now() };
 }
 
@@ -13,6 +20,23 @@ if (typeof globalThis.addEventListener === "function") {
   globalThis.addEventListener("unhandledrejection", (event) =>
     record((event as PromiseRejectionEvent).reason),
   );
+}
+
+if (typeof process !== "undefined" && typeof process.on === "function") {
+  process.on("uncaughtException", (err) => {
+    if (err && (err.code === "ECONNRESET" || err.message === "aborted")) return;
+    record(err);
+  });
+  process.on("unhandledRejection", (reason) => {
+    if (
+      reason &&
+      typeof reason === "object" &&
+      ((reason as any).code === "ECONNRESET" || (reason as any).message === "aborted")
+    ) {
+      return;
+    }
+    record(reason);
+  });
 }
 
 export function consumeLastCapturedError(): unknown {

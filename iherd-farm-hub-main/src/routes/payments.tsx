@@ -1,8 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { DataPage } from "@/components/admin/DataPage";
 import { useQuery } from "@tanstack/react-query";
-import { getLocalizedText } from "@/lib/utils";
+import { getLocalizedText, formatImageUrl } from "@/lib/utils";
 import { StatusBadge } from "@/components/admin/StatusBadge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -23,8 +23,11 @@ import {
   TrendingUp,
   Beef,
   ShoppingCart,
+  Package,
 } from "lucide-react";
 import { toast } from "sonner";
+import { collection, getDocs } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 
 export const Route = createFileRoute("/payments")({
   head: () => ({ meta: [{ title: "Payments — iHerd Admin" }] }),
@@ -35,19 +38,132 @@ const API_BASE =
   (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ||
   "https://iherdadminpanel.onrender.com";
 
+const DEFAULT_CATTLE_IMAGE =
+  "https://images.unsplash.com/photo-1546445317-29f4545e9d53?auto=format&fit=crop&w=300&q=80";
+
 async function fetchPaymentsData() {
+  // 1. Try Backend API first (with 6s safe timeout)
   try {
-    const res = await fetch(`${API_BASE}/api/admin/payments`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    return {
-      payments: data.payments || [],
-      summary: data.summary || {},
-    };
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 6000);
+    const res = await fetch(`${API_BASE}/api/admin/payments`, { signal: controller.signal });
+    clearTimeout(timer);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data.payments) && data.payments.length > 0) {
+        return {
+          payments: data.payments,
+          summary: data.summary || {},
+        };
+      }
+    }
   } catch (err) {
-    console.warn("Error fetching payments from backend:", err);
-    return { payments: [], summary: {} };
+    console.warn("Backend payments notice, switching to direct Firestore fallback:", err);
   }
+
+  // 2. Direct Firestore fallback (aggregates ProductOrders & CattleOrders on client)
+  try {
+    const [pSnap, cSnap] = await Promise.all([
+      getDocs(collection(db, "ProductOrders")).catch(() => null),
+      getDocs(collection(db, "CattleOrders")).catch(() => null),
+    ]);
+
+    const fallbackTxns: any[] = [];
+    pSnap?.docs?.forEach((d) => {
+      const o = d.data();
+      const orderKey = o.orderId || d.id;
+      const txnId = `TXN-PRD-${orderKey}`;
+      const items = Array.isArray(o.items) ? o.items : [];
+      const prodImg =
+        items[0]?.image ||
+        items[0]?.thumbnailUrl ||
+        o.thumbnailUrl ||
+        (Array.isArray(o.imageUrls) ? o.imageUrls[0] : null) ||
+        (Array.isArray(o.images) ? o.images[0] : null) ||
+        o.image ||
+        "";
+      const prodTitle =
+        items[0]?.name ||
+        items[0]?.title ||
+        o.productName ||
+        o.name ||
+        (items.length > 0 ? `${items.length} Product Items` : "Marketplace Product");
+
+      fallbackTxns.push({
+        id: txnId,
+        transactionId: txnId,
+        orderId: orderKey,
+        userId: o.userId || null,
+        party: o.buyerName || o.shippingAddress?.name || "Customer",
+        partyPhone: o.buyerPhone || o.shippingAddress?.phone || "—",
+        type: "Product Purchase",
+        category: "E-Commerce Store",
+        title: prodTitle,
+        image: prodImg,
+        method: o.paymentMethod || "UPI / Online Payment",
+        amount: Number(o.totalAmount || o.price || o.amount || 0),
+        seller: o.sellerName || "Chimertech",
+        itemsCount: items.length || 1,
+        items,
+        status: (o.status || "").toLowerCase().includes("cancel") ? "Failed" : "Paid",
+        invoiceNumber: o.invoiceNumber || o.invoiceNo || (orderKey ? `INV-${orderKey.slice(-8)}` : "—"),
+        createdAt: o.createdAt || o.date || null,
+      });
+    });
+
+    cSnap?.docs?.forEach((d) => {
+      const o = d.data();
+      const orderKey = o.orderId || o.cattleOrderId || d.id;
+      const txnId = `TXN-CTL-${orderKey}`;
+      const cattleImg =
+        o.cattleImage ||
+        o.image ||
+        (Array.isArray(o.cattlePhotos) ? o.cattlePhotos[0] : null) ||
+        (Array.isArray(o.photos) ? o.photos[0] : null) ||
+        (Array.isArray(o.images) ? o.images[0] : null) ||
+        "";
+      const cattleTitle =
+        o.cattleName || o.name || o.title || o.breed || o.animal || "Livestock Cattle";
+
+      fallbackTxns.push({
+        id: txnId,
+        transactionId: txnId,
+        orderId: orderKey,
+        userId: o.userId || null,
+        party: o.buyerName || "Buyer",
+        partyPhone: o.buyerPhone || o.phoneNumber || "—",
+        type: "Livestock Cattle Purchase",
+        category: "Livestock Herd",
+        title: cattleTitle,
+        image: cattleImg,
+        method: o.paymentMethod || "Escrow / Online",
+        amount: Number(o.price || o.totalAmount || o.amount || 0),
+        seller: o.sellerName || "Verified Seller",
+        itemsCount: 1,
+        status: (o.status || "").toLowerCase().includes("cancel") ? "Failed" : "Paid",
+        invoiceNumber: o.invoiceNumber || o.invoiceNo || "—",
+        createdAt: o.createdAt || o.date || null,
+      });
+    });
+
+    if (fallbackTxns.length > 0) {
+      fallbackTxns.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+      return {
+        payments: fallbackTxns,
+        summary: {
+          totalTransactions: fallbackTxns.length,
+          totalVolume: fallbackTxns.reduce((sum, t) => sum + t.amount, 0),
+          paidCount: fallbackTxns.filter((t) => t.status === "Paid").length,
+          pendingCount: fallbackTxns.filter((t) => t.status === "Pending").length,
+          failedCount: fallbackTxns.filter((t) => t.status === "Failed").length,
+        },
+      };
+    }
+  } catch (fbErr) {
+    console.warn("Direct Firestore fallback error in payments:", fbErr);
+  }
+
+  return { payments: [], summary: {} };
 }
 
 function formatDateTime(val: any) {
@@ -82,7 +198,6 @@ function PaymentsPage() {
   const { data, isLoading } = useQuery({
     queryKey: ["adminPayments"],
     queryFn: fetchPaymentsData,
-    placeholderData: { payments: [], summary: {} },
     staleTime: 15_000,
   });
 
@@ -96,10 +211,34 @@ function PaymentsPage() {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  const totalVolume = payments.reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0);
-  const paidCount = payments.filter((p: any) => p.status === "Paid").length;
-  const pendingCount = payments.filter((p: any) => p.status === "Pending").length;
-  const failedCount = payments.filter((p: any) => p.status === "Failed").length;
+  const isCattleTxn = (p: any) => {
+    const t = (p.type || p.category || "").toLowerCase();
+    return t.includes("cattle") || t.includes("livestock");
+  };
+
+  // Prepare enriched payments: map itemType to "Product" or "Cattle" for the filter
+  const enrichedPayments = useMemo(() => {
+    return payments.map((p: any) => {
+      const isCattle = isCattleTxn(p);
+      const itemType = isCattle ? "Cattle" : "Product";
+      const title =
+        p.title ||
+        (isCattle
+          ? p.cattleName || p.name || "Livestock Cattle"
+          : p.items?.[0]?.name || p.productName || "Product Item");
+      const rawImg = p.image || (isCattle ? p.cattleImage : p.items?.[0]?.image) || "";
+      const image = rawImg || (isCattle ? DEFAULT_CATTLE_IMAGE : "");
+
+      return {
+        ...p,
+        itemType, // Target key for the "Product" vs "Cattle" filter
+        title,
+        image,
+        status: getLocalizedText(p.status, "Paid"),
+        rawTxn: { ...p, itemType, title, image },
+      };
+    });
+  }, [payments]);
 
   return (
     <div className="space-y-6">
@@ -108,19 +247,107 @@ function PaymentsPage() {
         description="Transactions, payouts, and customer settlements from Product and Cattle marketplace orders."
         primaryAction=""
         isLoading={isLoading}
-        filters={["Paid", "Pending", "Failed"]}
-        statusKey="status"
-        kpis={[
-          { label: "Total Gross Volume", value: isLoading ? "…" : `₹${totalVolume.toLocaleString()}` },
-          { label: "Paid / Completed", value: isLoading ? "…" : `${paidCount} Completed` },
-          { label: "Pending Escrow / Orders", value: isLoading ? "…" : `${pendingCount} Pending` },
-          { label: "Failed / Cancelled", value: isLoading ? "…" : `${failedCount} Failed` },
-        ]}
-        data={payments.map((p: any) => ({
-          ...p,
-          status: getLocalizedText(p.status, "Paid"),
-          rawTxn: p,
-        }))}
+        filters={["Product", "Cattle"]}
+        statusKey="itemType"
+        statusOptions={["Product", "Cattle"]}
+        kpis={(filtered, activeFilter, allData) => {
+          const isProduct = activeFilter.toLowerCase() === "product";
+          const isCattle = activeFilter.toLowerCase() === "cattle";
+          const currentVolume = filtered.reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0);
+          const currentPaid = filtered.filter((p: any) => (p.status || "").toLowerCase().includes("paid")).length;
+          const currentPending = filtered.length - currentPaid;
+
+          if (isProduct) {
+            return [
+              {
+                label: "Product Gross Volume",
+                value: isLoading ? "…" : `₹${currentVolume.toLocaleString()}`,
+                hint: `Total sales for ${filtered.length} Product orders`,
+                up: true,
+              },
+              {
+                label: "Product Orders",
+                value: isLoading ? "…" : `${filtered.length} Orders`,
+                hint: "Filtered by Product category",
+                up: true,
+              },
+              {
+                label: "Settled Payments",
+                value: isLoading ? "…" : `${currentPaid} Paid`,
+                hint: "Completed settlements",
+                up: true,
+              },
+              {
+                label: "Pending / Processing",
+                value: isLoading ? "…" : `${currentPending} Orders`,
+                hint: "Pending or unpaid",
+              },
+            ];
+          }
+
+          if (isCattle) {
+            return [
+              {
+                label: "Cattle Gross Volume",
+                value: isLoading ? "…" : `₹${currentVolume.toLocaleString()}`,
+                hint: `Total livestock value for ${filtered.length} Cattle orders`,
+                up: true,
+              },
+              {
+                label: "Cattle Orders",
+                value: isLoading ? "…" : `${filtered.length} Orders`,
+                hint: "Filtered by Cattle orders",
+                up: true,
+              },
+              {
+                label: "Settled Payments",
+                value: isLoading ? "…" : `${currentPaid} Paid`,
+                hint: "Completed settlements",
+                up: true,
+              },
+              {
+                label: "Pending / Processing",
+                value: isLoading ? "…" : `${currentPending} Orders`,
+                hint: "Pending or unpaid",
+              },
+            ];
+          }
+
+          const totalAllVolume = allData.reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0);
+          const prodList = allData.filter((p: any) => p.itemType === "Product");
+          const prodVol = prodList.reduce((s: number, p: any) => s + Number(p.amount || 0), 0);
+          const ctlList = allData.filter((p: any) => p.itemType === "Cattle");
+          const ctlVol = ctlList.reduce((s: number, p: any) => s + Number(p.amount || 0), 0);
+          const totalPaid = allData.filter((p: any) => (p.status || "").toLowerCase().includes("paid")).length;
+
+          return [
+            {
+              label: "Total Gross Volume",
+              value: isLoading ? "…" : `₹${totalAllVolume.toLocaleString()}`,
+              hint: `₹${prodVol.toLocaleString()} Products · ₹${ctlVol.toLocaleString()} Cattle`,
+              up: true,
+            },
+            {
+              label: "Product Orders",
+              value: isLoading ? "…" : `${prodList.length} Orders`,
+              hint: `₹${prodVol.toLocaleString()} Product volume`,
+              up: true,
+            },
+            {
+              label: "Cattle Orders",
+              value: isLoading ? "…" : `${ctlList.length} Orders`,
+              hint: `₹${ctlVol.toLocaleString()} Cattle volume`,
+              up: true,
+            },
+            {
+              label: "Completed Settlements",
+              value: isLoading ? "…" : `${totalPaid} Paid`,
+              hint: "All settled orders",
+              up: true,
+            },
+          ];
+        }}
+        data={enrichedPayments}
         columns={[
           {
             key: "id",
@@ -148,12 +375,61 @@ function PaymentsPage() {
             },
           },
           {
+            key: "item",
+            label: "Product / Cattle Item",
+            render: (r: any) => {
+              const isCattle = r.itemType === "Cattle";
+              const imgUrl = r.image ? formatImageUrl(r.image) : "";
+              return (
+                <div className="flex items-center gap-2.5 min-w-[200px]">
+                  {imgUrl ? (
+                    <img
+                      src={imgUrl}
+                      alt={r.title || "Item"}
+                      className="h-10 w-10 rounded-xl object-cover ring-1 ring-border shrink-0 bg-background shadow-xs cursor-pointer hover:opacity-90 transition-opacity"
+                      onClick={() => setSelectedTxn(r.rawTxn || r)}
+                      referrerPolicy="no-referrer"
+                      crossOrigin="anonymous"
+                      onError={(e) => {
+                        (e.target as HTMLElement).style.display = "none";
+                      }}
+                    />
+                  ) : (
+                    <div className="h-10 w-10 rounded-xl bg-primary/10 text-primary grid place-items-center shrink-0">
+                      {isCattle ? <Beef className="h-5 w-5" /> : <Package className="h-5 w-5" />}
+                    </div>
+                  )}
+                  <div className="min-w-0">
+                    <div
+                      className="font-semibold text-xs text-foreground truncate max-w-[160px] cursor-pointer hover:text-primary transition-colors"
+                      onClick={() => setSelectedTxn(r.rawTxn || r)}
+                    >
+                      {r.title || (isCattle ? "Livestock Cattle" : "Product Item")}
+                    </div>
+                    <div className="inline-flex items-center gap-1.5 text-[10px] text-muted-foreground mt-0.5">
+                      <span
+                        className={`px-1.5 py-0.2 rounded font-semibold ${
+                          isCattle
+                            ? "bg-amber-500/10 text-amber-700 dark:text-amber-400"
+                            : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                        }`}
+                      >
+                        {r.itemType}
+                      </span>
+                      <span className="truncate max-w-[100px]">• {r.seller || "Verified Seller"}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            },
+          },
+          {
             key: "party",
             label: "Party / Customer",
             render: (r: any) => {
               const uId = r.userId || r.rawTxn?.userId;
               return (
-                <div className="space-y-0.5 min-w-[140px]">
+                <div className="space-y-0.5 min-w-[130px]">
                   {uId ? (
                     <Link
                       to={`/users/${uId}` as any}
@@ -173,29 +449,6 @@ function PaymentsPage() {
                 </div>
               );
             },
-          },
-          {
-            key: "type",
-            label: "Type & Category",
-            render: (r: any) => (
-              <div className="space-y-0.5 min-w-[140px]">
-                <div className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-muted text-foreground">
-                  {r.type?.includes("Cattle") ? <Beef className="h-3 w-3 text-primary" /> : <ShoppingCart className="h-3 w-3 text-primary" />}
-                  <span>{r.type}</span>
-                </div>
-                <div className="text-[10px] text-muted-foreground">{r.category || "Order Transaction"}</div>
-              </div>
-            ),
-          },
-          {
-            key: "method",
-            label: "Payment Method",
-            render: (r: any) => (
-              <div className="flex items-center gap-1 text-xs text-foreground min-w-[110px]">
-                <CreditCard className="h-3.5 w-3.5 text-primary shrink-0" />
-                <span className="truncate">{r.method || "UPI / Online"}</span>
-              </div>
-            ),
           },
           {
             key: "amount",
@@ -276,16 +529,60 @@ function PaymentsPage() {
 
           {selectedTxn && (
             <div className="space-y-5 mt-2">
+              {/* Product / Cattle Item Banner with Image */}
+              <div className="p-3.5 rounded-2xl bg-muted/40 border flex items-center gap-3">
+                {selectedTxn.image ? (
+                  <img
+                    src={formatImageUrl(selectedTxn.image)}
+                    alt={selectedTxn.title || "Item"}
+                    className="h-14 w-14 rounded-2xl object-cover ring-1 ring-border shrink-0 bg-background shadow-xs"
+                    referrerPolicy="no-referrer"
+                    crossOrigin="anonymous"
+                  />
+                ) : (
+                  <div className="h-14 w-14 rounded-2xl bg-primary/10 text-primary grid place-items-center shrink-0">
+                    {selectedTxn.itemType === "Cattle" ? (
+                      <Beef className="h-7 w-7" />
+                    ) : (
+                      <Package className="h-7 w-7" />
+                    )}
+                  </div>
+                )}
+                <div className="min-w-0">
+                  <div className="text-sm font-bold text-foreground truncate">
+                    {selectedTxn.title || (selectedTxn.itemType === "Cattle" ? "Livestock Cattle" : "Product Item")}
+                  </div>
+                  <div className="text-xs text-muted-foreground flex items-center gap-2 mt-0.5">
+                    <span
+                      className={`font-semibold px-2 py-0.5 rounded-full text-[11px] ${
+                        selectedTxn.itemType === "Cattle"
+                          ? "bg-amber-500/10 text-amber-700 dark:text-amber-400"
+                          : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                      }`}
+                    >
+                      {selectedTxn.itemType}
+                    </span>
+                    <span>{selectedTxn.category}</span>
+                  </div>
+                </div>
+              </div>
+
               {/* Header Box */}
               <div className="p-4 rounded-2xl bg-muted/30 border space-y-2 text-xs">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-1.5 text-muted-foreground">
                     <Clock className="h-3.5 w-3.5 text-primary" />
-                    <span>Processed on: <strong className="text-foreground">{formatDateTime(selectedTxn.createdAt)}</strong></span>
+                    <span>
+                      Processed on:{" "}
+                      <strong className="text-foreground">{formatDateTime(selectedTxn.createdAt)}</strong>
+                    </span>
                   </div>
                   <div className="flex items-center gap-1.5 text-muted-foreground">
                     <Receipt className="h-3.5 w-3.5 text-primary" />
-                    <span>Source Order: <strong className="font-mono text-foreground">#{selectedTxn.orderId}</strong></span>
+                    <span>
+                      Source Order:{" "}
+                      <strong className="font-mono text-foreground">#{selectedTxn.orderId}</strong>
+                    </span>
                   </div>
                 </div>
 
@@ -315,14 +612,20 @@ function PaymentsPage() {
               {/* Parties Details */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                 <div className="p-4 rounded-2xl bg-muted/20 border space-y-1">
-                  <div className="font-bold text-muted-foreground uppercase text-[10px] tracking-wider">Payer / Customer</div>
+                  <div className="font-bold text-muted-foreground uppercase text-[10px] tracking-wider">
+                    Payer / Customer
+                  </div>
                   <div className="font-semibold text-foreground text-sm">{selectedTxn.party}</div>
                   <div className="text-muted-foreground">Phone: {selectedTxn.partyPhone}</div>
-                  <div className="text-muted-foreground">Method: {selectedTxn.method}</div>
+                  {selectedTxn.method && (
+                    <div className="text-muted-foreground">Method: {selectedTxn.method}</div>
+                  )}
                 </div>
 
                 <div className="p-4 rounded-2xl bg-muted/20 border space-y-1">
-                  <div className="font-bold text-muted-foreground uppercase text-[10px] tracking-wider">Beneficiary / Seller</div>
+                  <div className="font-bold text-muted-foreground uppercase text-[10px] tracking-wider">
+                    Beneficiary / Seller
+                  </div>
                   <div className="font-semibold text-foreground text-sm">{selectedTxn.seller}</div>
                   <div className="text-muted-foreground">Type: {selectedTxn.type}</div>
                   <div className="text-muted-foreground">Category: {selectedTxn.category}</div>
@@ -339,7 +642,9 @@ function PaymentsPage() {
                     {selectedTxn.items.map((it: any, iIdx: number) => (
                       <div key={iIdx} className="pt-1.5 flex items-center justify-between gap-2">
                         <span className="font-medium text-foreground truncate">{it.name}</span>
-                        <span className="text-muted-foreground shrink-0">{it.quantity || 1} × ₹{it.price}</span>
+                        <span className="text-muted-foreground shrink-0">
+                          {it.quantity || 1} × ₹{it.price}
+                        </span>
                       </div>
                     ))}
                   </div>
@@ -352,3 +657,4 @@ function PaymentsPage() {
     </div>
   );
 }
+

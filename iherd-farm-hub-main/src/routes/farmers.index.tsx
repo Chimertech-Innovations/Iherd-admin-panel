@@ -20,6 +20,41 @@ import { getLocalizedText } from "@/lib/utils";
 import { getApiBaseUrlSync, isLocalHostname } from "@/lib/apiClient";
 
 
+function isValidFarmerName(name?: any): boolean {
+  if (!name || typeof name !== "string") return false;
+  const clean = name.trim();
+  if (!clean || clean === "—" || clean === "null" || clean === "undefined") return false;
+  const lower = clean.toLowerCase();
+  if (
+    lower === "user" ||
+    lower === "farmer" ||
+    lower === "seller" ||
+    lower === "admin" ||
+    lower === "registered farmer" ||
+    lower === "registered dairy farm" ||
+    lower === "registered farm" ||
+    lower.includes("registered farmer") ||
+    lower.startsWith("farmer #") ||
+    lower.startsWith("farmer (") ||
+    lower.startsWith("user #") ||
+    lower.startsWith("user (")
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function resolveFarmerName(...candidates: any[]): string {
+  for (const c of candidates) {
+    if (!c) continue;
+    const text = getLocalizedText(c, "").trim();
+    if (isValidFarmerName(text)) {
+      return text;
+    }
+  }
+  return "";
+}
+
 export const Route = createFileRoute("/farmers/")({
   head: () => ({ meta: [{ title: "Farmers Directory — iHerd Admin" }] }),
   component: FarmersPage,
@@ -49,6 +84,7 @@ function FarmersPage() {
   const { data: authUsers = [], isLoading: authLoading, isFetchingBalance } = useAdminUsers();
   const { data: firestoreUsers = [], isLoading: fsLoading } = useFirebaseCollection<any>("users");
   const { data: directFarmers = [], isLoading: directLoading } = useFirebaseCollection<any>("farmers");
+  const { data: roleDocs = [], isLoading: rolesLoading } = useFirebaseCollectionGroup<any>("roles");
   const { data: cattleList = [] } = useFirebaseCollection<any>("cattle_details");
   const { data: topFarms = [] } = useFirebaseCollection<any>("farms");
   const { data: groupFarms = [] } = useFirebaseCollectionGroup<any>("farms");
@@ -69,7 +105,10 @@ function FarmersPage() {
 
       for (const base of endpoints) {
         try {
-          const res = await fetch(`${base}/api/admin/farms`);
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 3000);
+          const res = await fetch(`${base}/api/admin/farms`, { signal: controller.signal });
+          clearTimeout(timer);
           if (res.ok) {
             const json = await res.json();
             if (Array.isArray(json.farms) && json.farms.length > 0 && isMounted) {
@@ -122,12 +161,12 @@ function FarmersPage() {
 
       const existing = map.get(owner) || {};
       map.set(owner, {
-        name: (ownerName && ownerName !== "Farmer" && ownerName !== "User") ? ownerName : existing.name,
+        name: isValidFarmerName(ownerName) ? ownerName : existing.name,
         phone: (phone && phone !== "—") ? phone : existing.phone,
         village: (village && village !== "—") ? village : existing.village,
         district: (district && district !== "—") ? district : existing.district,
         state: (state && state !== "—") ? state : existing.state,
-        farmName: farmName || existing.farmName,
+        farmName: (farmName && farmName !== "Registered Dairy Farm") ? farmName : existing.farmName,
         farmId: f.farmId || f.id || existing.farmId,
       });
     });
@@ -150,12 +189,12 @@ function FarmersPage() {
 
       const existing = map.get(owner) || {};
       map.set(owner, {
-        name: (ownerName && ownerName !== "Farmer" && ownerName !== "User") ? ownerName : existing.name,
+        name: isValidFarmerName(ownerName) ? ownerName : existing.name,
         phone: (phone && phone !== "—") ? phone : existing.phone,
         village: (village && village !== "—") ? village : existing.village,
         district: (district && district !== "—") ? district : existing.district,
         state: (state && state !== "—") ? state : existing.state,
-        farmName: farmName || existing.farmName,
+        farmName: (farmName && farmName !== "Registered Dairy Farm") ? farmName : existing.farmName,
         farmId: f.farmId || f.id || existing.farmId,
       });
     });
@@ -173,12 +212,12 @@ function FarmersPage() {
 
       const existing = map.get(owner) || {};
       map.set(owner, {
-        name: (ownerName && ownerName !== "Farmer" && ownerName !== "User") ? ownerName : existing.name,
+        name: isValidFarmerName(ownerName) ? ownerName : existing.name,
         phone: (phone && phone !== "—") ? phone : existing.phone,
         village: (village && village !== "—") ? village : existing.village,
         district: (district && district !== "—") ? district : existing.district,
         state: (state && state !== "—") ? state : existing.state,
-        farmName: farmName || existing.farmName,
+        farmName: (farmName && farmName !== "Registered Dairy Farm") ? farmName : existing.farmName,
         farmId: f.farmId || f.id || existing.farmId,
       });
     });
@@ -195,7 +234,7 @@ function FarmersPage() {
 
       const existing = map.get(owner) || {};
       map.set(owner, {
-        name: (ownerName && ownerName !== "Farmer" && ownerName !== "User") ? ownerName : existing.name,
+        name: isValidFarmerName(ownerName) ? ownerName : existing.name,
         phone: (phone && phone !== "—") ? phone : existing.phone,
         village: (village && village !== "—") ? village : existing.village,
         district: (district && district !== "—") ? district : existing.district,
@@ -208,14 +247,65 @@ function FarmersPage() {
     return map;
   }, [backendFarms, groupFarms, topFarms, cattleList]);
 
+  // Build fast multi-key lookup for Firestore users (by id, uid, and clean phone)
+  const fsUsersLookup = useMemo(() => {
+    const map = new Map<string, any>();
+    firestoreUsers.forEach((fu: any) => {
+      if (fu.id) map.set(fu.id, fu);
+      if (fu.uid) map.set(fu.uid, fu);
+      const cleanPhone = (fu.phoneNumber || fu.phone || "").replace(/\D/g, "").slice(-10);
+      if (cleanPhone) map.set(cleanPhone, fu);
+    });
+    return map;
+  }, [firestoreUsers]);
+
+  // Build fast multi-key lookup for direct farmers collection
+  const directFarmersLookup = useMemo(() => {
+    const map = new Map<string, any>();
+    directFarmers.forEach((df: any) => {
+      if (df.id) map.set(df.id, df);
+      if (df.uid) map.set(df.uid, df);
+      const cleanPhone = (df.farmerPhoneNumber || df.phoneNumber || df.phone || "").replace(/\D/g, "").slice(-10);
+      if (cleanPhone) map.set(cleanPhone, df);
+    });
+    return map;
+  }, [directFarmers]);
+
+  // Build fast multi-key lookup for farmer role documents from /users/{uid}/roles/farmer
+  const farmerRoleMap = useMemo(() => {
+    const map = new Map<string, any>();
+    roleDocs.forEach((rd: any) => {
+      const isFarmerDoc = (rd.id || "").toLowerCase() === "farmer" || rd.farmerPhoneNumber || rd._path?.includes("/roles/farmer");
+      if (!isFarmerDoc) return;
+
+      let uid = rd.uid || rd.userId;
+      if (!uid && rd._path) {
+        const parts = rd._path.split("/");
+        if (parts[0] === "users" && parts[1]) uid = parts[1];
+      }
+      if (!uid) uid = rd.id;
+
+      if (uid) {
+        map.set(uid, { ...rd, uid });
+      }
+      const p = (rd.farmerPhoneNumber || rd.phone || rd.phoneNumber || "").replace(/\D/g, "").slice(-10);
+      if (p) {
+        map.set(p, { ...rd, uid });
+      }
+    });
+    return map;
+  }, [roleDocs]);
+
   const farmerMap = new Map<string, any>();
 
-  // 1. Process Auth users merged with Firestore profiles
+  // 1. Process Auth users merged with Firestore profiles & role documents
   authUsers.forEach((authUser: any) => {
     const uid = authUser.uid;
-    const fsUser = firestoreUsers.find((fu: any) => fu.id === uid || fu.uid === uid);
-    const directFarmer = directFarmers.find((df: any) => df.id === uid || df.uid === uid);
-    const meta = farmerMetaMap.get(uid) || {};
+    const cleanAuthPhone = (authUser.phoneNumber || authUser.phone || "").replace(/\D/g, "").slice(-10);
+    const fsUser = fsUsersLookup.get(uid) || (cleanAuthPhone ? fsUsersLookup.get(cleanAuthPhone) : null) || {};
+    const directFarmer = directFarmersLookup.get(uid) || (cleanAuthPhone ? directFarmersLookup.get(cleanAuthPhone) : null) || null;
+    const roleData = farmerRoleMap.get(uid) || (cleanAuthPhone ? farmerRoleMap.get(cleanAuthPhone) : null) || null;
+    const meta = farmerMetaMap.get(uid) || (cleanAuthPhone ? farmerMetaMap.get(cleanAuthPhone) : null) || {};
 
     const fsRoles = fsUser?.roles || (fsUser?.role ? [fsUser.role] : []);
     const fsRolesList: string[] = Array.isArray(fsRoles) ? fsRoles : [String(fsRoles)];
@@ -226,6 +316,7 @@ function FarmersPage() {
       authUser.isFarmer === true ||
       Boolean(authUser.farmer);
     const hasDirectFarmerDoc = Boolean(directFarmer);
+    const hasRoleDoc = Boolean(roleData);
     const hasFarm = Boolean(
       meta.farmId ||
       meta.farmName ||
@@ -239,15 +330,17 @@ function FarmersPage() {
         (fsUser.farmer.farmName ||
           fsUser.farmer.farmerName ||
           (fsUser.farmer.village && fsUser.farmer.village !== "—") ||
-          (fsUser.farmer.name && fsUser.farmer.name !== "Farmer" && !fsUser.farmer.name.startsWith("Farmer (") && !fsUser.farmer.name.startsWith("Farmer #")))) ||
+          isValidFarmerName(fsUser.farmer.name) ||
+          isValidFarmerName(fsUser.farmer.farmerName))) ||
       (authUser?.farmer && typeof authUser.farmer === "object")
     );
 
-    const isFarmer = hasFarmerRole || hasAuthFarmerRole || hasDirectFarmerDoc || hasFarm || hasCattle || hasGenuineFarmerProfile || fsUser?.isFarmer === true;
+    const isFarmer = hasRoleDoc || hasFarmerRole || hasAuthFarmerRole || hasDirectFarmerDoc || hasFarm || hasCattle || hasGenuineFarmerProfile || fsUser?.isFarmer === true;
 
     if (isFarmer) {
-      const farmerProfile = fsUser?.farmer || authUser?.farmer || directFarmer || {};
+      const farmerProfile = roleData || fsUser?.farmer || authUser?.farmer || directFarmer || {};
       const rawTimestamp = parseTime(
+        roleData?.createdAt ||
         fsUser?.createdAt ||
         farmerProfile?.createdAt ||
         authUser?.createdAt ||
@@ -256,27 +349,43 @@ function FarmersPage() {
       );
 
       const phone =
-        (authUser?.phoneNumber && authUser.phoneNumber !== "—") ? authUser.phoneNumber :
-        (fsUser?.phoneNumber && fsUser.phoneNumber !== "—") ? fsUser.phoneNumber :
-        (meta.phone && meta.phone !== "—") ? meta.phone :
-        (farmerProfile.farmerPhoneNumber && farmerProfile.farmerPhoneNumber !== "—") ? farmerProfile.farmerPhoneNumber :
-        (fsUser?.phone && fsUser.phone !== "—") ? fsUser.phone :
-        (authUser?.phone && authUser.phone !== "—") ? authUser.phone :
+        roleData?.farmerPhoneNumber ||
+        roleData?.phone ||
+        (authUser?.phoneNumber && authUser.phoneNumber !== "—" ? authUser.phoneNumber : null) ||
+        (fsUser?.phoneNumber && fsUser.phoneNumber !== "—" ? fsUser.phoneNumber : null) ||
+        (meta.phone && meta.phone !== "—" ? meta.phone : null) ||
+        (farmerProfile.farmerPhoneNumber && farmerProfile.farmerPhoneNumber !== "—" ? farmerProfile.farmerPhoneNumber : null) ||
+        (fsUser?.phone && fsUser.phone !== "—" ? fsUser.phone : null) ||
+        (authUser?.phone && authUser.phone !== "—" ? authUser.phone : null) ||
         "—";
 
-      let resolvedName =
-        (meta.name && meta.name !== "User" && meta.name !== "Farmer" && !meta.name.startsWith("Farmer (") && !meta.name.startsWith("Farmer #")) ? meta.name :
-        (farmerProfile.name && farmerProfile.name !== "User" && farmerProfile.name !== "Farmer" && !farmerProfile.name.startsWith("Farmer (") && !farmerProfile.name.startsWith("Farmer #")) ? farmerProfile.name :
-        (farmerProfile.farmerName && farmerProfile.farmerName !== "User" && !farmerProfile.farmerName.startsWith("Farmer")) ? farmerProfile.farmerName :
-        (fsUser?.farmerName && fsUser?.farmerName !== "User" && !fsUser?.farmerName.startsWith("Farmer")) ? fsUser.farmerName :
-        (fsUser?.fullName && fsUser?.fullName !== "User" && !fsUser?.fullName.startsWith("Farmer")) ? fsUser.fullName :
-        (fsUser?.name && fsUser?.name !== "User" && !fsUser?.name.startsWith("Farmer")) ? fsUser.name :
-        (fsUser?.displayName && fsUser?.displayName !== "User" && !fsUser?.displayName.startsWith("Farmer")) ? fsUser.displayName :
-        (authUser?.displayName && authUser?.displayName !== "User" && !authUser?.displayName.startsWith("Farmer") && !authUser?.displayName.startsWith("User (")) ? authUser.displayName :
-        (authUser?.name && authUser?.name !== "User" && !authUser?.name.startsWith("Farmer")) ? authUser.name :
-        "";
+      let resolvedName = resolveFarmerName(
+        roleData?.name,
+        roleData?.farmerName,
+        farmerProfile.farmerName,
+        farmerProfile.name,
+        farmerProfile.fullName,
+        directFarmer?.farmerName,
+        directFarmer?.name,
+        directFarmer?.fullName,
+        fsUser?.fullName,
+        fsUser?.name,
+        fsUser?.displayName,
+        fsUser?.farmerName,
+        authUser?.displayName,
+        authUser?.name,
+        meta.name
+      );
 
-      if (!resolvedName || resolvedName.toLowerCase() === "user" || resolvedName.toLowerCase() === "farmer") {
+      // Extract farmer name from farm title if it contains "'s" (e.g. "Ramesh's Dairy Farm" -> "Ramesh")
+      if (!resolvedName && meta.farmName && meta.farmName.includes("'s")) {
+        const extracted = meta.farmName.split("'s")[0].trim();
+        if (isValidFarmerName(extracted)) {
+          resolvedName = extracted;
+        }
+      }
+
+      if (!resolvedName) {
         if (phone && phone !== "—") {
           resolvedName = `Farmer (${phone})`;
         } else {
@@ -284,9 +393,9 @@ function FarmersPage() {
         }
       }
 
-      const village = meta.village || farmerProfile.village || fsUser?.village || authUser?.village || authUser?.farmer?.village || "—";
-      const district = meta.district || farmerProfile.district || fsUser?.district || authUser?.district || authUser?.farmer?.district || "—";
-      const state = meta.state || farmerProfile.state || fsUser?.state || authUser?.state || authUser?.farmer?.state || "—";
+      const village = roleData?.village || meta.village || farmerProfile.village || fsUser?.village || authUser?.village || authUser?.farmer?.village || "—";
+      const district = roleData?.district || meta.district || farmerProfile.district || fsUser?.district || authUser?.district || authUser?.farmer?.district || "—";
+      const state = roleData?.state || meta.state || farmerProfile.state || fsUser?.state || authUser?.state || authUser?.farmer?.state || "—";
 
       const trackedCattle = cattleCountMap.get(uid) || Number(farmerProfile.cattle || fsUser?.cattle || 0);
       const registeredFarmName = meta.farmName || (fsUser?.farms?.name || farmerProfile?.farmName || authUser?.farms?.name || null);
@@ -314,51 +423,72 @@ function FarmersPage() {
     const uid = fsUser.id || fsUser.uid;
     if (!uid || farmerMap.has(uid)) return;
 
-    const meta = farmerMetaMap.get(uid) || {};
+    const cleanPhone = (fsUser.phoneNumber || fsUser.phone || "").replace(/\D/g, "").slice(-10);
+    const roleData = farmerRoleMap.get(uid) || (cleanPhone ? farmerRoleMap.get(cleanPhone) : null) || null;
+    const meta = farmerMetaMap.get(uid) || (cleanPhone ? farmerMetaMap.get(cleanPhone) : null) || {};
     const rawRoles = fsUser.roles || (fsUser.role ? [fsUser.role] : []);
     const roles: string[] = Array.isArray(rawRoles) ? rawRoles : [String(rawRoles)];
     const hasFarmerRole = roles.some((r: any) => typeof r === "string" && r.toLowerCase().includes("farmer"));
-    const directFarmer = directFarmers.find((df: any) => df.id === uid || df.uid === uid);
+    const directFarmer = directFarmersLookup.get(uid) || (cleanPhone ? directFarmersLookup.get(cleanPhone) : null) || null;
     const hasDirectFarmerDoc = Boolean(directFarmer);
+    const hasRoleDoc = Boolean(roleData);
     const hasFarm = Boolean(meta.farmId || meta.farmName || (fsUser.farms && typeof fsUser.farms === "object" && (fsUser.farms.name || fsUser.farms.farmName || (Array.isArray(fsUser.farms) && fsUser.farms.length > 0))));
     const hasCattle = (cattleCountMap.get(uid) || 0) > 0;
     const hasGenuineFarmerProfile = Boolean(
-      fsUser.farmer &&
-      typeof fsUser.farmer === "object" &&
-      (fsUser.farmer.farmName ||
-       fsUser.farmer.farmerName ||
-       (fsUser.farmer.village && fsUser.farmer.village !== "—") ||
-       (fsUser.farmer.name && fsUser.farmer.name !== "Farmer" && !fsUser.farmer.name.startsWith("Farmer (") && !fsUser.farmer.name.startsWith("Farmer #")))
+      (fsUser.farmer &&
+        typeof fsUser.farmer === "object" &&
+        (fsUser.farmer.farmName ||
+         fsUser.farmer.farmerName ||
+         (fsUser.farmer.village && fsUser.farmer.village !== "—") ||
+         isValidFarmerName(fsUser.farmer.name) ||
+         isValidFarmerName(fsUser.farmer.farmerName))) ||
+      hasRoleDoc
     );
 
-    const isFarmer = hasFarmerRole || hasDirectFarmerDoc || hasFarm || hasCattle || hasGenuineFarmerProfile || fsUser.isFarmer === true;
+    const isFarmer = hasRoleDoc || hasFarmerRole || hasDirectFarmerDoc || hasFarm || hasCattle || hasGenuineFarmerProfile || fsUser.isFarmer === true;
 
     if (isFarmer) {
-      const farmerProfile = fsUser.farmer || directFarmer || {};
+      const farmerProfile = roleData || fsUser.farmer || directFarmer || {};
       const rawTimestamp = parseTime(
+        roleData?.createdAt ||
         fsUser.createdAt ||
         farmerProfile?.createdAt ||
         directFarmer?.createdAt
       );
 
       const phone =
-        (fsUser.phoneNumber && fsUser.phoneNumber !== "—") ? fsUser.phoneNumber :
-        (meta.phone && meta.phone !== "—") ? meta.phone :
-        (farmerProfile.farmerPhoneNumber && farmerProfile.farmerPhoneNumber !== "—") ? farmerProfile.farmerPhoneNumber :
-        (fsUser.phone && fsUser.phone !== "—") ? fsUser.phone :
+        roleData?.farmerPhoneNumber ||
+        roleData?.phone ||
+        (fsUser.phoneNumber && fsUser.phoneNumber !== "—" ? fsUser.phoneNumber : null) ||
+        (meta.phone && meta.phone !== "—" ? meta.phone : null) ||
+        (farmerProfile.farmerPhoneNumber && farmerProfile.farmerPhoneNumber !== "—" ? farmerProfile.farmerPhoneNumber : null) ||
+        (fsUser.phone && fsUser.phone !== "—" ? fsUser.phone : null) ||
         "—";
 
-      let resolvedName =
-        (meta.name && meta.name !== "User" && meta.name !== "Farmer" && !meta.name.startsWith("Farmer (") && !meta.name.startsWith("Farmer #")) ? meta.name :
-        (farmerProfile.name && farmerProfile.name !== "User" && farmerProfile.name !== "Farmer" && !farmerProfile.name.startsWith("Farmer (") && !farmerProfile.name.startsWith("Farmer #")) ? farmerProfile.name :
-        (farmerProfile.farmerName && farmerProfile.farmerName !== "User" && !farmerProfile.farmerName.startsWith("Farmer")) ? farmerProfile.farmerName :
-        (fsUser?.farmerName && fsUser?.farmerName !== "User" && !fsUser?.farmerName.startsWith("Farmer")) ? fsUser.farmerName :
-        (fsUser?.fullName && fsUser?.fullName !== "User" && !fsUser?.fullName.startsWith("Farmer")) ? fsUser.fullName :
-        (fsUser?.name && fsUser?.name !== "User" && !fsUser?.name.startsWith("Farmer")) ? fsUser.name :
-        (fsUser?.displayName && fsUser?.displayName !== "User" && !fsUser?.displayName.startsWith("Farmer")) ? fsUser.displayName :
-        "";
+      let resolvedName = resolveFarmerName(
+        roleData?.name,
+        roleData?.farmerName,
+        farmerProfile.farmerName,
+        farmerProfile.name,
+        farmerProfile.fullName,
+        directFarmer?.farmerName,
+        directFarmer?.name,
+        directFarmer?.fullName,
+        fsUser.fullName,
+        fsUser.name,
+        fsUser.displayName,
+        fsUser.farmerName,
+        meta.name
+      );
 
-      if (!resolvedName || resolvedName.toLowerCase() === "user" || resolvedName.toLowerCase() === "farmer") {
+      if (!resolvedName && meta.farmName && meta.farmName.includes("'s")) {
+        const extracted = meta.farmName.split("'s")[0].trim();
+        if (isValidFarmerName(extracted)) {
+          resolvedName = extracted;
+        }
+      }
+
+      if (!resolvedName) {
         if (phone && phone !== "—") {
           resolvedName = `Farmer (${phone})`;
         } else {
@@ -366,9 +496,9 @@ function FarmersPage() {
         }
       }
 
-      const village = meta.village || farmerProfile.village || fsUser.village || "—";
-      const district = meta.district || farmerProfile.district || fsUser.district || "—";
-      const state = meta.state || farmerProfile.state || fsUser.state || "—";
+      const village = roleData?.village || meta.village || farmerProfile.village || fsUser.village || "—";
+      const district = roleData?.district || meta.district || farmerProfile.district || fsUser.district || "—";
+      const state = roleData?.state || meta.state || farmerProfile.state || fsUser.state || "—";
 
       const trackedCattle = cattleCountMap.get(uid) || Number(farmerProfile.cattle || fsUser.cattle || 0);
       const registeredFarmName = meta.farmName || (fsUser.farms?.name || farmerProfile?.farmName || null);
@@ -399,7 +529,12 @@ function FarmersPage() {
     const meta = farmerMetaMap.get(uid) || {};
     const rawTimestamp = parseTime(df.createdAt || df.timestamp);
     const phone = df.phone || df.farmerPhoneNumber || df.phoneNumber || meta.phone || "—";
-    const name = df.name || df.farmerName || meta.name || (phone !== "—" ? `Farmer (${phone})` : `Farmer #${uid.slice(-6).toUpperCase()}`);
+    const name = resolveFarmerName(
+      df.farmerName,
+      df.name,
+      df.fullName,
+      meta.name
+    ) || (phone !== "—" ? `Farmer (${phone})` : `Farmer #${uid.slice(-6).toUpperCase()}`);
     const village = df.village || meta.village || "—";
     const district = df.district || meta.district || "—";
     const state = df.state || meta.state || "—";
@@ -423,12 +558,48 @@ function FarmersPage() {
     });
   });
 
+  // 4. Ensure ALL farmers registered in /users/{uid}/roles/farmer are included
+  farmerRoleMap.forEach((rd: any, key: string) => {
+    const uid = rd.uid;
+    if (!uid || farmerMap.has(uid)) return;
+
+    const meta = farmerMetaMap.get(uid) || {};
+    const rawTimestamp = parseTime(rd.createdAt || rd.timestamp || rd.updatedAt);
+    const phone = rd.farmerPhoneNumber || rd.phone || rd.phoneNumber || meta.phone || "—";
+    const name = resolveFarmerName(
+      rd.name,
+      rd.farmerName,
+      meta.name
+    ) || (phone !== "—" ? `Farmer (${phone})` : `Farmer #${uid.slice(-6).toUpperCase()}`);
+    const village = rd.village || meta.village || "—";
+    const district = rd.district || meta.district || "—";
+    const state = rd.state || meta.state || "—";
+    const trackedCattle = cattleCountMap.get(uid) || 0;
+    const registeredFarmName = meta.farmName || null;
+
+    farmerMap.set(uid, {
+      id: uid,
+      uid,
+      name: getLocalizedText(name),
+      phone,
+      village: getLocalizedText(village),
+      district: getLocalizedText(district),
+      state: getLocalizedText(state),
+      cattleCount: trackedCattle,
+      registeredFarmName,
+      hasFarm: Boolean(registeredFarmName),
+      joined: formatDate(rawTimestamp),
+      rawTimestamp,
+      status: "Active",
+    });
+  });
+
   // Sort by newest registration first
   const allFarmers = Array.from(farmerMap.values()).sort(
     (a, b) => (b.rawTimestamp || 0) - (a.rawTimestamp || 0)
   );
 
-  const isLoading = (authLoading || fsLoading || directLoading) && allFarmers.length === 0;
+  const isLoading = (authLoading || fsLoading || directLoading || rolesLoading) && allFarmers.length === 0;
 
   const totalFarmers = allFarmers.length;
   const activeFarmers = allFarmers.filter((f) => f.status.toLowerCase() === "active" || !f.status).length;

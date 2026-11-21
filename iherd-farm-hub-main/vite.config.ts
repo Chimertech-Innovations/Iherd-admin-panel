@@ -21,6 +21,20 @@ export default defineConfig({
         "/api": {
           target: "http://127.0.0.1:5000",
           changeOrigin: true,
+          configure: (proxy) => {
+            proxy.on("error", (err, _req, res) => {
+              // Silently handle benign browser navigation cancels or socket resets
+              if ((err as any)?.code === "ECONNRESET" || err?.message === "aborted") {
+                return;
+              }
+              if (res && "writeHead" in res && !res.headersSent) {
+                try {
+                  res.writeHead(502, { "Content-Type": "application/json" });
+                  res.end(JSON.stringify({ error: "Proxy connection error", message: err?.message }));
+                } catch {}
+              }
+            });
+          },
         },
       },
     },

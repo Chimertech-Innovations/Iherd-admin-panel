@@ -54,6 +54,7 @@ import {
   Ban,
   RefreshCw,
   Sparkles,
+  Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useCoupons, useAdminProducts, type Coupon } from "@/hooks/useFirebaseData";
@@ -487,18 +488,17 @@ function CouponsPage() {
             </TableHeader>
             <TableBody>
               {isLoading ? (
-                Array.from({ length: 5 }).map((_, i) => (
-                  <TableRow key={i} className="animate-pulse">
-                    <TableCell><div className="h-6 w-28 bg-muted/70 rounded-md animate-pulse" /></TableCell>
-                    <TableCell><div className="h-5 w-16 bg-muted/60 rounded animate-pulse" /></TableCell>
-                    <TableCell><div className="h-5 w-24 bg-muted/50 rounded-full animate-pulse" /></TableCell>
-                    <TableCell><div className="h-5 w-16 bg-muted/50 rounded animate-pulse" /></TableCell>
-                    <TableCell><div className="h-5 w-14 bg-muted/50 rounded animate-pulse" /></TableCell>
-                    <TableCell><div className="h-5 w-20 bg-muted/50 rounded animate-pulse" /></TableCell>
-                    <TableCell><div className="h-5 w-16 bg-muted/60 rounded-full animate-pulse" /></TableCell>
-                    <TableCell className="text-right"><div className="h-8 w-20 bg-muted/60 rounded-lg ml-auto animate-pulse" /></TableCell>
-                  </TableRow>
-                ))
+                <TableRow>
+                  <TableCell colSpan={8} className="h-64 text-center">
+                    <div className="flex flex-col items-center justify-center gap-3 py-10">
+                      <Loader2 className="h-10 w-10 animate-spin text-primary" />
+                      <div className="space-y-1">
+                        <p className="text-sm font-semibold text-foreground">Loading coupons from database...</p>
+                        <p className="text-xs text-muted-foreground">Please wait while coupons are retrieved</p>
+                      </div>
+                    </div>
+                  </TableCell>
+                </TableRow>
               ) : filteredCoupons.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={8} className="text-center text-muted-foreground py-12">

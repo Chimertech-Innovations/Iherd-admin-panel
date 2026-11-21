@@ -234,7 +234,10 @@ function FarmsPage() {
         id: key,
         farmId: key,
         name: getLocalizedText(f.name || f.farmName, "Registered Dairy Farm"),
-        ownerName: getLocalizedText(f.ownerName || f.farmerName || ownerUser.name, "Registered Farmer"),
+        ownerName: getLocalizedText(
+          f.ownerName || f.farmerName || ownerUser.fullName || ownerUser.name || ownerUser.displayName,
+          ownerUser.phone ? `Farmer (${ownerUser.phone})` : (ownerUid ? `Farmer #${ownerUid.slice(-6).toUpperCase()}` : "Farmer")
+        ),
         ownerUid,
         farmPhoneNumber: getLocalizedText(f.farmPhoneNumber || f.phone || ownerUser.phone, "—"),
         animal: getLocalizedText(f.animal, "Cow / Cattle"),
@@ -270,7 +273,7 @@ function FarmsPage() {
         id: key,
         farmId: key,
         name: getLocalizedText(bf.name || bf.farmName || existing.name, "Registered Dairy Farm"),
-        ownerName: getLocalizedText(bf.ownerName || existing.ownerName, "Registered Farmer"),
+        ownerName: getLocalizedText(bf.ownerName || existing.ownerName, bf.farmPhoneNumber ? `Farmer (${bf.farmPhoneNumber})` : "Farmer"),
         farmPhoneNumber: getLocalizedText(bf.farmPhoneNumber || bf.phone || existing.farmPhoneNumber, "—"),
         village: getLocalizedText(bf.village || existing.village, "—"),
         district: getLocalizedText(bf.district || existing.district, "—"),

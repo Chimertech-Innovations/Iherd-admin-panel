@@ -21,11 +21,12 @@ const firebaseConfig = {
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 const auth = getAuth(app);
 
-// Initialize Firestore with Persistent IndexedDB Cache in the browser
+// Initialize Firestore with Persistent IndexedDB Cache and auto-detecting long polling in the browser
 let db: ReturnType<typeof getFirestore>;
 try {
   if (typeof window !== "undefined") {
     db = initializeFirestore(app, {
+      experimentalAutoDetectLongPolling: true,
       localCache: persistentLocalCache({
         tabManager: persistentMultipleTabManager(),
       }),

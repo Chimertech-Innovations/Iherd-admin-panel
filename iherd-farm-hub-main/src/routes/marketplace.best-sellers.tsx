@@ -42,6 +42,7 @@ import {
   Eye,
   Download,
   X,
+  Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAdminProducts, useFirebaseCollection, useBestSellers } from "@/hooks/useFirebaseData";
@@ -351,13 +352,17 @@ function BestSellersPage() {
             </TableHeader>
             <TableBody>
               {productsLoading ? (
-                Array.from({ length: 4 }).map((_, i) => (
-                  <TableRow key={i}>
-                    <TableCell colSpan={8} className="py-4 text-center">
-                      <div className="h-4 bg-muted rounded animate-pulse w-3/4 mx-auto" />
-                    </TableCell>
-                  </TableRow>
-                ))
+                <TableRow>
+                  <TableCell colSpan={8} className="h-64 text-center">
+                    <div className="flex flex-col items-center justify-center gap-3 py-10">
+                      <Loader2 className="h-10 w-10 animate-spin text-primary" />
+                      <div className="space-y-1">
+                        <p className="text-sm font-semibold text-foreground">Loading best seller products...</p>
+                        <p className="text-xs text-muted-foreground">Please wait while products are retrieved</p>
+                      </div>
+                    </div>
+                  </TableCell>
+                </TableRow>
               ) : filteredBestSellers.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={8} className="text-center text-muted-foreground py-12">

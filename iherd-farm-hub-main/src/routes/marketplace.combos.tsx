@@ -55,6 +55,7 @@ import {
   X,
   Globe,
   FileSpreadsheet,
+  Loader2,
 } from "lucide-react";
 import { BulkCsvUploadDialog } from "@/components/admin/BulkCsvUploadDialog";
 import { toast } from "sonner";
@@ -1222,10 +1223,13 @@ function CombosPage() {
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={8} className="h-32 text-center text-xs text-muted-foreground">
-                  <div className="flex items-center justify-center gap-2">
-                    <RefreshCw className="h-4 w-4 animate-spin text-primary" />
-                    Loading combo bundles from Firestore...
+                <TableCell colSpan={8} className="h-64 text-center">
+                  <div className="flex flex-col items-center justify-center gap-3 py-10">
+                    <Loader2 className="h-10 w-10 animate-spin text-primary" />
+                    <div className="space-y-1">
+                      <p className="text-sm font-semibold text-foreground">Loading combos from database...</p>
+                      <p className="text-xs text-muted-foreground">Please wait while combo products are retrieved</p>
+                    </div>
                   </div>
                 </TableCell>
               </TableRow>

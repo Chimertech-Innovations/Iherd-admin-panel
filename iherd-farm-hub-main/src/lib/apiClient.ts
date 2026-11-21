@@ -71,6 +71,36 @@ export function getApiBaseUrlSync(): string {
 }
 
 /**
+ * High-speed backend JSON fetch helper with a strict default 2.5s abort timeout.
+ * Prevents UI freezes/hangs when the local backend (port 5000) or Render cold-start is inactive.
+ */
+export async function fastFetchBackend<T = any>(
+  pathOrUrl: string,
+  timeoutMs = 2500
+): Promise<T | null> {
+  const base = getApiBaseUrlSync();
+  const url = pathOrUrl.startsWith("http")
+    ? pathOrUrl
+    : `${base}${pathOrUrl.startsWith("/") ? "" : "/"}${pathOrUrl}`;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: { Accept: "application/json" },
+    });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    return (await res.json()) as T;
+  } catch {
+    clearTimeout(timer);
+    return null;
+  }
+}
+
+/**
  * High-speed JSON fetch helper with timeout
  */
 export async function fetchApiJson<T = any>(

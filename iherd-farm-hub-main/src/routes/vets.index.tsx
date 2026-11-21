@@ -3,7 +3,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { DataPage } from "@/components/admin/DataPage";
 import { StatusBadge } from "@/components/admin/StatusBadge";
 import { useAdminUsers } from "../hooks/useAdminUsers";
-import { useFirebaseCollection } from "../hooks/useFirebaseData";
+import { useFirebaseCollection, useFirebaseCollectionGroup } from "../hooks/useFirebaseData";
 import { getLocalizedText } from "@/lib/utils";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -121,13 +121,41 @@ function VetsPage() {
   const { data: authUsers = [], isLoading: authLoading, refetch: refetchAuth } = useAdminUsers();
   const { data: firestoreUsers = [], isLoading: fsLoading, refetch: refetchFs } = useFirebaseCollection<any>("users");
   const { data: directVets = [], isLoading: vetsLoading, refetch: refetchVets } = useFirebaseCollection<any>("vets");
-  const isLoading = authLoading || fsLoading || vetsLoading;
+  const { data: roleDocs = [], isLoading: rolesLoading, refetch: refetchRoles } = useFirebaseCollectionGroup<any>("roles");
+  const isLoading = authLoading || fsLoading || vetsLoading || rolesLoading;
 
   const handleRefresh = () => {
     refetchAuth();
     refetchFs();
     refetchVets();
+    refetchRoles();
   };
+
+  // Build lookup map for veterinarian role documents from /users/{uid}/roles/veterinarian
+  const vetRoleDocsByUid = new Map<string, any>();
+  roleDocs.forEach((rd: any) => {
+    const isVetDoc =
+      (rd.id || "").toLowerCase() === "veterinarian" ||
+      (rd.id || "").toLowerCase() === "vet" ||
+      rd.role === "veterinarian" ||
+      rd.vetPhoneNumber ||
+      rd._path?.includes("/roles/veterinarian");
+    if (!isVetDoc) return;
+
+    let uid = rd.uid || rd.userId;
+    if (!uid && rd._path) {
+      const parts = rd._path.split("/");
+      if (parts[0] === "users" && parts[1]) uid = parts[1];
+    }
+    if (!uid) uid = rd.id;
+    if (uid) {
+      vetRoleDocsByUid.set(uid, { ...rd, uid });
+    }
+    const cleanP = (rd.vetPhoneNumber || rd.phone || rd.phoneNumber || "").replace(/\D/g, "").slice(-10);
+    if (cleanP) {
+      vetRoleDocsByUid.set(cleanP, { ...rd, uid });
+    }
+  });
 
   const vetMap = new Map<string, any>();
 
@@ -155,19 +183,23 @@ function VetsPage() {
       verified: Boolean(dv.verified || dv.isVerified),
       city: dv.city || dv.district || "—",
       state: dv.state || "—",
+      location: [dv.city || dv.district, dv.state].filter((x) => x && x !== "—").join(", ") || "—",
     });
   });
 
-  // 2. Process Auth users merged with Firestore profiles
+  // 2. Process Auth users merged with Firestore profiles and role documents
   authUsers.forEach((authUser: any) => {
     const uid = authUser.uid;
-    const fsUser = firestoreUsers.find((fu: any) => fu.id === uid || fu.uid === uid);
+    const cleanPhone = (authUser.phoneNumber || authUser.phone || "").replace(/\D/g, "").slice(-10);
+    const fsUser = firestoreUsers.find((fu: any) => fu.id === uid || fu.uid === uid) || {};
     const directVet = directVets.find((dv: any) => dv.id === uid || dv.uid === uid);
+    const roleVet = vetRoleDocsByUid.get(uid) || (cleanPhone ? vetRoleDocsByUid.get(cleanPhone) : null);
 
     const fsRoles = fsUser?.roles || (fsUser?.role ? [fsUser.role] : authUser?.roles || []);
     const roles: string[] = Array.isArray(fsRoles) ? fsRoles : [String(fsRoles)];
     const hasVetRole = roles.some((r: any) => typeof r === "string" && (r.toLowerCase().includes("vet") || r.toLowerCase().includes("veterinarian")));
     const hasDirectVetDoc = Boolean(directVet);
+    const hasRoleDoc = Boolean(roleVet);
     const hasVetProfile = Boolean(
       (fsUser?.veterinarian && typeof fsUser.veterinarian === "object") ||
       (fsUser?.vet && typeof fsUser.vet === "object") ||
@@ -177,11 +209,12 @@ function VetsPage() {
       authUser?.isVet === true
     );
 
-    const isVet = hasVetRole || hasDirectVetDoc || hasVetProfile;
+    const isVet = hasRoleDoc || hasVetRole || hasDirectVetDoc || hasVetProfile;
 
     if (isVet) {
-      const vetDetails = fsUser?.veterinarian || fsUser?.vet || authUser?.veterinarian || authUser?.vet || directVet || {};
+      const vetDetails = roleVet || fsUser?.veterinarian || fsUser?.vet || authUser?.veterinarian || authUser?.vet || directVet || {};
       const rawTimestamp = parseTime(
+        roleVet?.createdAt ||
         vetDetails?.createdAt ||
         fsUser?.createdAt ||
         authUser?.createdAt ||
@@ -190,6 +223,8 @@ function VetsPage() {
       );
 
       const phone =
+        (roleVet?.vetPhoneNumber && roleVet.vetPhoneNumber !== "—") ? roleVet.vetPhoneNumber :
+        (roleVet?.phone && roleVet.phone !== "—") ? roleVet.phone :
         (vetDetails.phone && vetDetails.phone !== "—") ? vetDetails.phone :
         (vetDetails.vetPhoneNumber && vetDetails.vetPhoneNumber !== "—") ? vetDetails.vetPhoneNumber :
         (authUser?.phoneNumber && authUser.phoneNumber !== "—") ? authUser.phoneNumber :
@@ -197,8 +232,10 @@ function VetsPage() {
         "—";
 
       const explicitName =
+        (roleVet?.name && !roleVet.name.startsWith("User") && !roleVet.name.startsWith("Farmer")) ? roleVet.name :
+        (roleVet?.doctorName && !roleVet.doctorName.startsWith("User")) ? roleVet.doctorName :
         (vetDetails.doctorName && !vetDetails.doctorName.startsWith("User")) ? vetDetails.doctorName :
-        (vetDetails.name && !vetDetails.name.startsWith("User")) ? vetDetails.name :
+        (vetDetails.name && !vetDetails.name.startsWith("User") && !vetDetails.name.startsWith("Farmer")) ? vetDetails.name :
         (fsUser?.fullName && !fsUser.fullName.startsWith("Farmer") && !fsUser.fullName.startsWith("User")) ? fsUser.fullName :
         (fsUser?.name && !fsUser.name.startsWith("Farmer") && !fsUser.name.startsWith("User")) ? fsUser.name :
         (authUser?.displayName && !authUser.displayName.startsWith("Farmer") && !authUser.displayName.startsWith("User")) ? authUser.displayName :
@@ -208,20 +245,27 @@ function VetsPage() {
         ? (explicitName.startsWith("Dr.") ? explicitName : `Dr. ${explicitName}`)
         : (phone !== "—" ? `Dr. (${phone})` : `Dr. #${uid.slice(-6).toUpperCase()}`);
 
+      const village = roleVet?.village || roleVet?.city || roleVet?.district || vetDetails.city || vetDetails.village || fsUser?.district || fsUser?.village || "—";
+      const district = roleVet?.district || vetDetails.district || fsUser?.district || "—";
+      const state = roleVet?.state || vetDetails.state || fsUser?.state || "—";
+      const locParts = [village, district, state].filter((x) => x && x !== "—");
+      const location = locParts.length > 0 ? locParts.join(", ") : "—";
+
       vetMap.set(uid, {
         id: uid,
         uid,
         name: getLocalizedText(formattedName),
         phone,
-        clinic: getLocalizedText(vetDetails.clinic || vetDetails.hospital || vetDetails.addInstitution || "—"),
-        qualification: getLocalizedText(vetDetails.qualification || vetDetails.degree || "B.V.Sc & A.H"),
-        experience: vetDetails.yearsOfExperience || vetDetails.experience ? `${vetDetails.yearsOfExperience || vetDetails.experience} Years` : "—",
+        clinic: getLocalizedText(roleVet?.clinic || roleVet?.hospital || vetDetails.clinic || vetDetails.hospital || vetDetails.addInstitution || "—"),
+        qualification: getLocalizedText(roleVet?.qualification || vetDetails.qualification || vetDetails.degree || "B.V.Sc & A.H"),
+        experience: roleVet?.experience || roleVet?.yearsOfExperience || vetDetails.yearsOfExperience || vetDetails.experience ? `${roleVet?.experience || roleVet?.yearsOfExperience || vetDetails.yearsOfExperience || vetDetails.experience} Years` : "—",
         joined: formatDate(rawTimestamp),
         rawTimestamp,
-        status: fsUser?.status || authUser?.status || vetDetails.status || "Active",
-        verified: Boolean(vetDetails.verified || fsUser?.verified),
-        city: vetDetails.city || fsUser?.district || "—",
-        state: vetDetails.state || fsUser?.state || "—",
+        status: fsUser?.status || authUser?.status || roleVet?.status || vetDetails.status || "Active",
+        verified: Boolean(roleVet?.verified || vetDetails.verified || fsUser?.verified),
+        city: village,
+        state,
+        location,
       });
     }
   });
@@ -231,30 +275,38 @@ function VetsPage() {
     const uid = fsUser.id || fsUser.uid;
     if (!uid || vetMap.has(uid)) return;
 
+    const cleanPhone = (fsUser.phoneNumber || fsUser.phone || "").replace(/\D/g, "").slice(-10);
+    const roleVet = vetRoleDocsByUid.get(uid) || (cleanPhone ? vetRoleDocsByUid.get(cleanPhone) : null);
     const fsRoles = fsUser.roles || (fsUser.role ? [fsUser.role] : []);
     const roles: string[] = Array.isArray(fsRoles) ? fsRoles : [String(fsRoles)];
     const hasVetRole = roles.some((r: any) => typeof r === "string" && (r.toLowerCase().includes("vet") || r.toLowerCase().includes("veterinarian")));
+    const hasRoleDoc = Boolean(roleVet);
     const hasVetProfile = Boolean(
       (fsUser.veterinarian && typeof fsUser.veterinarian === "object") ||
       (fsUser.vet && typeof fsUser.vet === "object") ||
       fsUser.isVet === true
     );
 
-    if (hasVetRole || hasVetProfile) {
-      const vetDetails = fsUser.veterinarian || fsUser.vet || {};
+    if (hasRoleDoc || hasVetRole || hasVetProfile) {
+      const vetDetails = roleVet || fsUser.veterinarian || fsUser.vet || {};
       const rawTimestamp = parseTime(
+        roleVet?.createdAt ||
         vetDetails?.createdAt ||
         fsUser.createdAt
       );
 
       const phone =
+        (roleVet?.vetPhoneNumber && roleVet.vetPhoneNumber !== "—") ? roleVet.vetPhoneNumber :
+        (roleVet?.phone && roleVet.phone !== "—") ? roleVet.phone :
         (vetDetails.phone && vetDetails.phone !== "—") ? vetDetails.phone :
         (fsUser.phoneNumber && fsUser.phoneNumber !== "—") ? fsUser.phoneNumber :
         "—";
 
       const explicitName =
+        (roleVet?.name && !roleVet.name.startsWith("User") && !roleVet.name.startsWith("Farmer")) ? roleVet.name :
+        (roleVet?.doctorName && !roleVet.doctorName.startsWith("User")) ? roleVet.doctorName :
         (vetDetails.doctorName && !vetDetails.doctorName.startsWith("User")) ? vetDetails.doctorName :
-        (vetDetails.name && !vetDetails.name.startsWith("User")) ? vetDetails.name :
+        (vetDetails.name && !vetDetails.name.startsWith("User") && !vetDetails.name.startsWith("Farmer")) ? vetDetails.name :
         (fsUser.fullName && !fsUser.fullName.startsWith("Farmer") && !fsUser.fullName.startsWith("User")) ? fsUser.fullName :
         (fsUser.name && !fsUser.name.startsWith("Farmer") && !fsUser.name.startsWith("User")) ? fsUser.name :
         null;
@@ -263,23 +315,65 @@ function VetsPage() {
         ? (explicitName.startsWith("Dr.") ? explicitName : `Dr. ${explicitName}`)
         : (phone !== "—" ? `Dr. (${phone})` : `Dr. #${uid.slice(-6).toUpperCase()}`);
 
+      const village = roleVet?.village || roleVet?.city || roleVet?.district || vetDetails.city || fsUser.district || "—";
+      const district = roleVet?.district || vetDetails.district || fsUser.district || "—";
+      const state = roleVet?.state || vetDetails.state || fsUser.state || "—";
+      const locParts = [village, district, state].filter((x) => x && x !== "—");
+      const location = locParts.length > 0 ? locParts.join(", ") : "—";
+
       vetMap.set(uid, {
         id: uid,
         uid,
         name: getLocalizedText(formattedName),
         phone,
-        clinic: getLocalizedText(vetDetails.clinic || vetDetails.hospital || "—"),
-        qualification: getLocalizedText(vetDetails.qualification || "B.V.Sc & A.H"),
-        experience: vetDetails.yearsOfExperience || vetDetails.experience ? `${vetDetails.yearsOfExperience || vetDetails.experience} Years` : "—",
+        clinic: getLocalizedText(roleVet?.clinic || roleVet?.hospital || vetDetails.clinic || vetDetails.hospital || "—"),
+        qualification: getLocalizedText(roleVet?.qualification || vetDetails.qualification || "B.V.Sc & A.H"),
+        experience: roleVet?.experience || roleVet?.yearsOfExperience || vetDetails.yearsOfExperience || vetDetails.experience ? `${roleVet?.experience || roleVet?.yearsOfExperience || vetDetails.yearsOfExperience || vetDetails.experience} Years` : "—",
         joined: formatDate(rawTimestamp),
         rawTimestamp,
-        status: fsUser.status || vetDetails.status || "Active",
-        verified: Boolean(vetDetails.verified || fsUser.verified),
-        city: vetDetails.city || fsUser.district || "—",
-        state: vetDetails.state || fsUser.state || "—",
-        location: [vetDetails.city || fsUser.district, vetDetails.state || fsUser.state].filter(x => x && x !== "—").join(", ") || "—",
+        status: fsUser.status || roleVet?.status || vetDetails.status || "Active",
+        verified: Boolean(roleVet?.verified || vetDetails.verified || fsUser.verified),
+        city: village,
+        state,
+        location,
       });
     }
+  });
+
+  // 4. Process all remaining standalone veterinarian role documents from /users/{uid}/roles/veterinarian
+  vetRoleDocsByUid.forEach((rd: any, key: string) => {
+    const uid = rd.uid || key;
+    if (!uid || vetMap.has(uid) || key.length < 15) return;
+
+    const rawTimestamp = parseTime(rd.createdAt || rd.updatedAt);
+    const phone = rd.vetPhoneNumber || rd.phone || rd.phoneNumber || "—";
+    const explicitName = rd.name || rd.doctorName;
+    const formattedName = explicitName
+      ? (explicitName.startsWith("Dr.") ? explicitName : `Dr. ${explicitName}`)
+      : (phone !== "—" ? `Dr. (${phone})` : `Dr. #${uid.slice(-6).toUpperCase()}`);
+
+    const village = rd.village || rd.city || rd.district || "—";
+    const district = rd.district || "—";
+    const state = rd.state || "—";
+    const locParts = [village, district, state].filter((x) => x && x !== "—");
+    const location = locParts.length > 0 ? locParts.join(", ") : "—";
+
+    vetMap.set(uid, {
+      id: uid,
+      uid,
+      name: getLocalizedText(formattedName),
+      phone,
+      clinic: getLocalizedText(rd.clinic || rd.hospital || rd.institution || rd.address || "—"),
+      qualification: getLocalizedText(rd.qualification || rd.degree || "B.V.Sc & A.H"),
+      experience: rd.experience || rd.yearsOfExperience ? `${rd.experience || rd.yearsOfExperience} Years` : "—",
+      joined: formatDate(rawTimestamp),
+      rawTimestamp,
+      status: rd.status || "Active",
+      verified: Boolean(rd.verified || true),
+      city: village,
+      state,
+      location,
+    });
   });
 
   // Sort strictly by registration timestamp descending (latest registered first)

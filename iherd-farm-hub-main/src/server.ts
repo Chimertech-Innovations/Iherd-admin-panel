@@ -60,6 +60,13 @@ export default {
       const response = await handler.fetch(request, env, ctx);
       return await normalizeCatastrophicSsrResponse(response);
     } catch (error) {
+      if (
+        error &&
+        typeof error === "object" &&
+        ((error as any).code === "ECONNRESET" || (error as any).message === "aborted")
+      ) {
+        return new Response(null, { status: 499 });
+      }
       console.error(error);
       return new Response(renderErrorPage(), {
         status: 500,

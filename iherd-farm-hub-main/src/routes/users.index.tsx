@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { DataPage } from "@/components/admin/DataPage";
-import { useFirebaseCollection } from "../hooks/useFirebaseData";
+import { useFirebaseCollection, useFirebaseCollectionGroup } from "../hooks/useFirebaseData";
 import { useAdminUsers } from "../hooks/useAdminUsers";
 import { Phone, Mail, MapPin, Building, Store, Stethoscope, ExternalLink } from "lucide-react";
 
@@ -24,6 +24,9 @@ function UsersPage() {
 
   // 2. Fetch users collection from Firestore to merge live roles & profiles
   const { data: firestoreUsers = [], isLoading: firestoreLoading } = useFirebaseCollection<any>("users");
+
+  // 3. Fetch role documents across Firestore
+  const { data: roleDocs = [], isLoading: rolesLoading } = useFirebaseCollectionGroup<any>("roles");
 
   // Merge Auth users and Firestore user documents with instant O(1) matching
   const mergedUsers = useMemo(() => {
@@ -271,15 +274,71 @@ function UsersPage() {
       });
     });
 
+    // 3. Process standalone role documents from /users/{uid}/roles/*
+    roleDocs.forEach((rd: any) => {
+      const parts = (rd._path || "").split("/");
+      let uid = rd.uid || rd.userId;
+      if (!uid && parts[0] === "users" && parts[1]) uid = parts[1];
+      if (!uid) uid = rd.id;
+      if (!uid || userMap.has(uid) || uid.length < 15) return;
+
+      const roleId = (rd.id || rd.role || "").toLowerCase();
+      const isFarmer = roleId === "farmer" || roleId.includes("farm") || Boolean(rd.farmerPhoneNumber);
+      const isSeller = roleId === "seller" || roleId.includes("sell") || Boolean(rd.sellerPhoneNumber);
+      const isVet = roleId === "veterinarian" || roleId.includes("vet") || Boolean(rd.vetPhoneNumber);
+
+      const roles: string[] = [];
+      if (isFarmer) roles.push("Farmer");
+      if (isSeller) roles.push("Seller");
+      if (isVet) roles.push("Veterinarian");
+      if (roles.length === 0) roles.push("User");
+
+      const rawPhone = rd.farmerPhoneNumber || rd.sellerPhoneNumber || rd.vetPhoneNumber || rd.phone || rd.phoneNumber || "";
+      const phone = rawPhone && rawPhone !== "—" ? (rawPhone.startsWith("+") ? rawPhone : (rawPhone.length === 10 ? `+91${rawPhone}` : rawPhone)) : "—";
+      const resolvedName = rd.name || rd.doctorName || rd.shopName || (phone !== "—" ? `User (${phone})` : `User #${uid.slice(-6).toUpperCase()}`);
+
+      const village = rd.village || rd.city || rd.town || "—";
+      const district = rd.district || "—";
+      const state = rd.state || "—";
+      const address = rd.address || "—";
+      const locParts = [village, district, state].filter((v) => v && v !== "—");
+      const location = locParts.length > 0 ? locParts.join(", ") : (address !== "—" ? address : "—");
+
+      const rawCreated = rd.createdAt || rd.updatedAt;
+      const createdAt = rawCreated ? (rawCreated._seconds ? rawCreated._seconds * 1000 : rawCreated.seconds ? rawCreated.seconds * 1000 : rawCreated) : null;
+
+      userMap.set(uid, {
+        id: uid,
+        uid,
+        name: resolvedName,
+        displayName: resolvedName,
+        phoneNumber: phone,
+        email: rd.email || null,
+        roles,
+        role: roles[0],
+        farmer: isFarmer ? rd : null,
+        farms: null,
+        seller: isSeller ? rd : null,
+        veterinarian: isVet ? rd : null,
+        village,
+        district,
+        state,
+        address,
+        location,
+        createdAt,
+        lastLoginAt: createdAt,
+      });
+    });
+
     // Sort by registration/created time descending (latest registered first)
     return Array.from(userMap.values()).sort((a, b) => {
       const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
       const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
       return timeB - timeA;
     });
-  }, [authUsers, firestoreUsers]);
+  }, [authUsers, firestoreUsers, roleDocs]);
 
-  const isLoading = (authLoading || firestoreLoading) && mergedUsers.length === 0;
+  const isLoading = (authLoading || firestoreLoading || rolesLoading) && mergedUsers.length === 0;
 
   const totalUsers = mergedUsers.length;
   const farmerUsers = mergedUsers.filter((u) => u.role === "Farmer" || (Array.isArray(u.roles) && u.roles.includes("Farmer"))).length;

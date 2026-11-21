@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { collection, collectionGroup, getDocs, doc, getDoc, setDoc, updateDoc, deleteDoc, deleteField } from "firebase/firestore";
 import { db } from "../lib/firebase";
-import { getApiBaseUrlSync } from "../lib/apiClient";
+import { getApiBaseUrlSync, fastFetchBackend } from "../lib/apiClient";
 import { PRODUCT_CATEGORIES } from "../lib/categories";
 
 export const API_BASE = getApiBaseUrlSync();
@@ -30,24 +30,16 @@ export function useFirebaseCollectionGroup<T>(collectionId: string) {
         }
       }
 
-      // Backend Admin SDK Fallback (handles security rules and indexes with Admin privileges)
+      // Backend Admin SDK Fallback (12s timeout for large collection group queries)
       try {
-        const base = getApiBaseUrlSync();
-        const res = await fetch(`${base}/api/admin/collection-group/${collectionId}`).catch(() =>
-          fetch(`/api/admin/collection-group/${collectionId}`)
-        );
-
-        if (res && res.ok) {
-          const json = await res.json();
-          if (Array.isArray(json.data) && json.data.length > 0) {
-            return json.data as T[];
-          }
+        const json = await fastFetchBackend<{ data?: any[] }>(`/api/admin/collection-group/${collectionId}`, 12000);
+        if (Array.isArray(json?.data) && json.data.length > 0) {
+          return json.data as T[];
         }
       } catch (e) {}
 
       return [] as T[];
     },
-    placeholderData: (previousData) => previousData || [],
     staleTime: 600_000,
     gcTime: 1800_000,
     refetchOnWindowFocus: false,
@@ -83,7 +75,6 @@ export function useFirebaseCollection<T>(collectionPath: string) {
         return [];
       }
     },
-    placeholderData: (previousData) => previousData || [],
     staleTime: 600_000,
     gcTime: 1800_000,
     refetchOnWindowFocus: false,
@@ -139,37 +130,43 @@ export function useTokenAdvance() {
   const query = useQuery<{ rates: TokenAdvanceRates; items: any[] }>({
     queryKey: ["token-advance"],
     queryFn: async () => {
-      // Try Backend API first, fallback to Firestore client
+      // 1. Direct Firestore Client SDK first (< 150ms)
       try {
-        const res = await fetch(`${API_BASE}/api/admin/token-advance`);
-        if (res.ok) {
-          const data = await res.json();
+        const colRef = collection(db, "token-advance");
+        const snap = await getDocs(colRef);
+        if (!snap.empty) {
+          let rates: TokenAdvanceRates = { cow: 200, buffalo: 250, goat: 100, sheep: 50 };
+          const items: any[] = [];
+          snap.forEach((d) => {
+            const data = d.data();
+            items.push({ id: d.id, ...data });
+            if (d.id === "token-advance" || d.id === "default") {
+              rates = { ...rates, ...data };
+            }
+          });
+          return { rates, items };
+        }
+      } catch (err) {
+        console.warn("Client SDK token advance error, trying backend:", err);
+      }
+
+      // 2. Fast Backend API fallback (2.5s timeout)
+      try {
+        const data = await fastFetchBackend<{ rates?: TokenAdvanceRates; items?: any[] }>("/api/admin/token-advance", 2500);
+        if (data) {
           return {
             rates: data.rates || { cow: 200, buffalo: 250, goat: 100, sheep: 50 },
             items: data.items || [],
           };
         }
       } catch (err) {
-        console.warn("Backend token advance fetch error, trying client SDK:", err);
+        console.warn("Backend token advance fetch error:", err);
       }
 
-      try {
-        const colRef = collection(db, "token-advance");
-        const snap = await getDocs(colRef);
-        let rates: TokenAdvanceRates = { cow: 200, buffalo: 250, goat: 100, sheep: 50 };
-        const items: any[] = [];
-        snap.forEach((d) => {
-          const data = d.data();
-          items.push({ id: d.id, ...data });
-          if (d.id === "token-advance" || d.id === "default") {
-            rates = { ...rates, ...data };
-          }
-        });
-        return { rates, items };
-      } catch (err) {
-        console.warn("Client SDK token advance error:", err);
-        return { rates: { cow: 200, buffalo: 250, goat: 100, sheep: 50 }, items: [] };
-      }
+      return {
+        rates: { cow: 200, buffalo: 250, goat: 100, sheep: 50 },
+        items: [],
+      };
     },
     staleTime: 600_000,
     gcTime: 1800_000,
@@ -228,55 +225,54 @@ export function useCoupons() {
   const query = useQuery<Coupon[]>({
     queryKey: ["coupons_code"],
     queryFn: async () => {
-      // Try backend first
-      try {
-        const res = await fetch(`${API_BASE}/api/admin/coupons`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.coupons && data.coupons.length > 0) {
-            return data.coupons;
-          }
-        }
-      } catch (err) {
-        console.warn("Backend coupons fetch error, trying client SDK:", err);
-      }
-
-      // Fallback to Firestore client SDK
+      // 1. Direct Firestore client SDK first (< 150ms)
       try {
         const colRef = collection(db, "product_marketplace", "main", "coupons_code");
         const snap = await getDocs(colRef);
-        const results: Coupon[] = [];
-        snap.forEach((d) => {
-          const data = d.data();
-          let expiresAtFormatted = null;
-          if (data.expiresAt?.toDate) {
-            expiresAtFormatted = data.expiresAt.toDate().toISOString();
-          } else if (data.expiresAt?._seconds) {
-            expiresAtFormatted = new Date(data.expiresAt._seconds * 1000).toISOString();
-          } else if (data.expiresAt?.seconds) {
-            expiresAtFormatted = new Date(data.expiresAt.seconds * 1000).toISOString();
-          } else if (typeof data.expiresAt === "string") {
-            expiresAtFormatted = data.expiresAt;
-          }
+        if (!snap.empty) {
+          const results: Coupon[] = [];
+          snap.forEach((d) => {
+            const data = d.data();
+            let expiresAtFormatted = null;
+            if (data.expiresAt?.toDate) {
+              expiresAtFormatted = data.expiresAt.toDate().toISOString();
+            } else if (data.expiresAt?._seconds) {
+              expiresAtFormatted = new Date(data.expiresAt._seconds * 1000).toISOString();
+            } else if (data.expiresAt?.seconds) {
+              expiresAtFormatted = new Date(data.expiresAt.seconds * 1000).toISOString();
+            } else if (typeof data.expiresAt === "string") {
+              expiresAtFormatted = data.expiresAt;
+            }
 
-          results.push({
-            id: d.id,
-            ...data,
-            code: data.code || d.id,
-            active: data.active !== false,
-            type: data.type || "PERCENT",
-            value: data.value || 0,
-            expiresAtFormatted,
-            usedCount: Array.isArray(data.usedUserIds) ? data.usedUserIds.filter(Boolean).length : 0,
-          } as Coupon);
-        });
-        return results;
+            results.push({
+              id: d.id,
+              ...data,
+              code: data.code || d.id,
+              active: data.active !== false,
+              type: data.type || "PERCENT",
+              value: data.value || 0,
+              expiresAtFormatted,
+              usedCount: Array.isArray(data.usedUserIds) ? data.usedUserIds.filter(Boolean).length : 0,
+            } as Coupon);
+          });
+          return results;
+        }
       } catch (err) {
-        console.warn("Client SDK coupons fetch error:", err);
-        return [];
+        console.warn("Client SDK coupons fetch error, trying backend:", err);
       }
+
+      // 2. Fast Backend fallback with 2.5s timeout
+      try {
+        const data = await fastFetchBackend<{ coupons?: any[] }>("/api/admin/coupons", 2500);
+        if (data?.coupons && data.coupons.length > 0) {
+          return data.coupons as Coupon[];
+        }
+      } catch (err) {
+        console.warn("Backend coupons fetch error:", err);
+      }
+
+      return [];
     },
-    placeholderData: [],
     staleTime: 600_000,
     gcTime: 1800_000,
     refetchOnWindowFocus: false,
@@ -361,37 +357,36 @@ export function useBestSellers() {
   const query = useQuery<any[]>({
     queryKey: ["bestSellers"],
     queryFn: async () => {
-      // Try backend first
+      // 1. Direct Firestore first (< 150ms)
       try {
-        const res = await fetch(`${API_BASE}/api/admin/best-sellers`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.bestSellers && data.bestSellers.length > 0) {
-            return data.bestSellers;
-          }
+        const colRef = collection(db, "product_marketplace", "main", "products");
+        const snap = await getDocs(colRef);
+        if (!snap.empty) {
+          const results: any[] = [];
+          snap.forEach((d) => {
+            const data = d.data();
+            if (data.bestSeller || data.isBestSeller) {
+              results.push({ id: d.id, ...data, bestSeller: true });
+            }
+          });
+          if (results.length > 0) return results;
+        }
+      } catch (err) {
+        console.warn("Client SDK best sellers error, trying backend:", err);
+      }
+
+      // 2. Fast Backend fallback with 2.5s timeout
+      try {
+        const data = await fastFetchBackend<{ bestSellers?: any[] }>("/api/admin/best-sellers", 2500);
+        if (data?.bestSellers && data.bestSellers.length > 0) {
+          return data.bestSellers;
         }
       } catch (err) {
         console.warn("Backend best sellers fetch error:", err);
       }
 
-      // Fallback: Query products with bestSeller == true
-      try {
-        const colRef = collection(db, "product_marketplace", "main", "products");
-        const snap = await getDocs(colRef);
-        const results: any[] = [];
-        snap.forEach((d) => {
-          const data = d.data();
-          if (data.bestSeller || data.isBestSeller) {
-            results.push({ id: d.id, ...data, bestSeller: true });
-          }
-        });
-        return results;
-      } catch (err) {
-        console.warn("Client SDK best sellers error:", err);
-        return [];
-      }
+      return [];
     },
-    placeholderData: [],
     staleTime: 600_000,
     gcTime: 1800_000,
     refetchOnWindowFocus: false,
@@ -434,30 +429,32 @@ export function useAdminProducts() {
   const query = useQuery<any[]>({
     queryKey: ["product_marketplace/main/products"],
     queryFn: async () => {
-      try {
-        const res = await fetch(`${API_BASE}/api/admin/products`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.products && data.products.length > 0) {
-            return data.products;
-          }
-        }
-      } catch (err) {
-        console.warn("Backend products fetch error, trying client SDK:", err);
-      }
-
+      // 1. Direct Firestore first (< 200ms)
       try {
         const colRef = collection(db, "product_marketplace", "main", "products");
         const snap = await getDocs(colRef);
-        const results: any[] = [];
-        snap.forEach((d) => {
-          results.push({ id: d.id, ...d.data() });
-        });
-        return results;
+        if (!snap.empty) {
+          const results: any[] = [];
+          snap.forEach((d) => {
+            results.push({ id: d.id, ...d.data() });
+          });
+          if (results.length > 0) return results;
+        }
       } catch (err) {
-        console.warn("Client SDK products error:", err);
-        return [];
+        console.warn("Client SDK products error, trying backend:", err);
       }
+
+      // 2. Fast Backend fallback with 2.5s timeout
+      try {
+        const data = await fastFetchBackend<{ products?: any[] }>("/api/admin/products", 2500);
+        if (data?.products && data.products.length > 0) {
+          return data.products;
+        }
+      } catch (err) {
+        console.warn("Backend products fetch error:", err);
+      }
+
+      return [];
     },
     staleTime: 600_000,
     gcTime: 1800_000,
@@ -568,31 +565,33 @@ export function useAdminBanners() {
   const query = useQuery<any[]>({
     queryKey: ["banners"],
     queryFn: async () => {
-      try {
-        const res = await fetch(`${API_BASE}/api/admin/banners`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.banners && Array.isArray(data.banners)) {
-            return data.banners;
-          }
-        }
-      } catch (err) {
-        console.warn("Backend banners fetch error, trying client SDK:", err);
-      }
-
+      // 1. Direct Firestore first (< 150ms)
       try {
         const colRef = collection(db, "banners");
         const snap = await getDocs(colRef);
-        const results: any[] = [];
-        snap.forEach((d) => {
-          results.push({ id: d.id, ...d.data() });
-        });
-        results.sort((a, b) => (Number(a.priority) || 999) - (Number(b.priority) || 999));
-        return results;
+        if (!snap.empty) {
+          const results: any[] = [];
+          snap.forEach((d) => {
+            results.push({ id: d.id, ...d.data() });
+          });
+          results.sort((a, b) => (Number(a.priority) || 999) - (Number(b.priority) || 999));
+          if (results.length > 0) return results;
+        }
       } catch (err) {
-        console.warn("Client SDK banners error:", err);
-        return [];
+        console.warn("Client SDK banners error, trying backend:", err);
       }
+
+      // 2. Fast Backend fallback with 2.5s timeout
+      try {
+        const data = await fastFetchBackend<{ banners?: any[] }>("/api/admin/banners", 2500);
+        if (data?.banners && Array.isArray(data.banners) && data.banners.length > 0) {
+          return data.banners;
+        }
+      } catch (err) {
+        console.warn("Backend banners fetch error:", err);
+      }
+
+      return [];
     },
     staleTime: 600_000,
     gcTime: 1800_000,
@@ -718,19 +717,7 @@ export function useShippingConfig() {
   const query = useQuery<ShippingConfig>({
     queryKey: ["shipping-config"],
     queryFn: async () => {
-      const base = getApiBaseUrlSync();
-      // 1. Try Backend API
-      try {
-        const res = await fetch(`${base}/api/admin/shipping-config`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data?.config) return data.config as ShippingConfig;
-        }
-      } catch (err) {
-        console.warn("Backend shipping config fetch error, trying client SDK:", err);
-      }
-
-      // 2. Client SDK Fallback
+      // 1. Client SDK first (< 150ms)
       try {
         const docRef = doc(db, "product_marketplace", "main", "shipping_config", "config");
         const snap = await getDoc(docRef);
@@ -738,7 +725,15 @@ export function useShippingConfig() {
           return snap.data() as ShippingConfig;
         }
       } catch (err) {
-        console.warn("Client SDK shipping config error:", err);
+        console.warn("Client SDK shipping config error, trying backend:", err);
+      }
+
+      // 2. Fast Backend API fallback (2.5s timeout)
+      try {
+        const data = await fastFetchBackend<{ config?: ShippingConfig }>("/api/admin/shipping-config", 2500);
+        if (data?.config) return data.config as ShippingConfig;
+      } catch (err) {
+        console.warn("Backend shipping config fetch error:", err);
       }
 
       return {
@@ -866,31 +861,32 @@ export function useCombos() {
   const query = useQuery<ComboProduct[]>({
     queryKey: ["marketplace-combos"],
     queryFn: async () => {
-      const base = getApiBaseUrlSync();
-      // 1. Try Backend API
-      try {
-        const res = await fetch(`${base}/api/admin/combos`);
-        if (res.ok) {
-          const data = await res.json();
-          if (Array.isArray(data?.combos)) return data.combos as ComboProduct[];
-        }
-      } catch (err) {
-        console.warn("Backend combos fetch error, trying client SDK:", err);
-      }
-
-      // 2. Client SDK Fallback
+      // 1. Client SDK direct first (< 150ms)
       try {
         const colRef = collection(db, "product_marketplace", "main", "combos");
         const snap = await getDocs(colRef);
-        const combos: ComboProduct[] = [];
-        snap.forEach((d) => {
-          combos.push({ id: d.id, ...d.data() } as ComboProduct);
-        });
-        return combos;
+        if (!snap.empty) {
+          const combos: ComboProduct[] = [];
+          snap.forEach((d) => {
+            combos.push({ id: d.id, ...d.data() } as ComboProduct);
+          });
+          if (combos.length > 0) return combos;
+        }
       } catch (err) {
-        console.warn("Client SDK combos error:", err);
-        return [];
+        console.warn("Client SDK combos error, trying backend:", err);
       }
+
+      // 2. Fast Backend API fallback (2.5s timeout)
+      try {
+        const data = await fastFetchBackend<{ combos?: ComboProduct[] }>("/api/admin/combos", 2500);
+        if (Array.isArray(data?.combos) && data.combos.length > 0) {
+          return data.combos;
+        }
+      } catch (err) {
+        console.warn("Backend combos fetch error:", err);
+      }
+
+      return [];
     },
     staleTime: 60_000,
     gcTime: 900_000,
@@ -1108,35 +1104,36 @@ export function usePashuprenuerCourses() {
   const query = useQuery<PashuprenuerCourse[]>({
     queryKey: ["pashuprenuer-courses"],
     queryFn: async () => {
-      const base = getApiBaseUrlSync();
-      // 1. Try Backend API (Admin privileges bypass security rules)
-      try {
-        let res = await fetch(`${base}/api/admin/pashuprenuer-courses`);
-        if (!res.ok) {
-          res = await fetch(`${base}/api/admin/pashupreneur-courses`);
-        }
-        if (res.ok) {
-          const data = await res.json();
-          if (Array.isArray(data?.courses)) return data.courses as PashuprenuerCourse[];
-        }
-      } catch (err) {
-        console.warn("Backend pashuprenuer courses fetch error, trying client SDK:", err);
-      }
-
-      // 2. Client SDK Fallback
+      // 1. Client SDK direct first (< 150ms)
       try {
         const colRef = collection(db, "pashuprenuer_courses");
         const snap = await getDocs(colRef);
-        const courses: PashuprenuerCourse[] = [];
-        snap.forEach((d) => {
-          courses.push({ id: d.id, ...d.data() } as PashuprenuerCourse);
-        });
-        courses.sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
-        return courses;
+        if (!snap.empty) {
+          const courses: PashuprenuerCourse[] = [];
+          snap.forEach((d) => {
+            courses.push({ id: d.id, ...d.data() } as PashuprenuerCourse);
+          });
+          courses.sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
+          if (courses.length > 0) return courses;
+        }
       } catch (err) {
-        console.warn("Client SDK pashuprenuer courses error:", err);
-        return [];
+        console.warn("Client SDK pashuprenuer courses error, trying backend:", err);
       }
+
+      // 2. Fast Backend API fallback (2.5s timeout)
+      try {
+        let data = await fastFetchBackend<{ courses?: PashuprenuerCourse[] }>("/api/admin/pashuprenuer-courses", 2500);
+        if (!data?.courses) {
+          data = await fastFetchBackend<{ courses?: PashuprenuerCourse[] }>("/api/admin/pashupreneur-courses", 2500);
+        }
+        if (Array.isArray(data?.courses) && data.courses.length > 0) {
+          return data.courses;
+        }
+      } catch (err) {
+        console.warn("Backend pashuprenuer courses fetch error:", err);
+      }
+
+      return [];
     },
     staleTime: 60_000,
     gcTime: 900_000,

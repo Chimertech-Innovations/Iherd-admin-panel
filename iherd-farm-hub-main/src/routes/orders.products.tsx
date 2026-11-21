@@ -49,7 +49,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
-import { doc, updateDoc, setDoc } from "firebase/firestore";
+import { doc, updateDoc, setDoc, collection, getDocs } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 
 export const Route = createFileRoute("/orders/products")({
@@ -90,19 +90,50 @@ async function fetchProductOrders() {
     endpoints.push(FALLBACK_API_BASE);
   }
 
+  // 1. Backend REST API with 4.5s safe timeout
   for (const base of endpoints) {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 6000);
+      const timeoutId = setTimeout(() => controller.abort(), 4500);
       const res = await fetch(`${base}/api/admin/product-orders?refresh=1&t=${Date.now()}`, { signal: controller.signal });
       clearTimeout(timeoutId);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      return data.orders || [];
+      if (Array.isArray(data.orders) && data.orders.length > 0) {
+        return data.orders;
+      }
     } catch (err) {
       console.warn(`Fetch product orders from ${base} notice:`, err);
     }
   }
+
+  // 2. Direct Firestore fallback (instant, reads ProductOrders or product_orders)
+  try {
+    const ordersMap = new Map<string, any>();
+    const [pSnap, legacySnap] = await Promise.all([
+      getDocs(collection(db, "ProductOrders")).catch(() => null),
+      getDocs(collection(db, "product_orders")).catch(() => null),
+    ]);
+
+    const processDoc = (snap: any) => {
+      if (!snap) return;
+      snap.docs?.forEach((d: any) => {
+        const o = { id: d.id, ...d.data() };
+        ordersMap.set(d.id, o);
+      });
+    };
+    processDoc(pSnap);
+    processDoc(legacySnap);
+
+    if (ordersMap.size > 0) {
+      const list = Array.from(ordersMap.values());
+      list.sort((a, b) => new Date(b.createdAt || b.date || 0).getTime() - new Date(a.createdAt || a.date || 0).getTime());
+      return list;
+    }
+  } catch (fbErr) {
+    console.warn("Direct Firestore ProductOrders fallback notice:", fbErr);
+  }
+
   return [];
 }
 
@@ -216,7 +247,6 @@ function ProductOrdersPage() {
   const { data: orders = [], isLoading } = useQuery({
     queryKey: ["adminProductOrders"],
     queryFn: fetchProductOrders,
-    placeholderData: [],
     staleTime: 15_000,
   });
 

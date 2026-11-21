@@ -39,10 +39,13 @@ export const Route = createFileRoute("/orders/cattle")({
 async function fetchCattleOrders() {
   const ordersMap = new Map<string, any>();
 
-  // 1. Backend REST API (with ?fresh=true to bypass stale cache)
+  // 1. Backend REST API (with 4.5s safe timeout, fresh=true)
   try {
     const API_BASE = getApiBaseUrlSync();
-    const res = await fetch(`${API_BASE}/api/admin/cattle-orders?fresh=true`);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4500);
+    const res = await fetch(`${API_BASE}/api/admin/cattle-orders?fresh=true`, { signal: controller.signal });
+    clearTimeout(timer);
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data.orders)) {
@@ -157,7 +160,6 @@ function CattleOrdersPage() {
   const { data: orders = [], isLoading } = useQuery({
     queryKey: ["adminCattleOrders"],
     queryFn: fetchCattleOrders,
-    placeholderData: [],
     staleTime: 15_000,
   });
 

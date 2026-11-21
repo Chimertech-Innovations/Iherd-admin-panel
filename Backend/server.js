@@ -1376,6 +1376,12 @@ async function fetchAndProcessAdminUsers(force = false) {
   const auth = getAuth();
   const db = getFirestore();
   
+  const safeCap = (p, timeoutMs = 3500) =>
+    Promise.race([
+      p,
+      new Promise((resolve) => setTimeout(() => resolve({ docs: [] }), timeoutMs)),
+    ]).catch(() => ({ docs: [] }));
+
   // Concurrently fetch Auth users and all Firestore user collections in parallel
   const [
     authUsersList,
@@ -1392,17 +1398,17 @@ async function fetchAndProcessAdminUsers(force = false) {
     storesSnap,
   ] = await Promise.all([
     listAllAuthUsers(auth),
-    db.collection("users").get().catch(() => ({ docs: [] })),
-    db.collection("farmers").get().catch(() => ({ docs: [] })),
-    db.collection("sellers").get().catch(() => ({ docs: [] })),
-    db.collection("vets").get().catch(() => ({ docs: [] })),
-    db.collectionGroup("farms").get().catch(() => ({ docs: [] })),
-    db.collection("cattle_details").get().catch(() => ({ docs: [] })),
-    db.collectionGroup("roles").get().catch(() => ({ docs: [] })),
-    db.collectionGroup("farmer").get().catch(() => ({ docs: [] })),
-    db.collectionGroup("seller").get().catch(() => ({ docs: [] })),
-    db.collectionGroup("veterinarian").get().catch(() => ({ docs: [] })),
-    db.collection("stores").get().catch(() => ({ docs: [] })),
+    safeCap(db.collection("users").get(), 8000),
+    safeCap(db.collection("farmers").get(), 5000),
+    safeCap(db.collection("sellers").get(), 5000),
+    safeCap(db.collection("vets").get(), 5000),
+    safeCap(db.collectionGroup("farms").get(), 8000),
+    safeCap(db.collection("cattle_details").get(), 8000),
+    safeCap(db.collectionGroup("roles").get(), 12000),
+    safeCap(db.collectionGroup("farmer").get(), 5000),
+    safeCap(db.collectionGroup("seller").get(), 5000),
+    safeCap(db.collectionGroup("veterinarian").get(), 5000),
+    safeCap(db.collection("stores").get(), 5000),
   ]);
 
   const fsUsersMap = {};
@@ -1427,13 +1433,28 @@ async function fetchAndProcessAdminUsers(force = false) {
 
     const roleId = (doc.id || defaultRole || d.role || "").toLowerCase();
     if (roleId.includes("farm") || defaultRole === "farmer") {
-      subRolesMap[uid].farmer = { ...d, id: doc.id };
+      subRolesMap[uid].farmer = { ...d, id: doc.id, uid };
     }
     if (roleId.includes("sell") || defaultRole === "seller") {
-      subRolesMap[uid].seller = { ...d, id: doc.id };
+      subRolesMap[uid].seller = { ...d, id: doc.id, uid };
     }
     if (roleId.includes("vet") || defaultRole === "veterinarian") {
-      subRolesMap[uid].vet = { ...d, id: doc.id };
+      subRolesMap[uid].vet = { ...d, id: doc.id, uid };
+    }
+
+    // Also index by clean 10-digit phone
+    const cleanP = (d.farmerPhoneNumber || d.sellerPhoneNumber || d.vetPhoneNumber || d.phone || d.phoneNumber || "").replace(/\D/g, "").slice(-10);
+    if (cleanP) {
+      if (!subRolesMap[cleanP]) subRolesMap[cleanP] = {};
+      if (roleId.includes("farm") || defaultRole === "farmer") {
+        subRolesMap[cleanP].farmer = { ...d, id: doc.id, uid };
+      }
+      if (roleId.includes("sell") || defaultRole === "seller") {
+        subRolesMap[cleanP].seller = { ...d, id: doc.id, uid };
+      }
+      if (roleId.includes("vet") || defaultRole === "veterinarian") {
+        subRolesMap[cleanP].vet = { ...d, id: doc.id, uid };
+      }
     }
   };
 
@@ -1845,6 +1866,93 @@ async function fetchAndProcessAdminUsers(force = false) {
     });
   });
 
+  // 3. Add any standalone role profiles from /users/{uid}/roles/*
+  Object.keys(subRolesMap).forEach((uid) => {
+    if (userMap.has(uid) || uid.length < 15) return;
+    const subRoles = subRolesMap[uid];
+    const farmerRecord = subRoles.farmer || null;
+    const sellerRecord = subRoles.seller || null;
+    const vetRecord = subRoles.vet || null;
+    const farmMeta = farmOwnersMap[uid] || null;
+    const cattleMeta = cattleOwnersMap[uid] || null;
+
+    const isFarmer = Boolean(farmerRecord || farmMeta || cattleMeta);
+    const isSeller = Boolean(sellerRecord);
+    const isVet = Boolean(vetRecord);
+
+    const roles = [];
+    if (isFarmer) roles.push("Farmer");
+    if (isSeller) roles.push("Seller");
+    if (isVet) roles.push("Veterinarian");
+    if (roles.length === 0) roles.push("User");
+
+    const resolvedName =
+      (farmerRecord?.name && !farmerRecord.name.startsWith("Farmer") ? farmerRecord.name : null) ||
+      (sellerRecord?.name && !sellerRecord.name.startsWith("Seller") ? sellerRecord.name : null) ||
+      (vetRecord?.name ? (vetRecord.name.startsWith("Dr.") ? vetRecord.name : `Dr. ${vetRecord.name}`) : null) ||
+      (vetRecord?.doctorName ? (vetRecord.doctorName.startsWith("Dr.") ? vetRecord.doctorName : `Dr. ${vetRecord.doctorName}`) : null) ||
+      (farmerRecord?.farmerPhoneNumber ? `Farmer (${farmerRecord.farmerPhoneNumber})` : `User #${uid.slice(-6).toUpperCase()}`);
+
+    const resolvedPhone = farmerRecord?.farmerPhoneNumber || farmerRecord?.phone || sellerRecord?.phone || vetRecord?.phone || "—";
+    const resolvedVillage = farmMeta?.village || farmerRecord?.village || sellerRecord?.village || vetRecord?.village || "—";
+    const resolvedDistrict = farmMeta?.district || farmerRecord?.district || sellerRecord?.district || vetRecord?.district || "—";
+    const resolvedState = farmMeta?.state || farmerRecord?.state || sellerRecord?.state || vetRecord?.state || "—";
+    const resolvedAddress = farmerRecord?.address || sellerRecord?.address || vetRecord?.address || "—";
+    const locParts = [resolvedVillage, resolvedDistrict, resolvedState].filter((v) => v && v !== "—");
+    const resolvedLocation = locParts.length > 0 ? locParts.join(", ") : (resolvedAddress !== "—" ? resolvedAddress : "—");
+
+    const rawCreatedAt = farmerRecord?.createdAt || sellerRecord?.createdAt || vetRecord?.createdAt;
+    const createdAt = rawCreatedAt ? (rawCreatedAt._seconds ? rawCreatedAt._seconds * 1000 : rawCreatedAt.seconds ? rawCreatedAt.seconds * 1000 : rawCreatedAt) : null;
+
+    userMap.set(uid, {
+      uid,
+      email: sellerRecord?.email || null,
+      phoneNumber: resolvedPhone,
+      displayName: resolvedName,
+      name: resolvedName,
+      roles,
+      role: roles[0],
+      village: resolvedVillage,
+      district: resolvedDistrict,
+      state: resolvedState,
+      address: resolvedAddress,
+      location: resolvedLocation,
+      createdAt,
+      lastLoginAt: createdAt,
+      farms: farmMeta ? { name: farmMeta.farmName, id: farmMeta.farmId } : null,
+      farmer: isFarmer ? {
+        ...(farmerRecord || {}),
+        name: resolvedName,
+        farmerPhoneNumber: resolvedPhone,
+        village: resolvedVillage,
+        district: resolvedDistrict,
+        state: resolvedState,
+        farmName: farmMeta?.farmName || null,
+      } : null,
+      isFarmer,
+      status: "Active",
+      seller: isSeller ? {
+        ...(sellerRecord || {}),
+        name: sellerRecord?.name || sellerRecord?.shopName || resolvedName,
+        phone: sellerRecord?.phone || resolvedPhone,
+        state: sellerRecord?.state || resolvedState,
+        district: sellerRecord?.district || resolvedDistrict,
+        village: sellerRecord?.village || sellerRecord?.city || resolvedVillage,
+        location: resolvedLocation,
+      } : null,
+      veterinarian: isVet ? {
+        ...(vetRecord || {}),
+        name: vetRecord?.name || vetRecord?.doctorName || resolvedName,
+        phone: vetRecord?.phone || resolvedPhone,
+        state: vetRecord?.state || resolvedState,
+        district: vetRecord?.district || resolvedDistrict,
+        village: vetRecord?.village || resolvedVillage,
+        location: resolvedLocation,
+      } : null,
+      isAuthUser: false,
+    });
+  });
+
   const result = Array.from(userMap.values());
 
   // Sort all users by creation/registration time descending (latest first)
@@ -1857,6 +1965,7 @@ async function fetchAndProcessAdminUsers(force = false) {
 // REST API to list all Firebase Authentication users with progressive pagination support
 app.get(["/api/admin/users", "/get/api/admin/users"], async (req, res) => {
   try {
+    if (res.writableEnded || req.destroyed) return;
     const limit = req.query.limit ? Math.max(1, parseInt(req.query.limit, 10)) : null;
     const offset = req.query.offset ? Math.max(0, parseInt(req.query.offset, 10)) : 0;
 
@@ -1870,6 +1979,8 @@ app.get(["/api/admin/users", "/get/api/admin/users"], async (req, res) => {
       // Trigger background revalidation asynchronously
       fetchAndProcessAdminUsers(true).catch(() => {});
     }
+
+    if (res.writableEnded || req.destroyed) return;
 
     if (limit) {
       const sliced = allUsers.slice(offset, offset + limit);
@@ -1885,6 +1996,7 @@ app.get(["/api/admin/users", "/get/api/admin/users"], async (req, res) => {
 
     res.json({ users: allUsers, total: allUsers.length, cached });
   } catch (error) {
+    if (res.writableEnded || req.destroyed) return;
     console.error("Error in /api/admin/users:", error);
     res.status(500).json({ error: error.message });
   }
@@ -2392,8 +2504,10 @@ app.get("/api/admin/product-orders", async (req, res) => {
 
     const payload = { orders: sortedOrders };
     setCache("admin_product_orders", payload);
+    if (res.writableEnded || req.destroyed) return;
     res.json(payload);
   } catch (error) {
+    if (res.writableEnded || req.destroyed) return;
     console.error("Error in /api/admin/product-orders:", error);
     res.status(500).json({ error: error.message, orders: [] });
   }
@@ -2666,8 +2780,10 @@ app.get("/api/admin/cattle-orders", async (req, res) => {
 
     const payload = { orders: sortedOrders };
     setCache("admin_cattle_orders", payload);
+    if (res.writableEnded || req.destroyed) return;
     res.json(payload);
   } catch (error) {
+    if (res.writableEnded || req.destroyed) return;
     console.error("Error in /api/admin/cattle-orders:", error);
     res.status(500).json({ error: error.message, orders: [] });
   }
@@ -3174,7 +3290,7 @@ app.get("/api/admin/farms", async (req, res) => {
       if (farmsMap.has(farmKey)) return;
 
       const ownerUid = f.userId || f.ownerUid || defaultOwner.id || defaultOwner.uid || "";
-      const ownerName = f.ownerName || f.farmerName || defaultOwner.name || defaultOwner.displayName || "Registered Farmer";
+      const ownerName = f.ownerName || f.farmerName || defaultOwner.fullName || defaultOwner.name || defaultOwner.displayName || (defaultOwner.phoneNumber ? `Farmer (${defaultOwner.phoneNumber})` : (ownerUid ? `Farmer #${ownerUid.slice(-6).toUpperCase()}` : ""));
       const farmPhone = f.farmPhoneNumber || f.farmerPhoneNumber || f.phone || defaultOwner.phoneNumber || defaultOwner.phone || "—";
 
       const realCattleCount = cattleByFarm.get(farmKey) || cattleByOwner.get(ownerUid) || Number(f.numberOfAnimals || f.cattleCount || 0);
@@ -3182,7 +3298,7 @@ app.get("/api/admin/farms", async (req, res) => {
       farmsMap.set(farmKey, {
         id: farmKey,
         farmId: farmKey,
-        name: f.name || f.farmName || (ownerName ? `${ownerName}'s Dairy Farm` : "Registered Dairy Farm"),
+        name: f.name || f.farmName || (ownerName ? `${ownerName}'s Dairy Farm` : "Dairy Farm"),
         ownerUid,
         ownerName,
         farmPhoneNumber: farmPhone,
@@ -3259,12 +3375,23 @@ app.get("/api/admin/farms", async (req, res) => {
 app.get("/api/admin/collection-group/:collectionId", async (req, res) => {
   try {
     const { collectionId } = req.params;
+    const cacheKey = `cg_${collectionId}`;
+    const cached = getCached(cacheKey, 300000);
+    if (cached) return res.json(cached);
+
     const db = getFirestore();
 
     if (collectionId === "farms") {
       const snap = await db.collectionGroup("farms").get().catch(() => ({ docs: [] }));
-      const data = snap.docs.map((d) => ({ id: d.id, _path: d.ref.path, ...d.data() }));
-      return res.json({ success: true, count: data.length, data, farms: data });
+      const data = snap.docs.map((d) => {
+        const parts = d.ref.path.split("/");
+        let uid = d.data().userId || d.data().ownerUid;
+        if (!uid && parts[0] === "users" && parts[1]) uid = parts[1];
+        return { id: d.id, _path: d.ref.path, uid, ...d.data() };
+      });
+      const response = { success: true, count: data.length, data, farms: data };
+      setCache(cacheKey, response);
+      return res.json(response);
     }
 
     if (collectionId === "cattle" || collectionId === "cattles") {
@@ -3273,15 +3400,35 @@ app.get("/api/admin/collection-group/:collectionId", async (req, res) => {
         db.collectionGroup("cattle").get().catch(() => ({ docs: [] })),
       ]);
       const map = new Map();
-      snap1.docs.forEach((d) => map.set(d.id, { id: d.id, _path: d.ref.path, ...d.data() }));
-      snap2.docs.forEach((d) => map.set(d.id, { id: d.id, _path: d.ref.path, ...d.data() }));
+      snap1.docs.forEach((d) => {
+        const parts = d.ref.path.split("/");
+        let uid = d.data().userId || d.data().ownerUid || d.data().farmerId;
+        if (!uid && parts[0] === "users" && parts[1]) uid = parts[1];
+        map.set(d.id, { id: d.id, _path: d.ref.path, uid, ...d.data() });
+      });
+      snap2.docs.forEach((d) => {
+        const parts = d.ref.path.split("/");
+        let uid = d.data().userId || d.data().ownerUid || d.data().farmerId;
+        if (!uid && parts[0] === "users" && parts[1]) uid = parts[1];
+        map.set(d.id, { id: d.id, _path: d.ref.path, uid, ...d.data() });
+      });
       const data = Array.from(map.values());
-      return res.json({ success: true, count: data.length, data, cattle: data });
+      const response = { success: true, count: data.length, data, cattle: data };
+      setCache(cacheKey, response);
+      return res.json(response);
     }
 
     const snap = await db.collectionGroup(collectionId).get().catch(() => ({ docs: [] }));
-    const data = snap.docs.map((d) => ({ id: d.id, _path: d.ref.path, ...d.data() }));
-    res.json({ success: true, count: data.length, data });
+    const data = snap.docs.map((d) => {
+      const parts = d.ref.path.split("/");
+      let uid = d.data().uid || d.data().userId;
+      if (!uid && parts[0] === "users" && parts[1]) uid = parts[1];
+      if (!uid) uid = d.id;
+      return { id: d.id, _path: d.ref.path, uid, ...d.data() };
+    });
+    const response = { success: true, count: data.length, data };
+    setCache(cacheKey, response);
+    res.json(response);
   } catch (error) {
     console.error(`Error in /api/admin/collection-group/${req.params.collectionId}:`, error);
     res.status(500).json({ error: error.message, data: [] });
@@ -3298,6 +3445,12 @@ app.get("/api/admin/payments", async (req, res) => {
     const defaultBucketName = process.env.VITE_FIREBASE_STORAGE_BUCKET || "auth-b404a.appspot.com";
     const bucket = getStorage().bucket(defaultBucketName);
 
+    // Fast storage listing helper with 2.5s maximum wait so bucket scan never blocks transactions
+    const safeInvoiceLookup = Promise.race([
+      listFilesUnderPrefix(bucket, "invoices/").catch(() => []),
+      new Promise((resolve) => setTimeout(() => resolve([]), 2500)),
+    ]);
+
     const [pSnap, cSnap, rSnap, tSnap, paySnap, usersSnap, invoiceFiles] = await Promise.all([
       db.collection("ProductOrders").get().catch(() => ({ docs: [] })),
       db.collection("CattleOrders").get().catch(() => ({ docs: [] })),
@@ -3305,7 +3458,7 @@ app.get("/api/admin/payments", async (req, res) => {
       db.collection("token-advance").get().catch(() => ({ docs: [] })),
       db.collection("payments").get().catch(() => ({ docs: [] })),
       db.collection("users").get().catch(() => ({ docs: [] })),
-      listFilesUnderPrefix(bucket, "invoices/").catch(() => []),
+      safeInvoiceLookup,
     ]);
 
     // Map invoices
@@ -3371,6 +3524,9 @@ app.get("/api/admin/payments", async (req, res) => {
       if (statusLower.includes("cancel") || statusLower.includes("fail")) txnStatus = "Failed";
       else if (statusLower.includes("pend") || statusLower.includes("process")) txnStatus = "Pending";
 
+      const prodImage = items[0]?.image || items[0]?.thumbnailUrl || po.thumbnailUrl || (Array.isArray(po.imageUrls) ? po.imageUrls[0] : null) || (Array.isArray(po.images) ? po.images[0] : null) || po.image || "";
+      const prodTitle = items[0]?.name || items[0]?.title || po.productName || po.name || (items.length > 0 ? `${items.length} Product Items` : "Marketplace Product");
+
       transactions.push({
         id: txnId,
         transactionId: txnId,
@@ -3383,6 +3539,8 @@ app.get("/api/admin/payments", async (req, res) => {
         method: po.paymentMethod || "UPI / Online Payment",
         amount: totalAmount,
         seller: po.sellerName || "iHerd Marketplace Store",
+        title: prodTitle,
+        image: prodImage,
         itemsCount: items.length || 1,
         items,
         status: txnStatus,
@@ -3431,6 +3589,9 @@ app.get("/api/admin/payments", async (req, res) => {
       if (statusLower.includes("cancel") || statusLower.includes("fail")) txnStatus = "Failed";
       else if (statusLower.includes("pend") || statusLower.includes("escrow")) txnStatus = "Pending";
 
+      const cattleImage = co.cattleImage || co.image || (Array.isArray(co.cattlePhotos) ? co.cattlePhotos[0] : null) || (Array.isArray(co.photos) ? co.photos[0] : null) || (Array.isArray(co.images) ? co.images[0] : null) || "";
+      const cattleTitle = co.cattleName || co.name || co.title || co.breed || "Livestock Cattle";
+
       transactions.push({
         id: txnId,
         transactionId: txnId,
@@ -3444,6 +3605,8 @@ app.get("/api/admin/payments", async (req, res) => {
         method: co.paymentMethod || "Bank Escrow / UPI",
         amount: totalAmount,
         seller: co.sellerName || co.owner || sellerUser.name || "Verified Farmer",
+        title: cattleTitle,
+        image: cattleImage,
         cattleName: co.cattleName || co.name || "Livestock Cattle",
         breed: co.breed || "Amritmahal",
         status: txnStatus,
@@ -3530,8 +3693,10 @@ app.get("/api/admin/payments", async (req, res) => {
       },
     };
     setCache("admin_payments", payload);
+    if (res.writableEnded || req.destroyed) return;
     res.json(payload);
   } catch (error) {
+    if (res.writableEnded || req.destroyed) return;
     console.error("Error in /api/admin/payments:", error);
     res.status(500).json({ error: error.message, payments: [], summary: {} });
   }

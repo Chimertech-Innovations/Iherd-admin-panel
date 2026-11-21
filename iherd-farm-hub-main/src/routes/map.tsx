@@ -276,7 +276,7 @@ function LiveGeoMapPage() {
     [...groupFarms, ...topFarms].forEach((f: any) => {
       const id = f.id || f.farmId || f._path || `gfarm_${Math.random()}`;
       const name = getLocalizedText(f.name || f.farmName, "Registered Dairy Farm");
-      const owner = getLocalizedText(f.ownerName || f.farmerName, "Registered Farmer");
+      const owner = getLocalizedText(f.ownerName || f.farmerName, "Farmer");
       const phone = getLocalizedText(f.farmPhoneNumber || f.phone || f.phoneNumber, "");
       const locationText = cleanLocationString([f.village, f.taluk, f.district, f.state]);
       const coords = resolveCoordinates(f, `farm_${id}_${name}_${f.state || ""}`);

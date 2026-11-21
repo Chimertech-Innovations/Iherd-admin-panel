@@ -271,7 +271,7 @@ function SellersPage() {
     refetchRoles();
   };
 
-  // Build a lookup map of seller role documents by user ID
+  // Build a lookup map of seller role documents by user ID and phone
   const sellerRoleDocsByUid = new Map<string, any>();
   roleDocs.forEach((rd: any) => {
     if (rd.id === "seller" || rd.role === "seller" || rd.sellerPhoneNumber || rd._path?.includes("/roles/seller")) {
@@ -281,7 +281,11 @@ function SellersPage() {
         if (parts[0] === "users" && parts[1]) uid = parts[1];
       }
       if (uid) {
-        sellerRoleDocsByUid.set(uid, rd);
+        sellerRoleDocsByUid.set(uid, { ...rd, uid });
+      }
+      const cleanP = (rd.sellerPhoneNumber || rd.phone || rd.phoneNumber || "").replace(/\D/g, "").slice(-10);
+      if (cleanP) {
+        sellerRoleDocsByUid.set(cleanP, { ...rd, uid });
       }
     }
   });
@@ -320,9 +324,10 @@ function SellersPage() {
   // 2. Process Auth users merged with Firestore profiles
   authUsers.forEach((authUser: any) => {
     const uid = authUser.uid;
+    const cleanAuthPhone = (authUser.phoneNumber || authUser.phone || "").replace(/\D/g, "").slice(-10);
     const fsUser = firestoreUsers.find((fu: any) => fu.id === uid || fu.uid === uid);
     const directSeller = directSellers.find((ds: any) => ds.id === uid || ds.uid === uid);
-    const sellerRoleDoc = sellerRoleDocsByUid.get(uid);
+    const sellerRoleDoc = sellerRoleDocsByUid.get(uid) || (cleanAuthPhone ? sellerRoleDocsByUid.get(cleanAuthPhone) : null);
 
     const fsRoles = fsUser?.roles || (fsUser?.role ? [fsUser.role] : []);
     const roles: string[] = Array.isArray(fsRoles) ? fsRoles : [String(fsRoles)];
@@ -386,6 +391,7 @@ function SellersPage() {
         verified: Boolean(sellerRoleDoc?.verified || sellerProfile.verified || fsUser?.verified),
         city: sellerRoleDoc?.district || sellerRoleDoc?.village || sellerProfile.city || fsUser?.district || "—",
         state: sellerRoleDoc?.state || sellerProfile.state || fsUser?.state || "—",
+        location: [sellerRoleDoc?.district || sellerRoleDoc?.village || sellerProfile.city || fsUser?.district, sellerRoleDoc?.state || sellerProfile.state || fsUser?.state].filter((x) => x && x !== "—").join(", ") || "—",
       });
     }
   });

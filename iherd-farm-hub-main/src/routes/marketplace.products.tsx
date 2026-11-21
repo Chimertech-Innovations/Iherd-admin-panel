@@ -70,6 +70,7 @@ import {
   Upload,
   FolderTree,
   FileSpreadsheet,
+  Loader2,
 } from "lucide-react";
 import { BulkCsvUploadDialog } from "@/components/admin/BulkCsvUploadDialog";
 import { toast } from "sonner";
@@ -1594,13 +1595,17 @@ function ProductsMarketplacePage() {
             </TableHeader>
             <TableBody>
               {isLoading ? (
-                Array.from({ length: 5 }).map((_, i) => (
-                  <TableRow key={i}>
-                    <TableCell colSpan={7}>
-                      <div className="h-10 w-full bg-muted/60 rounded-xl animate-pulse" />
-                    </TableCell>
-                  </TableRow>
-                ))
+                <TableRow>
+                  <TableCell colSpan={7} className="h-64 text-center">
+                    <div className="flex flex-col items-center justify-center gap-3 py-10">
+                      <Loader2 className="h-10 w-10 animate-spin text-primary" />
+                      <div className="space-y-1">
+                        <p className="text-sm font-semibold text-foreground">Loading products from database...</p>
+                        <p className="text-xs text-muted-foreground">Please wait while products are retrieved</p>
+                      </div>
+                    </div>
+                  </TableCell>
+                </TableRow>
               ) : filteredProducts.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={7} className="h-36 text-center text-xs text-muted-foreground">

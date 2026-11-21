@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect, type ReactNode } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { Search, Filter, Plus, Download, Calendar, MapPin, ArrowUpDown, Layers, RotateCcw, CalendarDays } from "lucide-react";
+import { Search, Filter, Plus, Download, Calendar, MapPin, ArrowUpDown, Layers, RotateCcw, CalendarDays, Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -138,6 +138,8 @@ const MONTHS = [
   { value: "12", label: "December" },
 ];
 
+export type DynamicKpisFn<T> = (filteredData: T[], activeFilter: string, allData: T[]) => KPI[];
+
 export function DataPage<T extends Record<string, any>>({
   title,
   description,
@@ -170,8 +172,8 @@ export function DataPage<T extends Record<string, any>>({
   statusKey?: string;
   filters?: string[];
   statusOptions?: string[];
-  kpis?: KPI[];
-  stats?: KPI[];
+  kpis?: KPI[] | DynamicKpisFn<T>;
+  stats?: KPI[] | DynamicKpisFn<T>;
   searchPlaceholder?: string;
   searchKeys?: string[];
   primaryAction?: ReactNode;
@@ -206,7 +208,6 @@ export function DataPage<T extends Record<string, any>>({
     setCurrentPage(1);
   }, [q, filter, selectedYear, selectedMonth, startDate, endDate, selectedState, locationFilter, sortBy]);
 
-  const effectiveKpis = kpis || stats;
   const effectiveFilters = (statusOptions && statusOptions.length > 0) ? statusOptions : filters;
 
   const MONTHS = [
@@ -557,6 +558,15 @@ export function DataPage<T extends Record<string, any>>({
   }, [data, q, filter, selectedYear, selectedMonth, startDate, endDate, selectedState, locationFilter, sortBy, statusKey, searchKeys]);
 
   const filtered = filteredAndSorted;
+
+  const effectiveKpis = useMemo(() => {
+    const raw = kpis || stats;
+    if (typeof raw === "function") {
+      return raw(filteredAndSorted, filter, data);
+    }
+    return raw;
+  }, [kpis, stats, filteredAndSorted, filter, data]);
+
   const totalRecords = filtered.length;
   const totalPages = pageSize === -1 ? 1 : Math.max(1, Math.ceil(totalRecords / (pageSize || 1)));
   const validCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
@@ -722,6 +732,54 @@ export function DataPage<T extends Record<string, any>>({
             </div>
           </div>
 
+          {/* Quick Filter Pill Buttons (e.g. All, Product, Cattle) */}
+          {!hideStatusFilter && effectiveFilters.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 pt-1">
+              <span className="text-[11px] font-semibold text-muted-foreground mr-1 flex items-center gap-1">
+                <Filter className="h-3 w-3 text-amber-500" /> Filter:
+              </span>
+              <button
+                type="button"
+                onClick={() => setFilter("all")}
+                className={`px-3 py-1 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                  filter === "all"
+                    ? "bg-primary text-primary-foreground shadow-xs"
+                    : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground"
+                }`}
+              >
+                {statusKey === "itemType" ? "All (Product & Cattle)" : "All"} ({data.length})
+              </button>
+              {effectiveFilters.map((f) => {
+                const fLower = f.toLowerCase();
+                const count = data.filter((row) => getLocalizedText(row[statusKey]).toLowerCase() === fLower).length;
+                const isActive = filter === fLower;
+                return (
+                  <button
+                    key={f}
+                    type="button"
+                    onClick={() => setFilter(isActive ? "all" : fLower)}
+                    className={`px-3 py-1 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
+                      isActive
+                        ? fLower === "product"
+                          ? "bg-emerald-600 text-white shadow-xs"
+                          : fLower === "cattle"
+                          ? "bg-amber-600 text-white shadow-xs"
+                          : "bg-primary text-primary-foreground shadow-xs"
+                        : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground"
+                    }`}
+                  >
+                    <span>{f}</span>
+                    <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                      isActive ? "bg-white/20 text-white" : "bg-background/80 text-foreground"
+                    }`}>
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           {/* Bottom Row: Filter Dropdowns (Date Presets, Year, Month, Specific Date, Location, Status, Sort) */}
           <div className="flex flex-wrap items-center gap-2 pt-1">
             {/* 1. Year Selector */}
@@ -869,15 +927,17 @@ export function DataPage<T extends Record<string, any>>({
               </Select>
             )}
 
-            {/* 6. Status Filter */}
+            {/* 6. Status / Category Filter */}
             {!hideStatusFilter && effectiveFilters.length > 0 && (
               <Select value={filter} onValueChange={setFilter} disabled={isLoading}>
-                <SelectTrigger className="w-32 text-xs h-9">
+                <SelectTrigger className="w-36 text-xs h-9 font-medium">
                   <Filter className="h-3.5 w-3.5 mr-1 text-amber-500 shrink-0" />
-                  <SelectValue placeholder="All Status" />
+                  <SelectValue placeholder={statusKey === "itemType" ? "All Types" : "All Status"} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Status</SelectItem>
+                  <SelectItem value="all">
+                    {statusKey === "itemType" ? "All (Product & Cattle)" : "All Status"}
+                  </SelectItem>
                   {effectiveFilters
                     .filter((f) => f.toLowerCase() !== "all" && f.toLowerCase() !== "all status")
                     .map((f) => (
@@ -922,21 +982,27 @@ export function DataPage<T extends Record<string, any>>({
             </TableHeader>
             <TableBody>
               {isLoading ? (
-                // 5 Shimmer Skeleton Rows
-                Array.from({ length: 6 }).map((_, rIdx) => (
-                  <TableRow key={rIdx} className="animate-pulse">
-                    {columns.map((c, cIdx) => (
-                      <TableCell key={cIdx} className={c.className}>
-                        <div
-                          className="h-5 bg-muted/60 rounded-md animate-pulse"
-                          style={{
-                            width: `${Math.max(40, 85 - (cIdx * 12 + rIdx * 7) % 45)}%`,
-                          }}
-                        />
-                      </TableCell>
-                    ))}
-                  </TableRow>
-                ))
+                <TableRow>
+                  <TableCell
+                    colSpan={columns.length}
+                    className="h-64 text-center py-12"
+                  >
+                    <div className="flex flex-col items-center justify-center gap-3">
+                      <div className="relative flex items-center justify-center">
+                        <Loader2 className="h-10 w-10 animate-spin text-primary" />
+                        <span className="sr-only">Loading...</span>
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-sm font-semibold text-foreground">
+                          Loading records from database...
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Please wait while data is being retrieved
+                        </p>
+                      </div>
+                    </div>
+                  </TableCell>
+                </TableRow>
               ) : displayedRows.length > 0 ? (
                 displayedRows.map((row, i) => {
                   const href = rowHref?.(row);
@@ -988,7 +1054,7 @@ export function DataPage<T extends Record<string, any>>({
           <div className="flex items-center gap-3">
             {isLoading ? (
               <span className="inline-flex items-center gap-2 text-xs font-medium text-primary">
-                <span className="h-2 w-2 rounded-full bg-primary animate-ping" /> Loading records...
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading records...
               </span>
             ) : (
               <span>

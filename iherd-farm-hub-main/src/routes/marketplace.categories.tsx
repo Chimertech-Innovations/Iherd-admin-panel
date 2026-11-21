@@ -53,6 +53,7 @@ import {
   ArrowRight,
   RefreshCw,
   ShoppingBag,
+  Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { formatImageUrl, getLocalizedText } from "@/lib/utils";
@@ -847,11 +848,17 @@ function CategoriesPage() {
               </TableHeader>
               <TableBody>
                 {catLoading ? (
-                  Array.from({ length: 4 }).map((_, i) => (
-                    <TableRow key={i} className="animate-pulse">
-                      <TableCell colSpan={6} className="h-16 bg-muted/20" />
-                    </TableRow>
-                  ))
+                  <TableRow>
+                    <TableCell colSpan={6} className="h-48 text-center">
+                      <div className="flex flex-col items-center justify-center gap-3 py-8">
+                        <Loader2 className="h-9 w-9 animate-spin text-primary" />
+                        <div className="space-y-1">
+                          <p className="text-sm font-semibold text-foreground">Loading categories...</p>
+                          <p className="text-xs text-muted-foreground">Please wait while categories are retrieved</p>
+                        </div>
+                      </div>
+                    </TableCell>
+                  </TableRow>
                 ) : filteredCategories.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={6} className="text-center py-12 text-muted-foreground text-sm">
@@ -1016,11 +1023,17 @@ function CategoriesPage() {
               </TableHeader>
               <TableBody>
                 {subLoading ? (
-                  Array.from({ length: 4 }).map((_, i) => (
-                    <TableRow key={i} className="animate-pulse">
-                      <TableCell colSpan={5} className="h-16 bg-muted/20" />
-                    </TableRow>
-                  ))
+                  <TableRow>
+                    <TableCell colSpan={5} className="h-48 text-center">
+                      <div className="flex flex-col items-center justify-center gap-3 py-8">
+                        <Loader2 className="h-9 w-9 animate-spin text-primary" />
+                        <div className="space-y-1">
+                          <p className="text-sm font-semibold text-foreground">Loading subcategories...</p>
+                          <p className="text-xs text-muted-foreground">Please wait while subcategories are retrieved</p>
+                        </div>
+                      </div>
+                    </TableCell>
+                  </TableRow>
                 ) : filteredSubcategories.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={5} className="text-center py-12 text-muted-foreground text-sm">

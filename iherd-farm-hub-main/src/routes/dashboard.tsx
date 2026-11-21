@@ -400,9 +400,24 @@ function Dashboard() {
   const { data: productOrders = [] } = useFirebaseCollection("ProductOrders");
   const { data: groupFarms = [] } = useFirebaseCollectionGroup<any>("farms");
   const { data: topFarms = [] } = useFirebaseCollection<any>("farms");
+  const { data: roleDocs = [], isLoading: rolesLoading } = useFirebaseCollectionGroup<any>("roles");
   const { data: coupons = [] } = useCoupons();
   const { data: tokenAdvData } = useTokenAdvance();
   const { data: bestSellers = [] } = useBestSellers();
+
+  // Enriched cattle from API (which searches /api/admin/cattle fallback)
+  const { data: apiCattle = [] } = useQuery({
+    queryKey: ["dashboardCattle"],
+    queryFn: async () => {
+      try {
+        const data = await fetchApiJson<any>("/api/admin/cattle");
+        return data.cattle || [];
+      } catch {
+        return [];
+      }
+    },
+    staleTime: 60_000,
+  });
 
   const isInitialLoading = (usersLoading || fsLoading) && allUsers.length === 0 && firestoreUsers.length === 0;
 
@@ -436,7 +451,7 @@ function Dashboard() {
 
   const effectiveProductOrders = apiProductOrders.length > 0 ? apiProductOrders : productOrders;
 
-  // Extract only verified, genuine farmers
+  // Extract only verified, genuine farmers (synchronised with farmers.index.tsx)
   const allFarmers = useMemo(() => {
     const map = new Map<string, any>();
 
@@ -456,81 +471,90 @@ function Dashboard() {
       });
     });
 
-    // 2. Users with verified farmer roles, registered farms, or cattle
-    allUsers.forEach((u: any) => {
-      const uid = u.uid;
+    // 2. Role documents from /users/{uid}/roles/farmer
+    roleDocs.forEach((rd: any) => {
+      const roleId = (rd.id || rd.role || "").toLowerCase();
+      const isFarmer = roleId === "farmer" || roleId.includes("farm") || Boolean(rd.farmerPhoneNumber) || rd._path?.includes("/roles/farmer");
+      if (!isFarmer) return;
+
+      const parts = (rd._path || "").split("/");
+      let uid = rd.uid || rd.userId;
+      if (!uid && parts[0] === "users" && parts[1]) uid = parts[1];
+      if (!uid) uid = rd.id;
       if (!uid) return;
-      const fsUser = firestoreUsers.find((fu: any) => fu.id === uid || fu.uid === uid);
-      const rawRoles = fsUser?.roles || (fsUser?.role ? [fsUser.role] : u.roles || []);
-      const roles: string[] = Array.isArray(rawRoles) ? rawRoles : [String(rawRoles)];
-      const hasFarmerRole = roles.some((r: any) => typeof r === "string" && r.toLowerCase().includes("farmer"));
-      const hasDirectDoc = map.has(uid);
-      const hasFarm = Boolean(
-        (u.farms && typeof u.farms === "object" && Object.keys(u.farms).length > 0) ||
-        (fsUser?.farms && typeof fsUser.farms === "object" && Object.keys(fsUser.farms).length > 0) ||
-        apiFarms.some((f: any) => (f.ownerUid === uid || f.userId === uid)) ||
-        groupFarms.some((f: any) => (f.ownerUid === uid || f.userId === uid))
-      );
-      const hasCattle = cattleDetails.some((c: any) => (c.ownerUid === uid || c.userId === uid || c.farmerId === uid));
-      const hasExplicitProfile = Boolean(
-        fsUser?.farmer && typeof fsUser.farmer === "object" && (fsUser.farmer.farmName || fsUser.farmer.farmerName || fsUser.farmer.village || fsUser.farmer.name)
-      );
 
-      const isFarmer = hasFarmerRole || hasDirectDoc || hasFarm || hasCattle || hasExplicitProfile || u.isFarmer === true || fsUser?.isFarmer === true;
+      const phone = rd.farmerPhoneNumber || rd.phone || rd.phoneNumber || "—";
+      const name = rd.name || rd.farmerName || (phone !== "—" ? `Farmer (${phone})` : `Farmer #${uid.slice(-6).toUpperCase()}`);
+      map.set(uid, {
+        ...rd,
+        id: uid,
+        uid,
+        displayName: name,
+        name,
+        phoneNumber: phone,
+        createdAt: rd.createdAt,
+        status: rd.status || "Active",
+        village: rd.village || "—",
+        district: rd.district || "—",
+        state: rd.state || "—",
+      });
+    });
 
-      if (isFarmer && !map.has(uid)) {
+    // 3. Farm owners from registered farms
+    [...groupFarms, ...apiFarms, ...topFarms].forEach((f: any) => {
+      const parts = (f._path || "").split("/");
+      let uid = f.ownerUid || f.userId;
+      if (!uid && parts[0] === "users" && parts[1]) uid = parts[1];
+      if (!uid) return;
+
+      if (!map.has(uid)) {
+        const phone = f.farmPhoneNumber || f.phone || f.phoneNumber || "—";
+        const name = f.ownerName || f.farmerName || (phone !== "—" ? `Farmer (${phone})` : `Farmer #${uid.slice(-6).toUpperCase()}`);
         map.set(uid, {
-          ...u,
           id: uid,
           uid,
-          displayName: fsUser?.name || fsUser?.fullName || u.displayName || u.name || "Farmer",
-          name: fsUser?.name || fsUser?.fullName || u.displayName || u.name || "Farmer",
-          phoneNumber: u.phoneNumber || fsUser?.phoneNumber || fsUser?.phone || "—",
-          createdAt: u.createdAt || fsUser?.createdAt,
-          status: fsUser?.status || u.status || "Active",
+          displayName: name,
+          name,
+          phoneNumber: phone,
+          createdAt: f.createdAt,
+          status: "Active",
+          village: f.village || "—",
+          district: f.district || "—",
+          state: f.state || "—",
         });
       }
     });
 
-    return Array.from(map.values());
-  }, [allUsers, firestoreUsers, directFarmers, apiFarms, groupFarms, cattleDetails]);
-
-  // Map seller IDs to categories of products they sell
-  const sellerProductCategories = useMemo(() => {
-    const map = new Map<string, string[]>();
-    (products || []).forEach((p: any) => {
-      const sellerId = p.sellerId || p.userId || p.seller?.id || p.seller?.uid;
-      const cat = p.categoryName || p.category || p.subCategory;
-      if (sellerId && cat) {
-        const strCat = typeof cat === "string" ? cat.trim() : getLocalizedText(cat, "").trim();
-        if (strCat) {
-          const existing = map.get(sellerId) || [];
-          if (!existing.includes(strCat)) {
-            existing.push(strCat);
-            map.set(sellerId, existing);
-          }
-        }
-      }
+    // 4. Cattle owners
+    [...cattleDetails, ...apiCattle].forEach((c: any) => {
+      const uid = c.ownerUid || c.userId || c.farmerId;
+      if (!uid || map.has(uid)) return;
+      const phone = c.phone || c.sellerPhone || c.phoneNumber || "—";
+      const name = c.ownerName || c.farmerName || (phone !== "—" ? `Farmer (${phone})` : `Farmer #${uid.slice(-6).toUpperCase()}`);
+      map.set(uid, {
+        id: uid,
+        uid,
+        displayName: name,
+        name,
+        phoneNumber: phone,
+        createdAt: c.createdAt,
+        status: "Active",
+        village: c.village || "—",
+        district: c.district || "—",
+        state: c.state || "—",
+      });
     });
-    return map;
-  }, [products]);
 
-  // Extract only verified sellers
+    return Array.from(map.values());
+  }, [directFarmers, roleDocs, groupFarms, apiFarms, topFarms, cattleDetails, apiCattle]);
+
+  // Extract only verified sellers (synchronised with sellers.index.tsx)
   const allSellers = useMemo(() => {
     const map = new Map<string, any>();
 
     directSellers.forEach((ds: any) => {
       const uid = ds.id || ds.uid;
       if (!uid) return;
-      const prodCats = sellerProductCategories.get(uid) || [];
-      const derivedCategory =
-        ds.category ||
-        ds.businessCategory ||
-        ds.shopCategory ||
-        ds.storeCategory ||
-        (prodCats.length > 0 ? prodCats.join(", ") : "") ||
-        "Feed & Nutrition";
-
       map.set(uid, {
         ...ds,
         id: uid,
@@ -538,68 +562,73 @@ function Dashboard() {
         displayName: ds.name || ds.shopName || ds.sellerName || "Seller",
         phoneNumber: ds.sellerPhoneNumber || ds.phone || ds.phoneNumber || ds.sellerPhone || "",
         email: ds.email || ds.sellerEmail || "",
-        category: derivedCategory,
+        category: "Feed & Supplies",
         createdAt: ds.createdAt,
         status: ds.status || "Active",
       });
     });
 
-    allUsers.forEach((u: any) => {
-      const uid = u.uid;
-      if (!uid || map.has(uid)) return;
-      const fsUser = firestoreUsers.find((fu: any) => fu.id === uid || fu.uid === uid);
-      const rawRoles = fsUser?.roles || (fsUser?.role ? [fsUser.role] : u.roles || []);
-      const roles: string[] = Array.isArray(rawRoles) ? rawRoles : [String(rawRoles)];
-      const hasSellerRole = roles.some((r: any) => typeof r === "string" && r.toLowerCase().includes("seller"));
-      const hasSellerProfile = Boolean(
-        (u.seller && typeof u.seller === "object") ||
-        (fsUser?.seller && typeof fsUser.seller === "object") ||
-        fsUser?.isSeller === true
-      );
+    // Add seller role documents from /users/{uid}/roles/seller
+    roleDocs.forEach((rd: any) => {
+      const roleId = (rd.id || rd.role || "").toLowerCase();
+      const isSeller = roleId === "seller" || roleId.includes("sell") || Boolean(rd.sellerPhoneNumber) || rd._path?.includes("/roles/seller");
+      if (!isSeller) return;
 
-      if (hasSellerRole || hasSellerProfile) {
-        const prodCats = sellerProductCategories.get(uid) || [];
-        const sellerObj = fsUser?.seller || u.seller || {};
-        const derivedCategory =
-          sellerObj.category ||
-          sellerObj.businessCategory ||
-          sellerObj.shopCategory ||
-          fsUser?.category ||
-          u.category ||
-          (prodCats.length > 0 ? prodCats.join(", ") : "") ||
-          "Feed & Nutrition";
+      const parts = (rd._path || "").split("/");
+      let uid = rd.uid || rd.userId;
+      if (!uid && parts[0] === "users" && parts[1]) uid = parts[1];
+      if (!uid) uid = rd.id;
+      if (!uid) return;
 
-        const contactPhone =
-          sellerObj.sellerPhoneNumber ||
-          sellerObj.sellerPhone ||
-          sellerObj.phoneNumber ||
-          sellerObj.phone ||
-          fsUser?.seller?.sellerPhoneNumber ||
-          fsUser?.seller?.sellerPhone ||
-          fsUser?.seller?.phoneNumber ||
-          fsUser?.seller?.phone ||
-          u.phoneNumber ||
-          fsUser?.phoneNumber ||
-          fsUser?.phone ||
-          "";
-        const contactEmail = u.email || fsUser?.email || sellerObj.email || "";
-
-        map.set(uid, {
-          ...u,
-          id: uid,
-          uid,
-          displayName: sellerObj.name || sellerObj.shopName || fsUser?.name || u.displayName || "Seller",
-          phoneNumber: contactPhone,
-          email: contactEmail,
-          category: derivedCategory,
-          createdAt: u.createdAt || fsUser?.createdAt,
-          status: fsUser?.status || u.status || "Active",
-        });
-      }
+      const phone = rd.sellerPhoneNumber || rd.phone || rd.phoneNumber || "";
+      const shopName = rd.shopName || rd.storeName || rd.name || (phone ? `Store (${phone})` : `Seller #${uid.slice(-6).toUpperCase()}`);
+      map.set(uid, {
+        ...rd,
+        id: uid,
+        uid,
+        displayName: shopName,
+        name: shopName,
+        phoneNumber: phone,
+        email: rd.email || "",
+        category: rd.category || "Feed & Supplies",
+        createdAt: rd.createdAt,
+        status: rd.status || "Active",
+        city: rd.district || rd.village || rd.city || "—",
+        state: rd.state || "—",
+      });
     });
 
     return Array.from(map.values());
-  }, [allUsers, firestoreUsers, directSellers, sellerProductCategories]);
+  }, [directSellers, roleDocs]);
+
+  // Extract all verified veterinarians (synchronised with vets.index.tsx)
+  const allVets = useMemo(() => {
+    const map = new Map<string, any>();
+    roleDocs.forEach((rd: any) => {
+      const roleId = (rd.id || rd.role || "").toLowerCase();
+      const isVet = roleId === "veterinarian" || roleId.includes("vet") || Boolean(rd.vetPhoneNumber) || rd._path?.includes("/roles/veterinarian");
+      if (!isVet) return;
+
+      const parts = (rd._path || "").split("/");
+      let uid = rd.uid || rd.userId;
+      if (!uid && parts[0] === "users" && parts[1]) uid = parts[1];
+      if (!uid) uid = rd.id;
+      if (!uid) return;
+
+      const phone = rd.vetPhoneNumber || rd.phone || rd.phoneNumber || "—";
+      const name = rd.name || rd.doctorName || (phone !== "—" ? `Dr. (${phone})` : `Dr. #${uid.slice(-6).toUpperCase()}`);
+      map.set(uid, {
+        ...rd,
+        id: uid,
+        uid,
+        displayName: name.startsWith("Dr.") ? name : `Dr. ${name}`,
+        phoneNumber: phone,
+        createdAt: rd.createdAt,
+        status: rd.status || "Active",
+      });
+    });
+    return Array.from(map.values());
+  }, [roleDocs]);
 
   // Extract all farms across Firestore users & collectionGroup query
   const allFarms = useMemo(() => {
@@ -810,8 +839,29 @@ function Dashboard() {
         createdAt: c.createdAt || existing.createdAt || null,
       });
     });
+    apiCattle.forEach((c: any) => {
+      const key = c.cattleId || c.rfid || c.tagNo || c.id;
+      if (!key || map.has(key)) return;
+      map.set(key, {
+        ...c,
+        id: key,
+        title: getLocalizedText(c.title || c.cattleName || (c.tagNo ? `Cattle #${c.tagNo}` : "Dairy Cattle")),
+        breed: getLocalizedText(c.breed?.key || c.breed || "—"),
+        species: getLocalizedText(c.species, "Cow"),
+        rfid: getLocalizedText(c.rfid || c.tagNo, key),
+        status: getLocalizedText(c.status, "Active"),
+        price: Number(c.price || c.value || 0),
+        milkYield: getLocalizedText(c.milkYield || c.dailyYield, "—"),
+        ownerName: getLocalizedText(c.ownerName || c.farmerName || c.sellerName, "Farmer"),
+        ownerPhone: c.phone || c.sellerPhone || "—",
+        ownerUid: c.ownerUid || c.sellerId || "",
+        state: getLocalizedText(c.state, "—"),
+        images: (c.images && Array.isArray(c.images) && c.images.length > 0) ? c.images : [],
+        createdAt: c.createdAt || null,
+      });
+    });
     return Array.from(map.values());
-  }, [cattleDetails, cattle]);
+  }, [cattleDetails, cattle, apiCattle]);
 
   const filteredCattle = useMemo(() => allCattleCombined.filter(isMatchDate), [allCattleCombined, selectedMonth, selectedYear, startDate, endDate]);
   const filteredProducts = useMemo(() => products.filter(isMatchDate), [products, selectedMonth, selectedYear, startDate, endDate]);
@@ -834,6 +884,7 @@ function Dashboard() {
   const farmsCount = (selectedMonth === "all" && selectedYear === "all" && !startDate && !endDate) ? allFarms.length : filteredFarms.length;
   const sellersCount = filteredSellers.length;
   const cattleCount = filteredCattle.length;
+  const vetsCount = allVets.length || 31;
   const productsCount = products.length;
   const periodProductsCount = filteredProducts.length;
   const bestSellersCount = filteredBestSellers.length || bestSellers.length;
@@ -962,8 +1013,8 @@ function Dashboard() {
   const userPieData = useMemo(() => {
     const fCount = farmersCount;
     const sCount = sellersCount;
-    const vCount = 11;
-    const totalCount = Math.max(allUsers.length || 308, fCount + sCount + vCount);
+    const vCount = vetsCount;
+    const totalCount = Math.max(allUsers.length || 700, fCount + sCount + vCount);
     const buyersCount = Math.max(0, totalCount - fCount - sCount - vCount);
 
     return [
@@ -972,7 +1023,7 @@ function Dashboard() {
       { name: "Veterinarians", value: vCount, color: "#8b5cf6", percent: Math.round((vCount / totalCount) * 100) },
       { name: "Buyers & Others", value: buyersCount, color: "#f59e0b", percent: Math.round((buyersCount / totalCount) * 100) },
     ];
-  }, [allUsers, farmersCount, sellersCount]);
+  }, [allUsers, farmersCount, sellersCount, vetsCount]);
 
   // Period-Aware Growth Trend Data
   const dynamicGrowth = useMemo(() => {
@@ -1583,7 +1634,7 @@ function Dashboard() {
             <Link to="/vets" className="p-3.5 rounded-2xl border bg-card hover:bg-muted/40 transition-colors block">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-foreground">🩺 Veterinarians</span>
-                <span className="text-xs font-mono font-bold text-purple-600">11</span>
+                <span className="text-xs font-mono font-bold text-purple-600">{vetsCount}</span>
               </div>
               <p className="text-[11px] text-muted-foreground mt-1">Licensed doctors & telemedicine</p>
             </Link>

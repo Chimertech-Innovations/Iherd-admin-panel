@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { getApiBaseUrlSync } from "@/lib/apiClient";
+import { getApiBaseUrlSync, fastFetchBackend } from "@/lib/apiClient";
 import { DataPage } from "@/components/admin/DataPage";
 import { StatusBadge } from "@/components/admin/StatusBadge";
 import { Button } from "@/components/ui/button";
@@ -220,27 +220,16 @@ function CattleDetailsPage() {
   const fetchData = async () => {
     try {
       setBackendLoading(true);
-      let res = await fetch(`${API_BASE}/api/admin/cattle`).catch(() => null);
-      if (!res || !res.ok) {
-        res = await fetch(`/api/admin/cattle`).catch(() => null);
-      }
-      if (res && res.ok) {
-        const json = await res.json();
-        if (Array.isArray(json.cattle) && json.cattle.length > 0) {
-          setBackendCattle(json.cattle);
-          return;
-        }
+      const json = await fastFetchBackend<{ cattle?: any[] }>("/api/admin/cattle", 2500);
+      if (Array.isArray(json?.cattle) && json.cattle.length > 0) {
+        setBackendCattle(json.cattle);
+        return;
       }
 
-      // Fallback to generic collection-group endpoint
-      const cgRes = await fetch(`${API_BASE}/api/admin/collection-group/cattles`).catch(() =>
-        fetch(`/api/admin/collection-group/cattles`).catch(() => null)
-      );
-      if (cgRes && cgRes.ok) {
-        const cgJson = await cgRes.json();
-        if (Array.isArray(cgJson.data) && cgJson.data.length > 0) {
-          setBackendCattle(cgJson.data);
-        }
+      // Fallback to generic collection-group endpoint with 2.5s timeout
+      const cgJson = await fastFetchBackend<{ data?: any[] }>("/api/admin/collection-group/cattles", 2500);
+      if (Array.isArray(cgJson?.data) && cgJson.data.length > 0) {
+        setBackendCattle(cgJson.data);
       }
     } catch (e) {
       console.warn("Could not fetch cattle data from backend:", e);
