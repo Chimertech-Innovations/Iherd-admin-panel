@@ -47,6 +47,69 @@ function UsersPage() {
   const mergedUsers = useMemo(() => {
     const userMap = new Map<string, any>();
 
+    // Build fast O(1) lookup of Auth users by 10-digit phone
+    const authByPhone = new Map<string, string>();
+    authUsers.forEach((au: any) => {
+      const uid = au.uid || au.id;
+      const cleanP = (au.phoneNumber || au.phone || "").replace(/\D/g, "").slice(-10);
+      if (cleanP && !authByPhone.has(cleanP)) {
+        authByPhone.set(cleanP, uid);
+      }
+    });
+
+    // 1. Pre-calculate strictly ONE canonical UID per verified farmer, seller, and vet
+    // (Prevents multiple duplicate Firebase Auth accounts sharing the same phone from inflating role counts)
+    const canonicalFarmerUids = new Set<string>();
+    const farmerPhoneToUid = new Map<string, string>();
+    farmers.forEach((f) => {
+      const cleanP = (f.phone || f.phoneNumber || "").replace(/\D/g, "").slice(-10);
+      const exactAuth = authUsers.find((au: any) => (au.uid || au.id) === f.uid);
+      if (exactAuth) {
+        canonicalFarmerUids.add(f.uid);
+        if (cleanP) farmerPhoneToUid.set(cleanP, f.uid);
+      } else if (cleanP && authByPhone.has(cleanP)) {
+        const mappedUid = authByPhone.get(cleanP)!;
+        canonicalFarmerUids.add(mappedUid);
+        farmerPhoneToUid.set(cleanP, mappedUid);
+      } else {
+        canonicalFarmerUids.add(f.uid);
+      }
+    });
+
+    const canonicalSellerUids = new Set<string>();
+    const sellerPhoneToUid = new Map<string, string>();
+    sellers.forEach((s) => {
+      const cleanP = (s.phone || s.phoneNumber || "").replace(/\D/g, "").slice(-10);
+      const exactAuth = authUsers.find((au: any) => (au.uid || au.id) === s.uid);
+      if (exactAuth) {
+        canonicalSellerUids.add(s.uid);
+        if (cleanP) sellerPhoneToUid.set(cleanP, s.uid);
+      } else if (cleanP && authByPhone.has(cleanP)) {
+        const mappedUid = authByPhone.get(cleanP)!;
+        canonicalSellerUids.add(mappedUid);
+        sellerPhoneToUid.set(cleanP, mappedUid);
+      } else {
+        canonicalSellerUids.add(s.uid);
+      }
+    });
+
+    const canonicalVetUids = new Set<string>();
+    const vetPhoneToUid = new Map<string, string>();
+    vets.forEach((v) => {
+      const cleanP = (v.phone || v.phoneNumber || "").replace(/\D/g, "").slice(-10);
+      const exactAuth = authUsers.find((au: any) => (au.uid || au.id) === v.uid);
+      if (exactAuth) {
+        canonicalVetUids.add(v.uid);
+        if (cleanP) vetPhoneToUid.set(cleanP, v.uid);
+      } else if (cleanP && authByPhone.has(cleanP)) {
+        const mappedUid = authByPhone.get(cleanP)!;
+        canonicalVetUids.add(mappedUid);
+        vetPhoneToUid.set(cleanP, mappedUid);
+      } else {
+        canonicalVetUids.add(v.uid);
+      }
+    });
+
     // Build O(1) lookup map of Firestore profiles by id, uid, and clean phone
     const fsMap = new Map<string, any>();
     firestoreUsers.forEach((fu: any) => {
@@ -64,9 +127,9 @@ function UsersPage() {
       const fsUser = fsMap.get(uid) || (cleanAuthPhone ? fsMap.get(cleanAuthPhone) : null) || {};
 
       // Verified roles strictly matching the canonical directory
-      const isFarmer = farmerMap.has(uid) || (cleanAuthPhone ? farmerMapByPhone.has(cleanAuthPhone) : false);
-      const isSeller = sellerMap.has(uid) || (cleanAuthPhone ? sellerMapByPhone.has(cleanAuthPhone) : false);
-      const isVet = vetMap.has(uid) || (cleanAuthPhone ? vetMapByPhone.has(cleanAuthPhone) : false);
+      const isFarmer = canonicalFarmerUids.has(uid);
+      const isSeller = canonicalSellerUids.has(uid);
+      const isVet = canonicalVetUids.has(uid);
 
       const roles: string[] = [];
       if (isFarmer) roles.push("Farmer");
@@ -79,9 +142,9 @@ function UsersPage() {
       else if (isSeller) primaryRole = "Seller";
       else if (isVet) primaryRole = "Veterinarian";
 
-      const verifiedFarmer = farmerMap.get(uid) || (cleanAuthPhone ? farmerMapByPhone.get(cleanAuthPhone) : null);
-      const verifiedSeller = sellerMap.get(uid) || (cleanAuthPhone ? sellerMapByPhone.get(cleanAuthPhone) : null);
-      const verifiedVet = vetMap.get(uid) || (cleanAuthPhone ? vetMapByPhone.get(cleanAuthPhone) : null);
+      const verifiedFarmer = isFarmer ? (farmerMap.get(uid) || (cleanAuthPhone ? farmerMapByPhone.get(cleanAuthPhone) : null)) : null;
+      const verifiedSeller = isSeller ? (sellerMap.get(uid) || (cleanAuthPhone ? sellerMapByPhone.get(cleanAuthPhone) : null)) : null;
+      const verifiedVet = isVet ? (vetMap.get(uid) || (cleanAuthPhone ? vetMapByPhone.get(cleanAuthPhone) : null)) : null;
 
       const farmerProfile = verifiedFarmer || authUser.farmer || fsUser?.farmer || null;
       const farmProfile = verifiedFarmer?.registeredFarmName ? { name: verifiedFarmer.registeredFarmName } : (authUser.farms || fsUser?.farms || null);
@@ -215,9 +278,9 @@ function UsersPage() {
       if (!uid || userMap.has(uid)) return;
       const cleanPhone = (fu.phoneNumber || fu.phone || "").replace(/\D/g, "").slice(-10);
 
-      const isFarmer = farmerMap.has(uid) || (cleanPhone ? farmerMapByPhone.has(cleanPhone) : false);
-      const isSeller = sellerMap.has(uid) || (cleanPhone ? sellerMapByPhone.has(cleanPhone) : false);
-      const isVet = vetMap.has(uid) || (cleanPhone ? vetMapByPhone.has(cleanPhone) : false);
+      const isFarmer = canonicalFarmerUids.has(uid);
+      const isSeller = canonicalSellerUids.has(uid);
+      const isVet = canonicalVetUids.has(uid);
 
       const roles: string[] = [];
       if (isFarmer) roles.push("Farmer");
@@ -230,9 +293,9 @@ function UsersPage() {
       else if (isSeller) primaryRole = "Seller";
       else if (isVet) primaryRole = "Veterinarian";
 
-      const verifiedFarmer = farmerMap.get(uid) || (cleanPhone ? farmerMapByPhone.get(cleanPhone) : null);
-      const verifiedSeller = sellerMap.get(uid) || (cleanPhone ? sellerMapByPhone.get(cleanPhone) : null);
-      const verifiedVet = vetMap.get(uid) || (cleanPhone ? vetMapByPhone.get(cleanPhone) : null);
+      const verifiedFarmer = isFarmer ? (farmerMap.get(uid) || (cleanPhone ? farmerMapByPhone.get(cleanPhone) : null)) : null;
+      const verifiedSeller = isSeller ? (sellerMap.get(uid) || (cleanPhone ? sellerMapByPhone.get(cleanPhone) : null)) : null;
+      const verifiedVet = isVet ? (vetMap.get(uid) || (cleanPhone ? vetMapByPhone.get(cleanPhone) : null)) : null;
 
       const farmerProfile = verifiedFarmer || fu.farmer || null;
       const farmProfile = verifiedFarmer?.registeredFarmName ? { name: verifiedFarmer.registeredFarmName } : (fu.farms || null);
@@ -272,7 +335,9 @@ function UsersPage() {
 
     // 3. Ensure all verified farmers, sellers, and vets exist in the User Directory
     farmers.forEach((f) => {
-      if (!userMap.has(f.uid)) {
+      const cleanP = (f.phone || f.phoneNumber || "").replace(/\D/g, "").slice(-10);
+      const mappedUid = (cleanP && farmerPhoneToUid.get(cleanP)) || f.uid;
+      if (!userMap.has(mappedUid) && !userMap.has(f.uid)) {
         userMap.set(f.uid, {
           id: f.uid,
           uid: f.uid,
@@ -298,7 +363,9 @@ function UsersPage() {
     });
 
     sellers.forEach((s) => {
-      if (!userMap.has(s.uid)) {
+      const cleanP = (s.phone || s.phoneNumber || "").replace(/\D/g, "").slice(-10);
+      const mappedUid = (cleanP && sellerPhoneToUid.get(cleanP)) || s.uid;
+      if (!userMap.has(mappedUid) && !userMap.has(s.uid)) {
         userMap.set(s.uid, {
           id: s.uid,
           uid: s.uid,
@@ -324,7 +391,9 @@ function UsersPage() {
     });
 
     vets.forEach((v) => {
-      if (!userMap.has(v.uid)) {
+      const cleanP = (v.phone || v.phoneNumber || "").replace(/\D/g, "").slice(-10);
+      const mappedUid = (cleanP && vetPhoneToUid.get(cleanP)) || v.uid;
+      if (!userMap.has(mappedUid) && !userMap.has(v.uid)) {
         userMap.set(v.uid, {
           id: v.uid,
           uid: v.uid,
