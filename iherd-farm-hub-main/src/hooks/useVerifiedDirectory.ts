@@ -647,13 +647,13 @@ export function useVerifiedDirectory() {
   // 8. Registered Cattle (Strictly 103 cattle)
   const cattle = useMemo(() => {
     const map = new Map<string, any>();
-    [...cattleDetails, ...cattleMarketplace].forEach((c: any) => {
+    [...cattleList, ...cattleMarketplace].forEach((c: any) => {
       const key = c.cattleId || c.id || c.rfid;
       if (!key || map.has(key)) return;
       map.set(key, c);
     });
     return Array.from(map.values());
-  }, [cattleDetails, cattleMarketplace]);
+  }, [cattleList, cattleMarketplace]);
 
   const isLoading = (rolesLoading || farmsLoading || authLoading) && farmers.length === 0;
 
