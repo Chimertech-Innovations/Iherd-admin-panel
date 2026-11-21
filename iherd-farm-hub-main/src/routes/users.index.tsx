@@ -1,8 +1,9 @@
 import { useMemo } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { DataPage } from "@/components/admin/DataPage";
-import { useFirebaseCollection, useFirebaseCollectionGroup } from "../hooks/useFirebaseData";
+import { useFirebaseCollection } from "../hooks/useFirebaseData";
 import { useAdminUsers } from "../hooks/useAdminUsers";
+import { useVerifiedDirectory } from "../hooks/useVerifiedDirectory";
 import { Phone, Mail, MapPin, Building, Store, Stethoscope, ExternalLink } from "lucide-react";
 
 export const Route = createFileRoute("/users/")({
@@ -25,8 +26,22 @@ function UsersPage() {
   // 2. Fetch users collection from Firestore to merge live roles & profiles
   const { data: firestoreUsers = [], isLoading: firestoreLoading } = useFirebaseCollection<any>("users");
 
-  // 3. Fetch role documents across Firestore
-  const { data: roleDocs = [], isLoading: rolesLoading } = useFirebaseCollectionGroup<any>("roles");
+  // 3. Single Canonical Source of Truth for verified directories
+  const {
+    farmers,
+    sellers,
+    vets,
+    farmerMap,
+    farmerMapByPhone,
+    sellerMap,
+    sellerMapByPhone,
+    vetMap,
+    vetMapByPhone,
+    farmerCount,
+    sellerCount,
+    vetCount,
+    isLoading: dirLoading,
+  } = useVerifiedDirectory();
 
   // Merge Auth users and Firestore user documents with instant O(1) matching
   const mergedUsers = useMemo(() => {
@@ -48,28 +63,41 @@ function UsersPage() {
       const cleanAuthPhone = (authUser.phoneNumber || authUser.phone || "").replace(/\D/g, "").slice(-10);
       const fsUser = fsMap.get(uid) || (cleanAuthPhone ? fsMap.get(cleanAuthPhone) : null) || {};
 
-      // Accurate role resolution from backend and Firestore
-      const rawRoles = authUser.roles || fsUser?.roles || (fsUser?.role ? [fsUser.role] : ["User"]);
-      const roles = Array.isArray(rawRoles) ? rawRoles : [String(rawRoles)];
+      // Verified roles strictly matching the canonical directory
+      const isFarmer = farmerMap.has(uid) || (cleanAuthPhone ? farmerMapByPhone.has(cleanAuthPhone) : false);
+      const isSeller = sellerMap.has(uid) || (cleanAuthPhone ? sellerMapByPhone.has(cleanAuthPhone) : false);
+      const isVet = vetMap.has(uid) || (cleanAuthPhone ? vetMapByPhone.has(cleanAuthPhone) : false);
+
+      const roles: string[] = [];
+      if (isFarmer) roles.push("Farmer");
+      if (isSeller) roles.push("Seller");
+      if (isVet) roles.push("Veterinarian");
+      if (roles.length === 0) roles.push("User");
 
       let primaryRole = "User";
-      if (roles.includes("Farmer") || authUser.isFarmer) {
-        primaryRole = "Farmer";
-      } else if (roles.includes("Seller") || authUser.seller) {
-        primaryRole = "Seller";
-      } else if (roles.includes("Veterinarian") || authUser.veterinarian) {
-        primaryRole = "Veterinarian";
-      }
+      if (isFarmer) primaryRole = "Farmer";
+      else if (isSeller) primaryRole = "Seller";
+      else if (isVet) primaryRole = "Veterinarian";
 
-      const farmerProfile = authUser.farmer || fsUser?.farmer || null;
-      const farmProfile = authUser.farms || fsUser?.farms || null;
-      const sellerProfile = authUser.seller || fsUser?.seller || null;
-      const vetProfile = authUser.veterinarian || fsUser?.veterinarian || fsUser?.vet || null;
+      const verifiedFarmer = farmerMap.get(uid) || (cleanAuthPhone ? farmerMapByPhone.get(cleanAuthPhone) : null);
+      const verifiedSeller = sellerMap.get(uid) || (cleanAuthPhone ? sellerMapByPhone.get(cleanAuthPhone) : null);
+      const verifiedVet = vetMap.get(uid) || (cleanAuthPhone ? vetMapByPhone.get(cleanAuthPhone) : null);
+
+      const farmerProfile = verifiedFarmer || authUser.farmer || fsUser?.farmer || null;
+      const farmProfile = verifiedFarmer?.registeredFarmName ? { name: verifiedFarmer.registeredFarmName } : (authUser.farms || fsUser?.farms || null);
+      const sellerProfile = verifiedSeller || authUser.seller || fsUser?.seller || null;
+      const vetProfile = verifiedVet || authUser.veterinarian || fsUser?.veterinarian || fsUser?.vet || null;
 
       const resolvedName =
-        (authUser.displayName && authUser.displayName !== "User" && authUser.displayName !== "Farmer")
+        (verifiedFarmer?.name && !verifiedFarmer.name.startsWith("Farmer"))
+          ? verifiedFarmer.name
+          : (verifiedSeller?.name && !verifiedSeller.name.startsWith("Store"))
+          ? verifiedSeller.name
+          : (verifiedVet?.name && !verifiedVet.name.startsWith("Dr. #"))
+          ? verifiedVet.name
+          : (authUser.displayName && authUser.displayName !== "User" && !authUser.displayName.startsWith("Farmer"))
           ? authUser.displayName
-          : (authUser.name && authUser.name !== "User")
+          : (authUser.name && authUser.name !== "User" && !authUser.name.startsWith("Farmer"))
           ? authUser.name
           : (fsUser?.fullName && fsUser.fullName !== "User")
           ? fsUser.fullName
@@ -77,8 +105,6 @@ function UsersPage() {
           ? fsUser.name
           : (fsUser?.displayName && fsUser.displayName !== "User")
           ? fsUser.displayName
-          : (farmerProfile?.name && farmerProfile.name !== "User")
-          ? farmerProfile.name
           : (authUser.phoneNumber ? `User (${authUser.phoneNumber})` : `User #${uid.slice(-6).toUpperCase()}`);
 
       const resolvedPhone =
@@ -86,13 +112,18 @@ function UsersPage() {
           ? authUser.phoneNumber
           : (fsUser?.phoneNumber && fsUser.phoneNumber !== "—")
           ? fsUser.phoneNumber
+          : (verifiedFarmer?.phone && verifiedFarmer.phone !== "—")
+          ? verifiedFarmer.phone
+          : (verifiedSeller?.phone && verifiedSeller.phone !== "—")
+          ? verifiedSeller.phone
+          : (verifiedVet?.phone && verifiedVet.phone !== "—")
+          ? verifiedVet.phone
           : (fsUser?.phone && fsUser.phone !== "—")
           ? fsUser.phone
-          : (farmerProfile?.farmerPhoneNumber && farmerProfile.farmerPhoneNumber !== "—")
-          ? farmerProfile.farmerPhoneNumber
           : "—";
 
       const village =
+        verifiedFarmer?.village ||
         farmProfile?.village ||
         farmerProfile?.village ||
         sellerProfile?.village ||
@@ -108,6 +139,7 @@ function UsersPage() {
         "—";
 
       const district =
+        verifiedFarmer?.district ||
         farmProfile?.district ||
         farmerProfile?.district ||
         sellerProfile?.district ||
@@ -122,6 +154,7 @@ function UsersPage() {
         "—";
 
       const state =
+        verifiedFarmer?.state ||
         farmProfile?.state ||
         farmerProfile?.state ||
         sellerProfile?.state ||
@@ -180,73 +213,36 @@ function UsersPage() {
     firestoreUsers.forEach((fu: any) => {
       const uid = fu.id || fu.uid;
       if (!uid || userMap.has(uid)) return;
+      const cleanPhone = (fu.phoneNumber || fu.phone || "").replace(/\D/g, "").slice(-10);
 
-      const rawRoles = fu.roles || (fu.role ? [fu.role] : ["User"]);
-      const roles = Array.isArray(rawRoles) ? rawRoles : [String(rawRoles)];
+      const isFarmer = farmerMap.has(uid) || (cleanPhone ? farmerMapByPhone.has(cleanPhone) : false);
+      const isSeller = sellerMap.has(uid) || (cleanPhone ? sellerMapByPhone.has(cleanPhone) : false);
+      const isVet = vetMap.has(uid) || (cleanPhone ? vetMapByPhone.has(cleanPhone) : false);
+
+      const roles: string[] = [];
+      if (isFarmer) roles.push("Farmer");
+      if (isSeller) roles.push("Seller");
+      if (isVet) roles.push("Veterinarian");
+      if (roles.length === 0) roles.push("User");
+
       let primaryRole = "User";
-      if (roles.some((r: any) => String(r).toLowerCase().includes("farmer")) || fu.farms || fu.farmer) {
-        primaryRole = "Farmer";
-      } else if (roles.some((r: any) => String(r).toLowerCase().includes("seller")) || fu.seller) {
-        primaryRole = "Seller";
-      } else if (roles.some((r: any) => String(r).toLowerCase().includes("vet")) || fu.veterinarian || fu.vet) {
-        primaryRole = "Veterinarian";
-      }
+      if (isFarmer) primaryRole = "Farmer";
+      else if (isSeller) primaryRole = "Seller";
+      else if (isVet) primaryRole = "Veterinarian";
 
-      const farmerProfile = fu.farmer || null;
-      const farmProfile = fu.farms || null;
-      const sellerProfile = fu.seller || null;
-      const vetProfile = fu.veterinarian || fu.vet || null;
+      const verifiedFarmer = farmerMap.get(uid) || (cleanPhone ? farmerMapByPhone.get(cleanPhone) : null);
+      const verifiedSeller = sellerMap.get(uid) || (cleanPhone ? sellerMapByPhone.get(cleanPhone) : null);
+      const verifiedVet = vetMap.get(uid) || (cleanPhone ? vetMapByPhone.get(cleanPhone) : null);
 
-      const village =
-        farmProfile?.village ||
-        farmerProfile?.village ||
-        sellerProfile?.village ||
-        sellerProfile?.city ||
-        sellerProfile?.town ||
-        vetProfile?.village ||
-        vetProfile?.city ||
-        vetProfile?.town ||
-        fu.village ||
-        fu.city ||
-        "—";
+      const farmerProfile = verifiedFarmer || fu.farmer || null;
+      const farmProfile = verifiedFarmer?.registeredFarmName ? { name: verifiedFarmer.registeredFarmName } : (fu.farms || null);
+      const sellerProfile = verifiedSeller || fu.seller || null;
+      const vetProfile = verifiedVet || fu.veterinarian || fu.vet || null;
 
-      const district =
-        farmProfile?.district ||
-        farmerProfile?.district ||
-        sellerProfile?.district ||
-        sellerProfile?.districtName ||
-        sellerProfile?.city ||
-        vetProfile?.district ||
-        vetProfile?.districtName ||
-        vetProfile?.city ||
-        fu.district ||
-        fu.districtName ||
-        "—";
-
-      const state =
-        farmProfile?.state ||
-        farmerProfile?.state ||
-        sellerProfile?.state ||
-        sellerProfile?.stateName ||
-        sellerProfile?.stateCode ||
-        vetProfile?.state ||
-        vetProfile?.stateName ||
-        vetProfile?.stateCode ||
-        fu.state ||
-        fu.stateName ||
-        fu.stateCode ||
-        "—";
-
-      const address =
-        farmProfile?.address ||
-        farmerProfile?.address ||
-        sellerProfile?.address ||
-        sellerProfile?.fullAddress ||
-        vetProfile?.address ||
-        vetProfile?.clinicAddress ||
-        fu.address ||
-        fu.fullAddress ||
-        "—";
+      const village = verifiedFarmer?.village || fu.village || fu.city || "—";
+      const district = verifiedFarmer?.district || fu.district || fu.districtName || "—";
+      const state = verifiedFarmer?.state || fu.state || fu.stateName || "—";
+      const address = fu.address || fu.fullAddress || "—";
 
       const locParts = [village, district, state].filter((v) => v && v !== "—");
       const location = locParts.length > 0 ? locParts.join(", ") : (address !== "—" ? address : "—");
@@ -274,60 +270,83 @@ function UsersPage() {
       });
     });
 
-    // 3. Process standalone role documents from /users/{uid}/roles/*
-    roleDocs.forEach((rd: any) => {
-      const parts = (rd._path || "").split("/");
-      let uid = rd.uid || rd.userId;
-      if (!uid && parts[0] === "users" && parts[1]) uid = parts[1];
-      if (!uid) uid = rd.id;
-      if (!uid || userMap.has(uid) || uid.length < 15) return;
+    // 3. Ensure all verified farmers, sellers, and vets exist in the User Directory
+    farmers.forEach((f) => {
+      if (!userMap.has(f.uid)) {
+        userMap.set(f.uid, {
+          id: f.uid,
+          uid: f.uid,
+          name: f.name,
+          displayName: f.displayName || f.name,
+          phoneNumber: f.phone,
+          email: null,
+          roles: ["Farmer"],
+          role: "Farmer",
+          farmer: f,
+          farms: f.hasFarm ? { name: f.registeredFarmName } : null,
+          seller: null,
+          veterinarian: null,
+          village: f.village,
+          district: f.district,
+          state: f.state,
+          address: "—",
+          location: f.location,
+          createdAt: f.rawTimestamp || null,
+          lastLoginAt: f.rawTimestamp || null,
+        });
+      }
+    });
 
-      const roleId = (rd.id || rd.role || "").toLowerCase();
-      const isFarmer = roleId === "farmer" || roleId.includes("farm") || Boolean(rd.farmerPhoneNumber);
-      const isSeller = roleId === "seller" || roleId.includes("sell") || Boolean(rd.sellerPhoneNumber);
-      const isVet = roleId === "veterinarian" || roleId.includes("vet") || Boolean(rd.vetPhoneNumber);
+    sellers.forEach((s) => {
+      if (!userMap.has(s.uid)) {
+        userMap.set(s.uid, {
+          id: s.uid,
+          uid: s.uid,
+          name: s.name,
+          displayName: s.shopName || s.name,
+          phoneNumber: s.phone,
+          email: s.email,
+          roles: ["Seller"],
+          role: "Seller",
+          farmer: null,
+          farms: null,
+          seller: s,
+          veterinarian: null,
+          village: "—",
+          district: s.city,
+          state: s.state,
+          address: "—",
+          location: s.location,
+          createdAt: s.rawTimestamp || null,
+          lastLoginAt: s.rawTimestamp || null,
+        });
+      }
+    });
 
-      const roles: string[] = [];
-      if (isFarmer) roles.push("Farmer");
-      if (isSeller) roles.push("Seller");
-      if (isVet) roles.push("Veterinarian");
-      if (roles.length === 0) roles.push("User");
-
-      const rawPhone = rd.farmerPhoneNumber || rd.sellerPhoneNumber || rd.vetPhoneNumber || rd.phone || rd.phoneNumber || "";
-      const phone = rawPhone && rawPhone !== "—" ? (rawPhone.startsWith("+") ? rawPhone : (rawPhone.length === 10 ? `+91${rawPhone}` : rawPhone)) : "—";
-      const resolvedName = rd.name || rd.doctorName || rd.shopName || (phone !== "—" ? `User (${phone})` : `User #${uid.slice(-6).toUpperCase()}`);
-
-      const village = rd.village || rd.city || rd.town || "—";
-      const district = rd.district || "—";
-      const state = rd.state || "—";
-      const address = rd.address || "—";
-      const locParts = [village, district, state].filter((v) => v && v !== "—");
-      const location = locParts.length > 0 ? locParts.join(", ") : (address !== "—" ? address : "—");
-
-      const rawCreated = rd.createdAt || rd.updatedAt;
-      const createdAt = rawCreated ? (rawCreated._seconds ? rawCreated._seconds * 1000 : rawCreated.seconds ? rawCreated.seconds * 1000 : rawCreated) : null;
-
-      userMap.set(uid, {
-        id: uid,
-        uid,
-        name: resolvedName,
-        displayName: resolvedName,
-        phoneNumber: phone,
-        email: rd.email || null,
-        roles,
-        role: roles[0],
-        farmer: isFarmer ? rd : null,
-        farms: null,
-        seller: isSeller ? rd : null,
-        veterinarian: isVet ? rd : null,
-        village,
-        district,
-        state,
-        address,
-        location,
-        createdAt,
-        lastLoginAt: createdAt,
-      });
+    vets.forEach((v) => {
+      if (!userMap.has(v.uid)) {
+        userMap.set(v.uid, {
+          id: v.uid,
+          uid: v.uid,
+          name: v.name,
+          displayName: v.doctorName || v.name,
+          phoneNumber: v.phone,
+          email: v.email,
+          roles: ["Veterinarian"],
+          role: "Veterinarian",
+          farmer: null,
+          farms: null,
+          seller: null,
+          veterinarian: v,
+          village: "—",
+          district: v.city,
+          state: v.state,
+          address: "—",
+          location: v.location,
+          createdAt: v.rawTimestamp || null,
+          lastLoginAt: v.rawTimestamp || null,
+        });
+      }
     });
 
     // Sort by registration/created time descending (latest registered first)
@@ -336,14 +355,11 @@ function UsersPage() {
       const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
       return timeB - timeA;
     });
-  }, [authUsers, firestoreUsers, roleDocs]);
+  }, [authUsers, firestoreUsers, farmers, sellers, vets, farmerMap, farmerMapByPhone, sellerMap, sellerMapByPhone, vetMap, vetMapByPhone]);
 
-  const isLoading = (authLoading || firestoreLoading || rolesLoading) && mergedUsers.length === 0;
+  const isLoading = (authLoading || firestoreLoading || dirLoading) && mergedUsers.length === 0;
 
   const totalUsers = mergedUsers.length;
-  const farmerUsers = mergedUsers.filter((u) => u.role === "Farmer" || (Array.isArray(u.roles) && u.roles.includes("Farmer"))).length;
-  const sellerUsers = mergedUsers.filter((u) => u.role === "Seller" || (Array.isArray(u.roles) && u.roles.includes("Seller"))).length;
-  const vetUsers = mergedUsers.filter((u) => u.role === "Veterinarian" || (Array.isArray(u.roles) && u.roles.includes("Veterinarian"))).length;
 
   return (
     <div className="space-y-6">
@@ -377,9 +393,9 @@ function UsersPage() {
         ]}
         kpis={[
           { label: "Total Accounts", value: isLoading ? "…" : totalUsers.toLocaleString(), change: "All registered users", up: true },
-          { label: "Farmers", value: isLoading ? "…" : farmerUsers.toLocaleString(), change: "With farm & cattle data", up: true },
-          { label: "Sellers", value: isLoading ? "…" : sellerUsers.toLocaleString(), change: "Marketplace vendors", up: true },
-          { label: "Veterinarians", value: isLoading ? "…" : vetUsers.toLocaleString(), change: "Verified doctors", up: true },
+          { label: "Farmers", value: isLoading ? "…" : farmerCount.toLocaleString(), change: "Verified farmers", up: true },
+          { label: "Sellers", value: isLoading ? "…" : sellerCount.toLocaleString(), change: "Registered vendors", up: true },
+          { label: "Veterinarians", value: isLoading ? "…" : vetCount.toLocaleString(), change: "Verified doctors", up: true },
         ]}
         data={mergedUsers}
         columns={[

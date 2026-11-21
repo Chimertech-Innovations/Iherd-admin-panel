@@ -441,7 +441,8 @@ export function DataPage<T extends Record<string, any>>({
 
       // 2. Status Filter
       const rowStatus = getLocalizedText(row[statusKey]).toLowerCase();
-      const matchF = filter === "all" ? true : rowStatus === filter.toLowerCase();
+      const hasRoleInArray = Array.isArray((row as any).roles) && (row as any).roles.some((r: any) => String(r).toLowerCase() === filter.toLowerCase());
+      const matchF = filter === "all" ? true : (rowStatus === filter.toLowerCase() || hasRoleInArray);
 
       // 3. Cascading Date Filter (Year -> Month -> Date Range)
       const ts = getRowTimestamp(row);
@@ -751,7 +752,11 @@ export function DataPage<T extends Record<string, any>>({
               </button>
               {effectiveFilters.map((f) => {
                 const fLower = f.toLowerCase();
-                const count = data.filter((row) => getLocalizedText(row[statusKey]).toLowerCase() === fLower).length;
+                const count = data.filter((row: any) => {
+                  const rowStatus = getLocalizedText(row[statusKey]).toLowerCase();
+                  const hasRoleInArray = Array.isArray(row.roles) && row.roles.some((r: any) => String(r).toLowerCase() === fLower);
+                  return rowStatus === fLower || hasRoleInArray;
+                }).length;
                 const isActive = filter === fLower;
                 return (
                   <button

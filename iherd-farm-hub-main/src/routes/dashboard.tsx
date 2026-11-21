@@ -112,6 +112,7 @@ import {
   useTokenAdvance,
   useBestSellers,
 } from "../hooks/useFirebaseData";
+import { useVerifiedDirectory } from "../hooks/useVerifiedDirectory";
 import { getLocalizedText } from "@/lib/utils";
 import { fetchApiJson } from "@/lib/apiClient";
 
@@ -451,184 +452,12 @@ function Dashboard() {
 
   const effectiveProductOrders = apiProductOrders.length > 0 ? apiProductOrders : productOrders;
 
-  // Extract only verified, genuine farmers (synchronised with farmers.index.tsx)
-  const allFarmers = useMemo(() => {
-    const map = new Map<string, any>();
-
-    // 1. Standalone /farmers collection
-    directFarmers.forEach((df: any) => {
-      const uid = df.id || df.uid;
-      if (!uid) return;
-      map.set(uid, {
-        ...df,
-        id: uid,
-        uid,
-        displayName: df.name || df.farmerName || "Farmer",
-        name: df.name || df.farmerName || "Farmer",
-        phoneNumber: df.phone || df.farmerPhoneNumber || "—",
-        createdAt: df.createdAt,
-        status: df.status || "Active",
-      });
-    });
-
-    // 2. Role documents from /users/{uid}/roles/farmer
-    roleDocs.forEach((rd: any) => {
-      const roleId = (rd.id || rd.role || "").toLowerCase();
-      const isFarmer = roleId === "farmer" || roleId.includes("farm") || Boolean(rd.farmerPhoneNumber) || rd._path?.includes("/roles/farmer");
-      if (!isFarmer) return;
-
-      const parts = (rd._path || "").split("/");
-      let uid = rd.uid || rd.userId;
-      if (!uid && parts[0] === "users" && parts[1]) uid = parts[1];
-      if (!uid) uid = rd.id;
-      if (!uid) return;
-
-      const phone = rd.farmerPhoneNumber || rd.phone || rd.phoneNumber || "—";
-      const name = rd.name || rd.farmerName || (phone !== "—" ? `Farmer (${phone})` : `Farmer #${uid.slice(-6).toUpperCase()}`);
-      map.set(uid, {
-        ...rd,
-        id: uid,
-        uid,
-        displayName: name,
-        name,
-        phoneNumber: phone,
-        createdAt: rd.createdAt,
-        status: rd.status || "Active",
-        village: rd.village || "—",
-        district: rd.district || "—",
-        state: rd.state || "—",
-      });
-    });
-
-    // 3. Farm owners from registered farms
-    [...groupFarms, ...apiFarms, ...topFarms].forEach((f: any) => {
-      const parts = (f._path || "").split("/");
-      let uid = f.ownerUid || f.userId;
-      if (!uid && parts[0] === "users" && parts[1]) uid = parts[1];
-      if (!uid) return;
-
-      if (!map.has(uid)) {
-        const phone = f.farmPhoneNumber || f.phone || f.phoneNumber || "—";
-        const name = f.ownerName || f.farmerName || (phone !== "—" ? `Farmer (${phone})` : `Farmer #${uid.slice(-6).toUpperCase()}`);
-        map.set(uid, {
-          id: uid,
-          uid,
-          displayName: name,
-          name,
-          phoneNumber: phone,
-          createdAt: f.createdAt,
-          status: "Active",
-          village: f.village || "—",
-          district: f.district || "—",
-          state: f.state || "—",
-        });
-      }
-    });
-
-    // 4. Cattle owners
-    [...cattleDetails, ...apiCattle].forEach((c: any) => {
-      const uid = c.ownerUid || c.userId || c.farmerId;
-      if (!uid || map.has(uid)) return;
-      const phone = c.phone || c.sellerPhone || c.phoneNumber || "—";
-      const name = c.ownerName || c.farmerName || (phone !== "—" ? `Farmer (${phone})` : `Farmer #${uid.slice(-6).toUpperCase()}`);
-      map.set(uid, {
-        id: uid,
-        uid,
-        displayName: name,
-        name,
-        phoneNumber: phone,
-        createdAt: c.createdAt,
-        status: "Active",
-        village: c.village || "—",
-        district: c.district || "—",
-        state: c.state || "—",
-      });
-    });
-
-    return Array.from(map.values());
-  }, [directFarmers, roleDocs, groupFarms, apiFarms, topFarms, cattleDetails, apiCattle]);
-
-  // Extract only verified sellers (synchronised with sellers.index.tsx)
-  const allSellers = useMemo(() => {
-    const map = new Map<string, any>();
-
-    directSellers.forEach((ds: any) => {
-      const uid = ds.id || ds.uid;
-      if (!uid) return;
-      map.set(uid, {
-        ...ds,
-        id: uid,
-        uid,
-        displayName: ds.name || ds.shopName || ds.sellerName || "Seller",
-        phoneNumber: ds.sellerPhoneNumber || ds.phone || ds.phoneNumber || ds.sellerPhone || "",
-        email: ds.email || ds.sellerEmail || "",
-        category: "Feed & Supplies",
-        createdAt: ds.createdAt,
-        status: ds.status || "Active",
-      });
-    });
-
-    // Add seller role documents from /users/{uid}/roles/seller
-    roleDocs.forEach((rd: any) => {
-      const roleId = (rd.id || rd.role || "").toLowerCase();
-      const isSeller = roleId === "seller" || roleId.includes("sell") || Boolean(rd.sellerPhoneNumber) || rd._path?.includes("/roles/seller");
-      if (!isSeller) return;
-
-      const parts = (rd._path || "").split("/");
-      let uid = rd.uid || rd.userId;
-      if (!uid && parts[0] === "users" && parts[1]) uid = parts[1];
-      if (!uid) uid = rd.id;
-      if (!uid) return;
-
-      const phone = rd.sellerPhoneNumber || rd.phone || rd.phoneNumber || "";
-      const shopName = rd.shopName || rd.storeName || rd.name || (phone ? `Store (${phone})` : `Seller #${uid.slice(-6).toUpperCase()}`);
-      map.set(uid, {
-        ...rd,
-        id: uid,
-        uid,
-        displayName: shopName,
-        name: shopName,
-        phoneNumber: phone,
-        email: rd.email || "",
-        category: rd.category || "Feed & Supplies",
-        createdAt: rd.createdAt,
-        status: rd.status || "Active",
-        city: rd.district || rd.village || rd.city || "—",
-        state: rd.state || "—",
-      });
-    });
-
-    return Array.from(map.values());
-  }, [directSellers, roleDocs]);
-
-  // Extract all verified veterinarians (synchronised with vets.index.tsx)
-  const allVets = useMemo(() => {
-    const map = new Map<string, any>();
-    roleDocs.forEach((rd: any) => {
-      const roleId = (rd.id || rd.role || "").toLowerCase();
-      const isVet = roleId === "veterinarian" || roleId.includes("vet") || Boolean(rd.vetPhoneNumber) || rd._path?.includes("/roles/veterinarian");
-      if (!isVet) return;
-
-      const parts = (rd._path || "").split("/");
-      let uid = rd.uid || rd.userId;
-      if (!uid && parts[0] === "users" && parts[1]) uid = parts[1];
-      if (!uid) uid = rd.id;
-      if (!uid) return;
-
-      const phone = rd.vetPhoneNumber || rd.phone || rd.phoneNumber || "—";
-      const name = rd.name || rd.doctorName || (phone !== "—" ? `Dr. (${phone})` : `Dr. #${uid.slice(-6).toUpperCase()}`);
-      map.set(uid, {
-        ...rd,
-        id: uid,
-        uid,
-        displayName: name.startsWith("Dr.") ? name : `Dr. ${name}`,
-        phoneNumber: phone,
-        createdAt: rd.createdAt,
-        status: rd.status || "Active",
-      });
-    });
-    return Array.from(map.values());
-  }, [roleDocs]);
+  // Extract verified farmers, sellers, and veterinarians from the Single Canonical Source of Truth
+  const {
+    farmers: allFarmers,
+    sellers: allSellers,
+    vets: allVets,
+  } = useVerifiedDirectory();
 
   // Extract all farms across Firestore users & collectionGroup query
   const allFarms = useMemo(() => {

@@ -1,85 +1,22 @@
 import { useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { DataPage } from "@/components/admin/DataPage";
-import { StatusBadge } from "@/components/admin/StatusBadge";
-import { useAdminUsers } from "../hooks/useAdminUsers";
-import { useFirebaseCollection, useFirebaseCollectionGroup } from "../hooks/useFirebaseData";
-import { getLocalizedText } from "@/lib/utils";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Store, Plus, Phone, Mail, MapPin, CheckCircle2 } from "lucide-react";
-import { doc, setDoc, collection, addDoc } from "firebase/firestore";
+import { Store, Plus, Phone, Mail, MapPin } from "lucide-react";
+import { collection, addDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { fetchApiJson } from "@/lib/apiClient";
 import { toast } from "sonner";
+import { useVerifiedDirectory } from "@/hooks/useVerifiedDirectory";
 
 export const Route = createFileRoute("/sellers/")({
   head: () => ({ meta: [{ title: "Sellers Management — iHerd Admin" }] }),
   component: SellersPage,
 });
-
-function parseTime(val: any): number {
-  if (!val) return 0;
-  if (typeof val === "number") return val;
-  if (val instanceof Date) return val.getTime();
-  if (typeof val === "object" && (val._seconds || val.seconds)) {
-    return (val._seconds || val.seconds) * 1000;
-  }
-  const d = new Date(val).getTime();
-  return isNaN(d) ? 0 : d;
-}
-
-function resolvePhone(val: any): string {
-  if (!val || val === "—" || val === "null" || val === "undefined") return "";
-  const s = String(val).trim();
-  if (!s || s === "—") return "";
-  if (s.startsWith("+")) return s;
-  if (/^\d{10}$/.test(s)) return `+91${s}`;
-  return s;
-}
-
-function extractSellerPhone(...sources: any[]): string {
-  for (const src of sources) {
-    if (!src) continue;
-    if (typeof src === "string") {
-      const p = resolvePhone(src);
-      if (p) return p;
-    } else if (typeof src === "object") {
-      const candidateKeys = [
-        "sellerPhoneNumber",
-        "sellerPhone",
-        "phoneNumber",
-        "phone",
-        "contactPhone",
-        "phoneNo",
-        "mobile",
-      ];
-      for (const k of candidateKeys) {
-        const p = resolvePhone(src[k]);
-        if (p) return p;
-      }
-      if (src.seller && typeof src.seller === "object") {
-        for (const k of candidateKeys) {
-          const p = resolvePhone(src.seller[k]);
-          if (p) return p;
-        }
-      }
-    }
-  }
-  return "—";
-}
-
-function formatDate(ms: number): string {
-  if (!ms || isNaN(ms)) return "—";
-  return new Date(ms).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-}
 
 function AddSellerDialog({ onCreated }: { onCreated?: () => void }) {
   const [open, setOpen] = useState(false);
@@ -122,7 +59,6 @@ function AddSellerDialog({ onCreated }: { onCreated?: () => void }) {
         updatedAt: new Date().toISOString(),
       };
 
-      // Save via backend API (Admin SDK) with fallback to Firestore addDoc
       try {
         await fetchApiJson("/api/admin/sellers", {
           method: "POST",
@@ -130,7 +66,6 @@ function AddSellerDialog({ onCreated }: { onCreated?: () => void }) {
           body: JSON.stringify(sellerData),
         });
       } catch (apiErr) {
-        console.warn("Backend /api/admin/sellers failed, falling back to direct addDoc:", apiErr);
         await addDoc(collection(db, "sellers"), sellerData);
       }
 
@@ -154,6 +89,9 @@ function AddSellerDialog({ onCreated }: { onCreated?: () => void }) {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
+        <Button className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm rounded-xl">
+          <Plus className="h-4 w-4" /> Add Seller
+        </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md rounded-2xl">
         <DialogHeader>
@@ -179,18 +117,16 @@ function AddSellerDialog({ onCreated }: { onCreated?: () => void }) {
               className="rounded-xl"
             />
           </div>
-
           <div className="space-y-1">
-            <Label htmlFor="ownerName" className="text-xs font-semibold">Owner / Contact Person</Label>
+            <Label htmlFor="ownerName" className="text-xs font-semibold">Owner Name</Label>
             <Input
               id="ownerName"
-              placeholder="e.g. Ramesh Kumar"
+              placeholder="e.g. Rajesh Kumar"
               value={ownerName}
               onChange={(e) => setOwnerName(e.target.value)}
               className="rounded-xl"
             />
           </div>
-
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
               <Label htmlFor="phone" className="text-xs font-semibold">Phone Number</Label>
@@ -205,21 +141,30 @@ function AddSellerDialog({ onCreated }: { onCreated?: () => void }) {
             <div className="space-y-1">
               <Label htmlFor="category" className="text-xs font-semibold">Category</Label>
               <Select value={category} onValueChange={setCategory}>
-                <SelectTrigger className="rounded-xl text-xs">
-                  <SelectValue placeholder="Category" />
+                <SelectTrigger id="category" className="rounded-xl">
+                  <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="rounded-xl">
                   <SelectItem value="Feed & Nutrition">Feed & Nutrition</SelectItem>
                   <SelectItem value="Veterinary Medicines">Veterinary Medicines</SelectItem>
-                  <SelectItem value="Farm Equipment">Farm Equipment</SelectItem>
-                  <SelectItem value="Dairy Machinery">Dairy Machinery</SelectItem>
-                  <SelectItem value="Cattle Trader">Cattle Trader</SelectItem>
-                  <SelectItem value="General">General</SelectItem>
+                  <SelectItem value="Dairy Equipment">Dairy Equipment</SelectItem>
+                  <SelectItem value="Cattle Trading">Cattle Trading</SelectItem>
+                  <SelectItem value="General Supplies">General Supplies</SelectItem>
                 </SelectContent>
               </Select>
             </div>
           </div>
-
+          <div className="space-y-1">
+            <Label htmlFor="email" className="text-xs font-semibold">Email Address</Label>
+            <Input
+              id="email"
+              type="email"
+              placeholder="vendor@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="rounded-xl"
+            />
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
               <Label htmlFor="city" className="text-xs font-semibold">City / District</Label>
@@ -258,232 +203,10 @@ function AddSellerDialog({ onCreated }: { onCreated?: () => void }) {
 }
 
 function SellersPage() {
-  const { data: authUsers = [], isLoading: authLoading, refetch: refetchAuth } = useAdminUsers();
-  const { data: firestoreUsers = [], isLoading: fsLoading, refetch: refetchFs } = useFirebaseCollection<any>("users");
-  const { data: directSellers = [], isLoading: sellersLoading, refetch: refetchSellers } = useFirebaseCollection<any>("sellers");
-  const { data: roleDocs = [], isLoading: rolesLoading, refetch: refetchRoles } = useFirebaseCollectionGroup<any>("roles");
-  const isLoading = authLoading || fsLoading || sellersLoading || rolesLoading;
-
-  const handleRefresh = () => {
-    refetchAuth();
-    refetchFs();
-    refetchSellers();
-    refetchRoles();
-  };
-
-  // Build a lookup map of seller role documents by user ID and phone
-  const sellerRoleDocsByUid = new Map<string, any>();
-  roleDocs.forEach((rd: any) => {
-    if (rd.id === "seller" || rd.role === "seller" || rd.sellerPhoneNumber || rd._path?.includes("/roles/seller")) {
-      let uid = rd.uid || rd.userId;
-      if (!uid && rd._path) {
-        const parts = rd._path.split("/");
-        if (parts[0] === "users" && parts[1]) uid = parts[1];
-      }
-      if (uid) {
-        sellerRoleDocsByUid.set(uid, { ...rd, uid });
-      }
-      const cleanP = (rd.sellerPhoneNumber || rd.phone || rd.phoneNumber || "").replace(/\D/g, "").slice(-10);
-      if (cleanP) {
-        sellerRoleDocsByUid.set(cleanP, { ...rd, uid });
-      }
-    }
-  });
-
-  const sellerMap = new Map<string, any>();
-
-  // 1. Process direct sellers collection
-  directSellers.forEach((ds: any) => {
-    const id = ds.id || ds.uid;
-    if (!id) return;
-
-    const rawTimestamp = parseTime(ds.createdAt || ds.timestamp || ds.updatedAt);
-    const phone = extractSellerPhone(ds);
-    const shopName = ds.shopName || ds.storeName || ds.name || ds.sellerName || "Marketplace Store";
-
-    sellerMap.set(id, {
-      id,
-      uid: id,
-      name: getLocalizedText(shopName),
-      ownerName: getLocalizedText(ds.name || ds.ownerName || "Seller"),
-      phone,
-      email: ds.email || ds.sellerEmail || "",
-      category: getLocalizedText(ds.category || ds.shopCategory || "Feed & Supplies"),
-      products: Number(ds.products || ds.productCount || 0),
-      gmv: ds.gmv || "—",
-      rating: Number(ds.rating || 5.0),
-      joined: formatDate(rawTimestamp),
-      rawTimestamp,
-      status: ds.status || "Active",
-      verified: Boolean(ds.verified || ds.isVerified),
-      city: ds.city || ds.district || "—",
-      state: ds.state || "—",
-    });
-  });
-
-  // 2. Process Auth users merged with Firestore profiles
-  authUsers.forEach((authUser: any) => {
-    const uid = authUser.uid;
-    const cleanAuthPhone = (authUser.phoneNumber || authUser.phone || "").replace(/\D/g, "").slice(-10);
-    const fsUser = firestoreUsers.find((fu: any) => fu.id === uid || fu.uid === uid);
-    const directSeller = directSellers.find((ds: any) => ds.id === uid || ds.uid === uid);
-    const sellerRoleDoc = sellerRoleDocsByUid.get(uid) || (cleanAuthPhone ? sellerRoleDocsByUid.get(cleanAuthPhone) : null);
-
-    const fsRoles = fsUser?.roles || (fsUser?.role ? [fsUser.role] : []);
-    const roles: string[] = Array.isArray(fsRoles) ? fsRoles : [String(fsRoles)];
-    const hasSellerRole = roles.some((r: any) => typeof r === "string" && r.toLowerCase().includes("seller"));
-    const hasDirectSellerDoc = Boolean(directSeller);
-    const hasRoleDoc = Boolean(sellerRoleDoc);
-    const hasSellerProfile = Boolean(
-      (fsUser?.seller && typeof fsUser.seller === "object" && (fsUser.seller.name || fsUser.seller.shopName || fsUser.seller.storeName || fsUser.seller.phone || fsUser.seller.sellerPhoneNumber || fsUser.seller.category)) ||
-      (authUser?.seller && typeof authUser.seller === "object" && (authUser.seller.name || authUser.seller.shopName || authUser.seller.storeName || authUser.seller.sellerPhoneNumber || authUser.seller.category)) ||
-      fsUser?.isSeller === true ||
-      authUser?.isSeller === true
-    );
-
-    const isSeller = hasSellerRole || hasDirectSellerDoc || hasSellerProfile || hasRoleDoc;
-
-    if (isSeller) {
-      const sellerProfile = sellerRoleDoc || fsUser?.seller || authUser?.seller || directSeller || {};
-      const rawTimestamp = parseTime(
-        sellerRoleDoc?.createdAt ||
-        sellerProfile?.createdAt ||
-        fsUser?.createdAt ||
-        authUser?.createdAt ||
-        directSeller?.createdAt ||
-        authUser?.metadata?.creationTime
-      );
-
-      const phone = extractSellerPhone(sellerRoleDoc, sellerProfile, fsUser, authUser, directSeller);
-      const email = authUser?.email || fsUser?.email || sellerProfile?.email || directSeller?.email || "";
-
-      const shopName =
-        sellerRoleDoc?.shopName ||
-        sellerProfile.shopName ||
-        sellerProfile.storeName ||
-        sellerProfile.name ||
-        sellerProfile.sellerName ||
-        (fsUser?.fullName && fsUser.fullName !== "User" && !fsUser.fullName.startsWith("Farmer") ? fsUser.fullName : null) ||
-        (fsUser?.name && fsUser.name !== "User" && !fsUser.name.startsWith("Farmer") ? fsUser.name : null) ||
-        (phone !== "—" ? `Store (${phone})` : `Seller #${uid.slice(-6).toUpperCase()}`);
-
-      const ownerName =
-        (sellerRoleDoc?.name && sellerRoleDoc.name !== "User") ? sellerRoleDoc.name :
-        (fsUser?.fullName && fsUser.fullName !== "User" && !fsUser.fullName.startsWith("Farmer")) ? fsUser.fullName :
-        (fsUser?.name && fsUser.name !== "User" && !fsUser.name.startsWith("Farmer")) ? fsUser.name :
-        (sellerProfile.name && sellerProfile.name !== "User") ? sellerProfile.name :
-        "Seller";
-
-      sellerMap.set(uid, {
-        id: uid,
-        uid,
-        name: getLocalizedText(shopName),
-        ownerName: getLocalizedText(ownerName),
-        phone,
-        email,
-        category: getLocalizedText(sellerRoleDoc?.category || sellerProfile.category || "Feed & Supplies"),
-        products: Number(sellerProfile.products || sellerProfile.productCount || 0),
-        gmv: sellerProfile.gmv || "—",
-        rating: Number(sellerProfile.rating || 5.0),
-        joined: formatDate(rawTimestamp),
-        rawTimestamp,
-        status: fsUser?.status || authUser?.status || sellerProfile.status || "Active",
-        verified: Boolean(sellerRoleDoc?.verified || sellerProfile.verified || fsUser?.verified),
-        city: sellerRoleDoc?.district || sellerRoleDoc?.village || sellerProfile.city || fsUser?.district || "—",
-        state: sellerRoleDoc?.state || sellerProfile.state || fsUser?.state || "—",
-        location: [sellerRoleDoc?.district || sellerRoleDoc?.village || sellerProfile.city || fsUser?.district, sellerRoleDoc?.state || sellerProfile.state || fsUser?.state].filter((x) => x && x !== "—").join(", ") || "—",
-      });
-    }
-  });
-
-  // 3. Process standalone Firestore users
-  firestoreUsers.forEach((fsUser: any) => {
-    const uid = fsUser.id || fsUser.uid;
-    if (!uid || sellerMap.has(uid)) return;
-
-    const fsRoles = fsUser.roles || (fsUser.role ? [fsUser.role] : []);
-    const roles: string[] = Array.isArray(fsRoles) ? fsRoles : [String(fsRoles)];
-    const hasSellerRole = roles.some((r: any) => typeof r === "string" && r.toLowerCase().includes("seller"));
-    const hasSellerProfile = Boolean(
-      (fsUser.seller && typeof fsUser.seller === "object" && (fsUser.seller.name || fsUser.seller.shopName || fsUser.seller.storeName || fsUser.seller.phone || fsUser.seller.sellerPhoneNumber || fsUser.seller.category)) ||
-      fsUser.isSeller === true
-    );
-
-    if (hasSellerRole || hasSellerProfile) {
-      const sellerProfile = fsUser.seller || {};
-      const rawTimestamp = parseTime(
-        sellerProfile?.createdAt ||
-        fsUser.createdAt
-      );
-
-      const phone = extractSellerPhone(sellerProfile, fsUser);
-      const email = fsUser.email || sellerProfile?.email || "";
-
-      const shopName =
-        sellerProfile.shopName ||
-        sellerProfile.storeName ||
-        sellerProfile.name ||
-        (fsUser.fullName && fsUser.fullName !== "User" && !fsUser.fullName.startsWith("Farmer") ? fsUser.fullName : null) ||
-        (fsUser.name && fsUser.name !== "User" && !fsUser.name.startsWith("Farmer") ? fsUser.name : null) ||
-        (phone !== "—" ? `Store (${phone})` : `Seller #${uid.slice(-6).toUpperCase()}`);
-
-      sellerMap.set(uid, {
-        id: uid,
-        uid,
-        name: getLocalizedText(shopName),
-        ownerName: getLocalizedText(fsUser.fullName || fsUser.name || "Seller"),
-        phone,
-        email,
-        category: getLocalizedText(sellerProfile.category || "Feed & Supplies"),
-        products: Number(sellerProfile.products || 0),
-        gmv: sellerProfile.gmv || "—",
-        rating: Number(sellerProfile.rating || 5.0),
-        joined: formatDate(rawTimestamp),
-        rawTimestamp,
-        status: fsUser.status || sellerProfile.status || "Active",
-        verified: Boolean(sellerProfile.verified || fsUser.verified),
-        city: sellerProfile.city || fsUser.district || "—",
-        state: sellerProfile.state || fsUser.state || "—",
-        location: [sellerProfile.city || fsUser.district, sellerProfile.state || fsUser.state].filter(x => x && x !== "—").join(", ") || "—",
-      });
-    }
-  });
-
-  // 4. Process any standalone seller role documents from /users/{uid}/roles/seller
-  sellerRoleDocsByUid.forEach((rd: any, uid: string) => {
-    if (!uid || sellerMap.has(uid)) return;
-    const rawTimestamp = parseTime(rd.createdAt || rd.updatedAt);
-    const phone = extractSellerPhone(rd);
-    const shopName = rd.shopName || rd.storeName || rd.name || (phone !== "—" ? `Store (${phone})` : `Seller #${uid.slice(-6).toUpperCase()}`);
-    sellerMap.set(uid, {
-      id: uid,
-      uid,
-      name: getLocalizedText(shopName),
-      ownerName: getLocalizedText(rd.name || "Seller"),
-      phone,
-      email: rd.email || "",
-      category: getLocalizedText(rd.category || "Feed & Supplies"),
-      products: Number(rd.products || 0),
-      gmv: "—",
-      rating: 5.0,
-      joined: formatDate(rawTimestamp),
-      rawTimestamp,
-      status: rd.status || "Active",
-      verified: Boolean(rd.verified),
-      city: rd.district || rd.village || rd.city || "—",
-      state: rd.state || "—",
-      location: [rd.district || rd.village || rd.city, rd.state].filter(Boolean).join(", ") || "—",
-    });
-  });
-
-  // Sort strictly by registration timestamp descending (latest registered first)
-  const sellers = Array.from(sellerMap.values()).sort(
-    (a, b) => (b.rawTimestamp || 0) - (a.rawTimestamp || 0)
-  );
+  const { sellers, isLoading } = useVerifiedDirectory();
 
   const totalSellers = sellers.length;
   const verifiedSellers = sellers.filter((s) => s.verified || s.status === "Active").length;
-  const distinctRegions = new Set(sellers.map((s) => s.city || s.state).filter((c) => c && c !== "—")).size;
   const totalListedProducts = sellers.reduce((acc, s) => acc + (s.products || 0), 0);
 
   return (
@@ -593,7 +316,7 @@ function SellersPage() {
           {
             key: "joined",
             label: "Joined Date",
-            render: (row) => <span className="text-xs text-muted-foreground">{row.joined}</span>,
+            render: (row) => <span className="text-muted-foreground text-xs">{row.joined}</span>,
           },
         ]}
       />
