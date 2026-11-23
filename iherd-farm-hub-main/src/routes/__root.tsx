@@ -141,6 +141,11 @@ function RootContent() {
   const isAuthRoute = pathname === "/login" || pathname === "/signup";
   const isRootRedirect = pathname === "/";
 
+  // Pre-warm the backend immediately upon app load
+  useEffect(() => {
+    fetch("https://iherdadminpanel.onrender.com/ping").catch(() => {});
+  }, []);
+
   useEffect(() => {
     if (loading) return;
     const authed = !!user;

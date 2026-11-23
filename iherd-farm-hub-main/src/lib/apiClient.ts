@@ -71,12 +71,12 @@ export function getApiBaseUrlSync(): string {
 }
 
 /**
- * High-speed backend JSON fetch helper with a strict default 2.5s abort timeout.
- * Prevents UI freezes/hangs when the local backend (port 5000) or Render cold-start is inactive.
+ * High-speed backend JSON fetch helper with an adaptable timeout.
+ * Allows sufficient time for Render free-tier cold-start wakeups while avoiding infinite hangs.
  */
 export async function fastFetchBackend<T = any>(
   pathOrUrl: string,
-  timeoutMs = 2500
+  timeoutMs = 25000
 ): Promise<T | null> {
   const base = getApiBaseUrlSync();
   const url = pathOrUrl.startsWith("http")
@@ -101,41 +101,55 @@ export async function fastFetchBackend<T = any>(
 }
 
 /**
- * High-speed JSON fetch helper with timeout
+ * Resilient JSON fetch helper with automatic cold-start retry and timeout
  */
 export async function fetchApiJson<T = any>(
   path: string,
   options?: RequestInit,
-  timeoutMs = 12000
+  timeoutMs = 30000,
+  maxRetries = 2
 ): Promise<T> {
   const base = await getApiBaseUrl();
   const cleanPath = path.startsWith("/") ? path : `/${path}`;
   const url = `${base}${cleanPath}`;
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-  try {
-    const res = await fetch(url, {
-      ...options,
-      signal: options?.signal || controller.signal,
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        ...(options?.headers || {}),
-      },
-    });
+    try {
+      const res = await fetch(url, {
+        ...options,
+        signal: options?.signal || controller.signal,
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          ...(options?.headers || {}),
+        },
+      });
 
-    clearTimeout(timeoutId);
+      clearTimeout(timeoutId);
 
-    if (!res.ok) {
-      const errText = await res.text().catch(() => "");
-      throw new Error(`API HTTP ${res.status}: ${errText || res.statusText}`);
+      if (!res.ok) {
+        // If Render is currently booting up (502/503/504), wait and retry
+        if ((res.status === 502 || res.status === 503 || res.status === 504) && attempt < maxRetries) {
+          await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
+          continue;
+        }
+        const errText = await res.text().catch(() => "");
+        throw new Error(`API HTTP ${res.status}: ${errText || res.statusText}`);
+      }
+
+      return await res.json();
+    } catch (error: any) {
+      clearTimeout(timeoutId);
+      if (attempt < maxRetries) {
+        await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
+        continue;
+      }
+      throw error;
     }
-
-    return await res.json();
-  } catch (error: any) {
-    clearTimeout(timeoutId);
-    throw error;
   }
+
+  throw new Error(`Failed to fetch ${path} after ${maxRetries} retries`);
 }

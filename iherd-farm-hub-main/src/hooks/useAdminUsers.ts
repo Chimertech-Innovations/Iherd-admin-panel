@@ -69,11 +69,8 @@ function saveTopCachedUsers(users: any[]) {
 async function pingBackend() {
   for (const base of getEndpoints()) {
     try {
-      const controller = new AbortController();
-      const t = setTimeout(() => controller.abort(), 2000);
-      await fetch(`${base}/ping`, { method: "GET", signal: controller.signal });
-      clearTimeout(t);
-      break;
+      // Non-blocking ping allowing Render free-tier cold-start to wake up
+      fetch(`${base}/ping`, { method: "GET" }).catch(() => {});
     } catch {}
   }
 }
@@ -81,7 +78,7 @@ async function pingBackend() {
 /**
  * High-Speed Progressive User Data Fetcher:
  * 1. Fast requests in large chunks (5,000 per chunk instead of 100) to eliminate 80+ network round-trips.
- * 2. 4-second timeout failover to immediately switch dead/idle endpoints to live server.
+ * 2. 35-second cold-start allowance to wait for Render free-tier container boot.
  * 3. Direct Firestore client fallback if all backend endpoints fail.
  */
 async function fetchProgressiveUsers(
@@ -91,7 +88,7 @@ async function fetchProgressiveUsers(
     try {
       // Step 1: Fetch initial large batch (up to 5,000 users in 1 request)
       const initialController = new AbortController();
-      const initialTimer = setTimeout(() => initialController.abort(), 4500);
+      const initialTimer = setTimeout(() => initialController.abort(), 35000);
       const res = await fetch(`${base}/api/admin/users?limit=5000&offset=0`, {
         signal: initialController.signal,
       });
@@ -224,8 +221,10 @@ export function useAdminUsers() {
     staleTime: 600_000,
     gcTime: 1800_000,
     refetchOnWindowFocus: false,
-    refetchOnMount: false,
-    refetchOnReconnect: false,
+    refetchOnMount: true,
+    refetchOnReconnect: true,
+    retry: 3,
+    retryDelay: (attempt) => Math.min(attempt * 2500, 7500),
   });
 
   return {

@@ -364,10 +364,10 @@ function Dashboard() {
   const currentYearStr = String(now.getFullYear());
 
   const [selectedMonth, setSelectedMonth] = useState<string>(() => {
-    return localStorage.getItem("iherd_dashboard_month") || currentMonthStr;
+    return localStorage.getItem("iherd_dashboard_month") || "all";
   });
   const [selectedYear, setSelectedYear] = useState<string>(() => {
-    return localStorage.getItem("iherd_dashboard_year") || currentYearStr;
+    return localStorage.getItem("iherd_dashboard_year") || "all";
   });
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
@@ -406,6 +406,14 @@ function Dashboard() {
   const { data: tokenAdvData } = useTokenAdvance();
   const { data: bestSellers = [] } = useBestSellers();
 
+  // Extract verified farmers, sellers, and veterinarians from the Single Canonical Source of Truth
+  const {
+    farmers: allFarmers,
+    sellers: allSellers,
+    vets: allVets,
+    isLoading: dirLoading,
+  } = useVerifiedDirectory();
+
   // Enriched cattle from API (which searches /api/admin/cattle fallback)
   const { data: apiCattle = [] } = useQuery({
     queryKey: ["dashboardCattle"],
@@ -418,9 +426,13 @@ function Dashboard() {
       }
     },
     staleTime: 60_000,
+    retry: 3,
+    retryDelay: (attempt) => Math.min(attempt * 2000, 6000),
   });
 
-  const isInitialLoading = (usersLoading || fsLoading) && allUsers.length === 0 && firestoreUsers.length === 0;
+  const isInitialLoading =
+    (dirLoading || rolesLoading || usersLoading) &&
+    allFarmers.length === 0;
 
   // Enriched product orders from API
   const { data: apiProductOrders = [] } = useQuery({
@@ -434,6 +446,8 @@ function Dashboard() {
       }
     },
     staleTime: 60_000,
+    retry: 3,
+    retryDelay: (attempt) => Math.min(attempt * 2000, 6000),
   });
 
   // Enriched registered farms from API (which searches /users/{uid}/roles/farmer/farms subcollections)
@@ -448,16 +462,11 @@ function Dashboard() {
       }
     },
     staleTime: 60_000,
+    retry: 3,
+    retryDelay: (attempt) => Math.min(attempt * 2000, 6000),
   });
 
   const effectiveProductOrders = apiProductOrders.length > 0 ? apiProductOrders : productOrders;
-
-  // Extract verified farmers, sellers, and veterinarians from the Single Canonical Source of Truth
-  const {
-    farmers: allFarmers,
-    sellers: allSellers,
-    vets: allVets,
-  } = useVerifiedDirectory();
 
   // Extract all farms across Firestore users & collectionGroup query
   const allFarms = useMemo(() => {

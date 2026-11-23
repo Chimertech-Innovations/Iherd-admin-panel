@@ -30,9 +30,9 @@ export function useFirebaseCollectionGroup<T>(collectionId: string) {
         }
       }
 
-      // Backend Admin SDK Fallback (12s timeout for large collection group queries)
+      // Backend Admin SDK Fallback (25s timeout for large collection group queries)
       try {
-        const json = await fastFetchBackend<{ data?: any[] }>(`/api/admin/collection-group/${collectionId}`, 12000);
+        const json = await fastFetchBackend<{ data?: any[] }>(`/api/admin/collection-group/${collectionId}`, 25000);
         if (Array.isArray(json?.data) && json.data.length > 0) {
           return json.data as T[];
         }
@@ -43,7 +43,7 @@ export function useFirebaseCollectionGroup<T>(collectionId: string) {
     staleTime: 600_000,
     gcTime: 1800_000,
     refetchOnWindowFocus: false,
-    refetchOnMount: false,
+    refetchOnMount: true,
   });
 }
 
